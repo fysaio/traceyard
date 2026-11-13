@@ -82,7 +82,91 @@ export interface RunListParams {
   limit?: number | undefined;
 }
 
+export interface AuthUser {
+  id: string;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+export interface AuthSession {
+  user: AuthUser | null;
+  currentSessionId: string | null;
+  githubSignInAvailable: boolean;
+  sessions: UserSession[];
+}
+
+export interface UserSession {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
+}
+
+export interface ProjectSummary {
+  id: string;
+  slug: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface SavedWorkflowSummary {
+  id: string;
+  projectId: string;
+  slug: string;
+  name: string;
+  description: string;
+  definition: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const api = {
+  authSession: (): Promise<AuthSession> =>
+    request<AuthSession>("/api/auth/session").then((body) => body.data),
+
+  logout: (): Promise<void> =>
+    request<unknown>("/api/auth/logout", { method: "POST" }).then(() => undefined),
+
+  claim: (): Promise<{ claimedRuns: number }> =>
+    request<{ claimedRuns: number }>("/api/auth/claim", { method: "POST" }).then(
+      (body) => body.data,
+    ),
+
+  revokeSession: (id: string): Promise<void> =>
+    request<unknown>(`/api/auth/sessions/${encodeURIComponent(id)}/revoke`, {
+      method: "POST",
+    }).then(() => undefined),
+
+  projects: (): Promise<ProjectSummary[]> =>
+    request<{ items: ProjectSummary[] }>("/api/projects").then((body) => body.data.items),
+
+  createProject: (name: string): Promise<ProjectSummary> =>
+    request<ProjectSummary>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }).then((body) => body.data),
+
+  savedWorkflows: (projectId: string): Promise<SavedWorkflowSummary[]> =>
+    request<{ items: SavedWorkflowSummary[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflows`,
+    ).then((body) => body.data.items),
+
+  createSavedWorkflow: (
+    projectId: string,
+    input: { name: string; description: string; definition: Record<string, unknown> },
+  ): Promise<SavedWorkflowSummary> =>
+    request<SavedWorkflowSummary>(`/api/projects/${encodeURIComponent(projectId)}/workflows`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }).then((body) => body.data),
+
+  deleteSavedWorkflow: (projectId: string, workflowId: string): Promise<void> =>
+    request<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowId)}`,
+      { method: "DELETE" },
+    ).then(() => undefined),
+
   health: (): Promise<HealthPayload> =>
     request<HealthPayload>("/api/health").then((body) => body.data),
 

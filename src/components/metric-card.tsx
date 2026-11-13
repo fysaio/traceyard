@@ -19,12 +19,9 @@ export function MetricCard({
     <div
       className={cn(
         "relative overflow-hidden rounded-xl border border-line bg-surface/80 p-4",
-        tone === "accent" && "border-accent/25",
+        tone === "accent" && "border-line-strong",
       )}
     >
-      {tone === "accent" ? (
-        <div className="pointer-events-none absolute -right-6 -top-6 size-24 rounded-full bg-accent/10 blur-2xl" />
-      ) : null}
       <div className="flex items-center justify-between gap-3">
         <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-faint">
           {label}

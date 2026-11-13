@@ -6,11 +6,11 @@ type BadgeTone = "neutral" | "success" | "danger" | "warning" | "info" | "accent
 
 const TONES: Record<BadgeTone, string> = {
   neutral: "border-line-strong bg-raised text-muted",
-  success: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
-  danger: "border-rose-400/25 bg-rose-400/10 text-rose-300",
-  warning: "border-amber-400/25 bg-amber-400/10 text-amber-300",
-  info: "border-sky-400/25 bg-sky-400/10 text-sky-300",
-  accent: "border-accent/30 bg-accent/10 text-accent",
+  success: "border-line-strong bg-raised text-ink",
+  danger: "border-line-strong bg-canvas text-ink",
+  warning: "border-line-strong bg-raised text-muted",
+  info: "border-line-strong bg-canvas text-ink",
+  accent: "border-line-strong bg-ink text-canvas",
 };
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {

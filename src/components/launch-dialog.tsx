@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { FlaskConical, Play } from "lucide-react";
 
 import type { WorkflowSummary } from "../../shared/contracts/api";
 import type { FailureScenario } from "../../shared/workflow/document";
@@ -8,6 +8,7 @@ import { api, ApiClientError, newIdempotencyKey } from "../lib/api";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Field, Input, Select, Textarea } from "./ui/input";
+import { Icon } from "./ui/icon";
 
 const EXAMPLE_DOCUMENT = `Incident review: queue saturation
 Owner: Platform Reliability
@@ -54,6 +55,7 @@ function LaunchForm({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const fallbackSlug = workflows[0]?.slug ?? "";
   const initialSlug =
     defaultWorkflowId !== undefined &&
@@ -89,6 +91,10 @@ function LaunchForm({
       );
       onClose();
       setIdempotencyKey(newIdempotencyKey());
+      void queryClient.invalidateQueries({ queryKey: ["overview"] });
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+      void queryClient.invalidateQueries({ queryKey: ["sandbox"] });
       navigate(`/executions/${result.run.id}${replayed ? "?replayed=1" : ""}`);
     } catch (caught) {
       setError(
@@ -184,19 +190,14 @@ function LaunchForm({
 
       <div className="mt-1 flex items-center justify-between gap-3 border-t border-line pt-4">
         <p className="flex items-center gap-1.5 text-[11px] text-faint">
-          <FlaskConical className="size-3.5" />
+          <Icon name="flask" />
           Quotas and circuit breaker apply.
         </p>
         <div className="flex gap-2">
           <Button type="button" variant="ghost" onClick={onClose} disabled={pending}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            loading={pending}
-            icon={<Play className="size-3.5" />}
-          >
+          <Button type="submit" variant="primary" loading={pending} icon={<Icon name="play" />}>
             Launch run
           </Button>
         </div>

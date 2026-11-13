@@ -19,6 +19,7 @@ import { appendAudit } from "../persistence/audit";
 import { findWorkflowByIdOrSlug, SANDBOX_PROJECT_ID } from "../persistence/catalog";
 import { getDispatchByRunId } from "../persistence/dispatches";
 import { eventInsertStatement } from "../persistence/events";
+import { getDefaultProjectId, getOwnedProject } from "../persistence/projects";
 import {
   emptyStepCounts,
   stepCountsFromRows,
@@ -26,7 +27,6 @@ import {
   toRunSummary,
 } from "../persistence/mappers";
 import {
-  countActiveRuns,
   getAttempts,
   getEvents,
   getRunForOwner,
@@ -36,7 +36,14 @@ import {
   listRuns,
 } from "../persistence/runs";
 import { insertRunBundle } from "../persistence/run-creation";
-import { getFlag, releaseQuota, reserveQuota } from "../persistence/quotas";
+import { acquireExecutionLease, releaseExecutionLease } from "../persistence/admission";
+import {
+  getFlag,
+  commitQuotaReservation,
+  createQuotaReservation,
+  releaseQuotaReservation,
+  reserveQuota,
+} from "../persistence/quotas";
 import type { StepStatusCountRow } from "../persistence/rows";
 import type { SandboxSession } from "../api/middleware";
 import {
@@ -54,21 +61,42 @@ const DEDUPE_WINDOW_MS = 10_000;
 
 export interface LaunchInput {
   workflowId: string;
+  projectId?: string;
   input: unknown;
   scenario: FailureScenario;
+}
+
+async function resolveRunProject(
+  db: D1Database,
+  userId: string | null,
+  requestedProjectId: string | undefined,
+): Promise<string> {
+  if (userId === null) {
+    if (requestedProjectId !== undefined) throw notFound("The project was not found.");
+    return SANDBOX_PROJECT_ID;
+  }
+  if (requestedProjectId !== undefined) {
+    const project = await getOwnedProject(db, userId, requestedProjectId);
+    if (project === null) throw notFound("The project was not found.");
+    return project.id;
+  }
+  const projectId = await getDefaultProjectId(db, userId);
+  if (projectId === null) throw new Error("The authenticated account has no personal workspace.");
+  return projectId;
 }
 
 export async function launchRun(
   env: Env,
   options: {
     session: SandboxSession;
+    userId?: string | null;
     requestId: string;
     body: LaunchInput;
     idempotencyKey: string | null;
     config: AppConfig;
   },
 ): Promise<{ result: LaunchRunResult; replayed: boolean; status: 200 | 202 }> {
-  const { session, requestId, body, idempotencyKey, config } = options;
+  const { session, userId = null, requestId, body, idempotencyKey, config } = options;
   const db = env.DB;
 
   const entry = await findWorkflowByIdOrSlug(db, body.workflowId);
@@ -76,6 +104,7 @@ export async function launchRun(
     throw notFound("The requested workflow does not exist in this project.");
   }
   const runtime = assertCatalogMatchesRuntime(entry);
+  const projectId = await resolveRunProject(db, userId, body.projectId);
 
   let validatedInput: unknown;
   try {
@@ -111,7 +140,7 @@ export async function launchRun(
           "This Idempotency-Key was already used with a different request body.",
         );
       }
-      const detail = await getRunDetailForSession(db, existing.run_id, session.idHash);
+      const detail = await getRunDetailForSession(db, existing.run_id, session.idHash, userId);
       if (detail === null) {
         throw conflict(
           "IDEMPOTENCY_RECORD_UNAVAILABLE",
@@ -128,13 +157,15 @@ export async function launchRun(
     const recent = await db
       .prepare(
         `SELECT id FROM runs
-          WHERE project_id = ? AND owner_session_hash = ? AND workflow_id = ?
+          WHERE project_id = ? AND owner_session_hash = ? AND owner_user_id IS ?
+            AND workflow_id = ?
             AND input_hash = ? AND scenario = ? AND created_at >= ?
           ORDER BY created_at DESC LIMIT 1`,
       )
       .bind(
-        SANDBOX_PROJECT_ID,
+        projectId,
         session.idHash,
+        userId,
         entry.workflow.id,
         inputHash,
         body.scenario,
@@ -142,7 +173,7 @@ export async function launchRun(
       )
       .first<{ id: string }>();
     if (recent !== null) {
-      const detail = await getRunDetailForSession(db, recent.id, session.idHash);
+      const detail = await getRunDetailForSession(db, recent.id, session.idHash, userId);
       if (detail !== null) {
         return {
           result: { run: detail, replayed: true, dispatch: detail.dispatch },
@@ -155,43 +186,56 @@ export async function launchRun(
 
   await assertSandboxAvailable(db, config, session.idHash, requestId);
 
-  const activeRuns = await countActiveRuns(db, SANDBOX_PROJECT_ID);
-  if (activeRuns >= config.sandbox.globalConcurrencyLimit) {
-    await appendAudit(db, {
-      projectId: SANDBOX_PROJECT_ID,
-      actorType: "anonymous",
-      actorIdHash: session.idHash,
-      action: "sandbox.concurrency_rejected",
-      targetType: "workflow",
-      targetId: entry.workflow.id,
-      metadata: { activeRuns, limit: config.sandbox.globalConcurrencyLimit },
-      requestId,
-    });
-    throw tooManyRequests(
-      "SANDBOX_CONCURRENCY_LIMIT",
-      "The sandbox is running its maximum number of executions. Try again shortly.",
-      5,
-    );
-  }
-
-  const reservations = await reserveSandboxQuotas(db, session, config, requestId);
   const runId = randomId("run");
   const dispatchId = randomId("dsp");
   const correlationId = randomId("cor");
   const createdAt = nowIso();
   const expiresAt = isoFromNow(config.retentionDays * 24 * 60 * 60 * 1000);
 
+  // Reservation happens before the run bundle is written. The lease is the
+  // authoritative capacity record; the ledger tracks the exact quota counters
+  // that were incremented so an interrupted request can release them.
+  const lease = await acquireExecutionLease(
+    db,
+    SANDBOX_PROJECT_ID,
+    runId,
+    config.sandbox.globalConcurrencyLimit,
+  );
+  if (!lease.acquired) {
+    await appendAudit(db, {
+      projectId,
+      actorType: userId === null ? "anonymous" : "user",
+      actorIdHash: userId === null ? session.idHash : await sha256Hex(userId),
+      action: "sandbox.concurrency_rejected",
+      targetType: "workflow",
+      targetId: entry.workflow.id,
+      metadata: { activeRuns: lease.active, limit: config.sandbox.globalConcurrencyLimit },
+      requestId,
+    });
+    // No reset time is known, so none is advertised.
+    throw tooManyRequests(
+      "SANDBOX_CONCURRENCY_LIMIT",
+      "The sandbox is running its maximum number of executions. Try again shortly.",
+    );
+  }
+
+  let reservationCreated = false;
   try {
+    await createQuotaReservation(db, runId);
+    reservationCreated = true;
+    await reserveSandboxQuotas(db, runId, session, config, requestId, userId);
+
     await insertRunBundle(db, {
       run: {
         id: runId,
-        projectId: SANDBOX_PROJECT_ID,
+        projectId,
         workflowId: entry.workflow.id,
         workflowVersion: entry.version.version,
         triggerSource: "sandbox",
         scenario: body.scenario,
         visibility: "private",
         ownerSessionHash: session.idHash,
+        ownerUserId: userId,
         ownerIpHash: session.ipHash,
         parentRunId: null,
         retryOfRunId: null,
@@ -239,9 +283,9 @@ export async function launchRun(
         },
       ],
       audit: {
-        projectId: SANDBOX_PROJECT_ID,
-        actorType: "anonymous",
-        actorIdHash: session.idHash,
+        projectId,
+        actorType: userId === null ? "anonymous" : "user",
+        actorIdHash: userId === null ? session.idHash : await sha256Hex(userId),
         action: "run.created",
         targetType: "run",
         targetId: runId,
@@ -254,23 +298,22 @@ export async function launchRun(
       },
       retryLink: null,
     });
+
+    await commitQuotaReservation(db, runId);
   } catch (error) {
-    await Promise.all(reservations.map((key) => releaseQuota(db, key)));
+    await releaseExecutionLease(db, runId);
+    if (reservationCreated) {
+      await releaseQuotaReservation(db, runId);
+    }
     if (idempotencyKey !== null && isUniqueIdempotencyConflict(error)) {
-      const existing = await db
-        .prepare(`SELECT request_hash, run_id FROM idempotency_records WHERE scope = ? AND key = ?`)
-        .bind(session.idHash, idempotencyKey)
-        .first<{ request_hash: string; run_id: string }>();
-      if (existing !== null && existing.request_hash === requestHash) {
-        const detail = await getRunDetailForSession(db, existing.run_id, session.idHash);
-        if (detail !== null) {
-          return {
-            result: { run: detail, replayed: true, dispatch: detail.dispatch },
-            replayed: true,
-            status: 200,
-          };
-        }
-      }
+      const replay = await resolveIdempotentReplay(
+        db,
+        session.idHash,
+        userId,
+        idempotencyKey,
+        requestHash,
+      );
+      if (replay !== null) return replay;
     }
     logError("run.create_failed", error, { requestId, runId });
     throw error;
@@ -281,7 +324,7 @@ export async function launchRun(
     await publishDispatch(env, db, dispatch, requestId);
   }
 
-  const detail = await getRunDetailForSession(db, runId, session.idHash);
+  const detail = await getRunDetailForSession(db, runId, session.idHash, userId);
   if (detail === null) {
     throw new Error("Run was persisted but could not be read back.");
   }
@@ -302,12 +345,49 @@ export async function launchRun(
   };
 }
 
+/**
+ * Resolves a lost idempotency race. The other request has already committed the
+ * run and its idempotency record in the same D1 batch, so a single read is
+ * sufficient; no polling or in-memory locking is involved.
+ */
+async function resolveIdempotentReplay(
+  db: D1Database,
+  sessionHash: string,
+  userId: string | null,
+  idempotencyKey: string,
+  requestHash: string,
+): Promise<{ result: LaunchRunResult; replayed: boolean; status: 200 } | null> {
+  const existing = await db
+    .prepare(`SELECT request_hash, run_id FROM idempotency_records WHERE scope = ? AND key = ?`)
+    .bind(sessionHash, idempotencyKey)
+    .first<{ request_hash: string; run_id: string }>();
+  if (existing === null) return null;
+  if (existing.request_hash !== requestHash) {
+    throw new ApiError(
+      422,
+      "IDEMPOTENCY_KEY_REUSED",
+      "This Idempotency-Key was already used with a different request body.",
+    );
+  }
+  const detail = await getRunDetailForSession(db, existing.run_id, sessionHash, userId);
+  if (detail === null) {
+    throw conflict("IDEMPOTENCY_RECORD_UNAVAILABLE", "The original run is no longer available.");
+  }
+  return {
+    result: { run: detail, replayed: true, dispatch: detail.dispatch },
+    replayed: true,
+    status: 200,
+  };
+}
+
 async function reserveSandboxQuotas(
   db: D1Database,
+  runId: string,
   session: SandboxSession,
   config: AppConfig,
   requestId: string,
-): Promise<string[]> {
+  userId: string | null = null,
+): Promise<void> {
   const now = new Date();
   const day = dayKey(now);
   const hour = hourKey(now);
@@ -322,6 +402,7 @@ async function reserveSandboxQuotas(
       windowStart: startOfUtcDay(now).toISOString(),
       expiresAt: dayExpiry,
       reason: "GLOBAL_DAILY_QUOTA",
+      message: "The sandbox has reached its global daily execution allowance. Try again after the quota window resets.",
     },
     {
       key: `session:${session.idHash}:day:${day}`,
@@ -329,6 +410,8 @@ async function reserveSandboxQuotas(
       windowStart: startOfUtcDay(now).toISOString(),
       expiresAt: dayExpiry,
       reason: "SESSION_DAILY_QUOTA",
+      message:
+        "This session has reached its daily execution allowance. Existing executions remain available.",
     },
     {
       key: `session:${session.idHash}:hour:${hour}`,
@@ -336,6 +419,8 @@ async function reserveSandboxQuotas(
       windowStart: `${hour}:00:00.000Z`,
       expiresAt: hourExpiry,
       reason: "SESSION_HOURLY_QUOTA",
+      message:
+        "This session has reached its hourly execution allowance. Existing executions remain available.",
     },
     {
       key: `ip:${session.ipHash}:hour:${hour}`,
@@ -343,38 +428,35 @@ async function reserveSandboxQuotas(
       windowStart: `${hour}:00:00.000Z`,
       expiresAt: hourExpiry,
       reason: "IP_HOURLY_QUOTA",
+      message:
+        "This network has reached its hourly execution allowance. Existing executions remain available.",
     },
   ];
 
-  const reserved: string[] = [];
   for (const bucket of buckets) {
-    const outcome = await reserveQuota(db, {
+    const outcome = await reserveQuota(db, runId, {
       bucketKey: bucket.key,
       limit: bucket.limit,
       windowStart: bucket.windowStart,
       expiresAt: bucket.expiresAt,
     });
     if (!outcome.allowed) {
-      await Promise.all(reserved.map((key) => releaseQuota(db, key)));
       await appendAudit(db, {
         projectId: SANDBOX_PROJECT_ID,
-        actorType: "anonymous",
-        actorIdHash: session.idHash,
+        actorType: userId === null ? "anonymous" : "user",
+        actorIdHash: userId === null ? session.idHash : await sha256Hex(userId),
         action: "sandbox.quota_rejected",
         targetType: "quota",
         targetId: bucket.key,
         metadata: { reason: bucket.reason, count: outcome.count, limit: bucket.limit },
         requestId,
       });
-      throw tooManyRequests(
-        "SANDBOX_QUOTA_EXCEEDED",
-        "The sandbox execution quota has been reached. Try again later.",
-        bucket.key.includes(":day:") ? 3600 : 600,
-      );
+      // The window end is deterministic, so Retry-After is exact rather than
+      // guessed. The caller releases every counter already incremented.
+      const retryAfter = Math.max(1, Math.ceil((Date.parse(bucket.expiresAt) - Date.now()) / 1000));
+      throw tooManyRequests(bucket.reason, bucket.message, retryAfter);
     }
-    reserved.push(bucket.key);
   }
-  return reserved;
 }
 
 async function assertSandboxAvailable(
@@ -430,8 +512,9 @@ export async function getRunDetailForSession(
   db: D1Database,
   runId: string,
   sessionHash: string,
+  userId: string | null = null,
 ): Promise<RunDetail | null> {
-  const run = await getRunForSession(db, runId, SANDBOX_PROJECT_ID, sessionHash);
+  const run = await getRunForSession(db, runId, null, sessionHash, userId);
   if (run === null) return null;
   const [steps, attempts, dispatch, counts] = await Promise.all([
     getSteps(db, run.id),
@@ -451,10 +534,12 @@ export async function listRunsForSession(
     cursor: { createdAt: string; id: string } | null;
     limit: number;
   },
+  userId: string | null = null,
 ): Promise<RunListPage> {
   const rows = await listRuns(db, {
-    projectId: SANDBOX_PROJECT_ID,
+    projectId: userId === null ? SANDBOX_PROJECT_ID : null,
     sessionHash,
+    userId,
     status: options.status,
     workflowId: options.workflowId,
     cursor: options.cursor,
@@ -486,8 +571,15 @@ export async function listEventPage(
   sessionHash: string,
   after: number,
   limit: number,
+  userId: string | null = null,
 ) {
-  const run = await getRunForSession(db, runId, SANDBOX_PROJECT_ID, sessionHash);
+  const run = await getRunForSession(
+    db,
+    runId,
+    userId === null ? SANDBOX_PROJECT_ID : null,
+    sessionHash,
+    userId,
+  );
   if (run === null) throw notFound("The requested run was not found.");
   const rows = await getEvents(db, runId, after, limit + 1);
   const hasMore = rows.length > limit;
@@ -518,8 +610,9 @@ export async function cancelRun(
   sessionHash: string,
   runId: string,
   requestId: string,
+  userId: string | null = null,
 ): Promise<CancelRunResult> {
-  let run = await getRunForOwner(db, runId, sessionHash);
+  let run = await getRunForOwner(db, runId, sessionHash, userId);
   if (run === null) throw notFound("The requested run was not found.");
 
   if (run.status === "QUEUED") {
@@ -543,6 +636,12 @@ export async function cancelRun(
             WHERE run_id = ? AND status IN ('PENDING', 'PUBLISHED')`,
         )
         .bind(now, run.id),
+      db
+        .prepare(
+          `DELETE FROM execution_leases WHERE run_id = ?
+            AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'CANCELLED')`,
+        )
+        .bind(run.id, run.id),
       eventInsertStatement(db, {
         runId: run.id,
         type: "run.cancelled",
@@ -555,9 +654,9 @@ export async function cancelRun(
 
     if ((results[0]?.meta.changes ?? 0) === 1) {
       await appendAudit(db, {
-        projectId: SANDBOX_PROJECT_ID,
-        actorType: "anonymous",
-        actorIdHash: sessionHash,
+        projectId: run.project_id,
+        actorType: userId === null ? "anonymous" : "user",
+        actorIdHash: userId === null ? sessionHash : await sha256Hex(userId),
         action: "run.cancelled",
         targetType: "run",
         targetId: run.id,
@@ -572,7 +671,7 @@ export async function cancelRun(
       };
     }
 
-    run = (await getRunForOwner(db, runId, sessionHash)) ?? run;
+    run = (await getRunForOwner(db, runId, sessionHash, userId)) ?? run;
   }
 
   if (run.status === "RUNNING") {
@@ -596,9 +695,9 @@ export async function cancelRun(
 
     if ((results[0]?.meta.changes ?? 0) === 1) {
       await appendAudit(db, {
-        projectId: SANDBOX_PROJECT_ID,
-        actorType: "anonymous",
-        actorIdHash: sessionHash,
+        projectId: run.project_id,
+        actorType: userId === null ? "anonymous" : "user",
+        actorIdHash: userId === null ? sessionHash : await sha256Hex(userId),
         action: "run.cancel_requested",
         targetType: "run",
         targetId: run.id,
@@ -612,7 +711,7 @@ export async function cancelRun(
       };
     }
 
-    run = (await getRunForOwner(db, runId, sessionHash)) ?? run;
+    run = (await getRunForOwner(db, runId, sessionHash, userId)) ?? run;
   }
 
   if (run.status === "CANCELLING" || run.status === "CANCELLED") {
@@ -637,11 +736,12 @@ export async function retryRun(
     runId: string;
     requestId: string;
     config: AppConfig;
+    userId?: string | null;
   },
 ): Promise<RetryRunResult> {
   const db = env.DB;
-  const { session, runId, requestId, config } = options;
-  const original = await getRunForOwner(db, runId, session.idHash);
+  const { session, runId, requestId, config, userId = null } = options;
+  const original = await getRunForOwner(db, runId, session.idHash, userId);
   if (original === null) throw notFound("The requested run was not found.");
   if (original.status !== "FAILED") {
     throw conflict("RUN_NOT_RETRYABLE", "Only failed runs can be retried.");
@@ -670,25 +770,42 @@ export async function retryRun(
     );
   }
 
-  await assertSandboxAvailable(db, config, session.idHash, requestId);
-  const reservations = await reserveSandboxQuotas(db, session, config, requestId);
-
   const newRunId = randomId("run");
   const dispatchId = randomId("dsp");
   const correlationId = randomId("cor");
   const createdAt = nowIso();
+  await assertSandboxAvailable(db, config, session.idHash, requestId);
 
+  const lease = await acquireExecutionLease(
+    db,
+    SANDBOX_PROJECT_ID,
+    newRunId,
+    config.sandbox.globalConcurrencyLimit,
+  );
+  if (!lease.acquired) {
+    throw tooManyRequests(
+      "SANDBOX_CONCURRENCY_LIMIT",
+      "The sandbox is running its maximum number of executions. Try again shortly.",
+    );
+  }
+
+  let reservationCreated = false;
   try {
+    await createQuotaReservation(db, newRunId);
+    reservationCreated = true;
+    await reserveSandboxQuotas(db, newRunId, session, config, requestId, userId);
+
     await insertRunBundle(db, {
       run: {
         id: newRunId,
-        projectId: SANDBOX_PROJECT_ID,
+        projectId: original.project_id,
         workflowId: original.workflow_id,
         workflowVersion: original.workflow_version,
         triggerSource: "retry",
         scenario: original.scenario,
         visibility: "private",
         ownerSessionHash: session.idHash,
+        ownerUserId: userId,
         ownerIpHash: session.ipHash,
         parentRunId: original.id,
         retryOfRunId: original.id,
@@ -729,9 +846,9 @@ export async function retryRun(
         },
       ],
       audit: {
-        projectId: SANDBOX_PROJECT_ID,
-        actorType: "anonymous",
-        actorIdHash: session.idHash,
+        projectId: original.project_id,
+        actorType: userId === null ? "anonymous" : "user",
+        actorIdHash: userId === null ? session.idHash : await sha256Hex(userId),
         action: "run.retried",
         targetType: "run",
         targetId: newRunId,
@@ -740,8 +857,12 @@ export async function retryRun(
       },
       retryLink: { originalRunId: original.id },
     });
+    await commitQuotaReservation(db, newRunId);
   } catch (error) {
-    await Promise.all(reservations.map((key) => releaseQuota(db, key)));
+    await releaseExecutionLease(db, newRunId);
+    if (reservationCreated) {
+      await releaseQuotaReservation(db, newRunId);
+    }
     if (
       error instanceof Error &&
       /UNIQUE constraint failed: runs\.retry_of_run_id/u.test(error.message)
@@ -755,7 +876,7 @@ export async function retryRun(
   const dispatch = await getDispatchByRunId(db, newRunId);
   if (dispatch !== null) await publishDispatch(env, db, dispatch, requestId);
 
-  const detail = await getRunDetailForSession(db, newRunId, session.idHash);
+  const detail = await getRunDetailForSession(db, newRunId, session.idHash, userId);
   if (detail === null) throw new Error("Retry run could not be read back.");
   return { originalRunId: original.id, run: detail, dispatch: detail.dispatch };
 }

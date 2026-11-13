@@ -1,19 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Activity,
-  ArrowUpRight,
-  Clock3,
-  Gauge,
-  Inbox,
-  Play,
-  RefreshCw,
-  ShieldCheck,
-  Timer,
-  TriangleAlert,
-} from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { Icon } from "../components/ui/icon";
 import { EmptyState, ErrorState } from "../components/empty-state";
 import { LaunchDialog } from "../components/launch-dialog";
 import { MetricCard } from "../components/metric-card";
@@ -40,8 +29,11 @@ export function OverviewPage() {
     },
   });
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+  const session = useQuery({ queryKey: ["auth-session"], queryFn: api.authSession });
+  const sandbox = useQuery({ queryKey: ["sandbox"], queryFn: api.sandbox });
 
   const data = overview.data;
+  const hasActivity = data !== undefined && data.totals.runs > 0;
 
   return (
     <>
@@ -56,13 +48,11 @@ export function OverviewPage() {
               size="icon"
               aria-label="Refresh overview"
               onClick={() => void overview.refetch()}
-              icon={
-                <RefreshCw className={overview.isFetching ? "size-4 animate-spin" : "size-4"} />
-              }
+              icon={<Icon name="refresh" className={overview.isFetching ? "animate-spin" : ""} />}
             />
             <Button
               variant="primary"
-              icon={<Play className="size-3.5" />}
+              icon={<Icon name="play" />}
               onClick={() => setLaunchOpen(true)}
               disabled={workflows.data === undefined || workflows.data.length === 0}
             >
@@ -71,6 +61,101 @@ export function OverviewPage() {
           </>
         }
       />
+
+      <section className="mb-6 grid gap-6 border-y border-line py-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)] lg:gap-10 lg:py-8">
+        <div className="flex flex-col items-start">
+          <p className="mb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-faint">
+            Durable execution, without the guesswork
+          </p>
+          <h2 className="max-w-2xl text-3xl font-semibold leading-tight tracking-[-0.04em] text-ink sm:text-4xl">
+            Follow every run from first step to recovery.
+          </h2>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted">
+            Traceyard records workflow progress, attempts, events and outputs so you can inspect
+            what happened and retry a failed run with its history intact.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Link
+              to="/workflows"
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-ink px-4 text-xs font-medium text-canvas no-underline transition-opacity hover:opacity-80"
+            >
+              Explore sandbox <Icon name="arrow-up-right" className="text-[10px]" />
+            </Link>
+            {session.data?.user == null && session.data?.githubSignInAvailable !== false ? (
+              <a
+                href="/api/auth/github/start"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-line-strong px-4 text-xs font-medium text-ink no-underline transition-colors hover:bg-raised"
+              >
+                <Icon name="github" /> Continue with GitHub
+              </a>
+            ) : null}
+            {session.data?.user == null && session.data?.githubSignInAvailable === false ? (
+              <span className="max-w-52 text-[11px] leading-4 text-muted">
+                GitHub sign-in is unavailable. Sandbox browsing and launch remain available.
+              </span>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Icon name="play" />}
+              onClick={() => setLaunchOpen(true)}
+              disabled={workflows.data === undefined || workflows.data.length === 0}
+            >
+              Start a run
+            </Button>
+          </div>
+          <p className="mt-3 text-[11px] leading-5 text-faint">
+            Guest runs are private to this browser session and governed by the live sandbox quota.
+            {sandbox.data === undefined
+              ? " Quota availability is being checked."
+              : ` ${sandbox.data.sessionDailyLimit} runs per session each day; ${sandbox.data.retentionDays}-day retention.`}
+          </p>
+        </div>
+
+        <div className="border-t border-line pt-4 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-faint">
+                Available to run
+              </p>
+              <p className="mt-1 text-xs text-muted">Built-in executable workflows</p>
+            </div>
+            <Link
+              to="/workflows"
+              className="text-[11px] text-muted underline underline-offset-4 hover:text-ink"
+            >
+              Full catalog
+            </Link>
+          </div>
+          {workflows.isPending ? (
+            <SkeletonRows rows={2} />
+          ) : workflows.isError ? (
+            <p className="rounded-md border border-line px-3 py-3 text-xs text-muted">
+              Workflow catalog unavailable. Existing executions and navigation remain available.
+            </p>
+          ) : workflows.data?.length === 0 ? (
+            <p className="rounded-md border border-line px-3 py-3 text-xs text-muted">
+              No executable workflows are available in this deployment.
+            </p>
+          ) : (
+            <ul className="divide-y divide-line border-y border-line">
+              {(workflows.data ?? []).slice(0, 3).map((workflow) => (
+                <li key={workflow.id} className="flex items-start justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{workflow.name}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-muted">
+                      {workflow.description}
+                    </p>
+                  </div>
+                  <span className="shrink-0 font-mono text-[10px] text-faint">
+                    v{workflow.version}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
 
       {overview.isError ? (
         <ErrorState
@@ -83,139 +168,149 @@ export function OverviewPage() {
         />
       ) : null}
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard
-          label="Total executions"
-          value={data === undefined ? "—" : formatNumber(data.totals.runs)}
-          hint={
-            data === undefined
-              ? "Loading…"
-              : `${data.totals.succeeded} succeeded · ${data.totals.failed} failed`
-          }
-          icon={<Activity className="size-4" />}
-        />
-        <MetricCard
-          label="Success rate"
-          value={data === undefined ? "—" : formatPercent(data.totals.successRate)}
-          hint={
-            data === undefined
-              ? "Loading…"
-              : data.totals.successRate === null
-                ? "No terminal runs yet"
-                : "Succeeded ÷ terminal runs"
-          }
-          icon={<ShieldCheck className="size-4" />}
-          tone="accent"
-        />
-        <MetricCard
-          label="P95 duration"
-          value={data === undefined ? "—" : formatDuration(data.executionDuration.p95Ms)}
-          hint={
-            data === undefined
-              ? "Loading…"
-              : `${data.executionDuration.sampleSize} completed samples`
-          }
-          icon={<Timer className="size-4" />}
-        />
-        <MetricCard
-          label="In flight"
-          value={
-            data === undefined
-              ? "—"
-              : formatNumber(data.totals.running + data.totals.queued + data.totals.cancelling)
-          }
-          hint={
-            data === undefined
-              ? "Loading…"
-              : `${data.totals.queued} queued · ${data.totals.running} running · ${data.totals.cancelling} cancelling`
-          }
-          icon={<Gauge className="size-4" />}
-        />
-      </section>
+      {hasActivity ? (
+        <>
+          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <MetricCard
+              label="Total executions"
+              value={data === undefined ? "—" : formatNumber(data.totals.runs)}
+              hint={
+                data === undefined
+                  ? "Loading…"
+                  : `${data.totals.succeeded} succeeded · ${data.totals.failed} failed`
+              }
+              icon={<Icon name="activity" className="text-sm" />}
+            />
+            <MetricCard
+              label="Success rate"
+              value={data === undefined ? "—" : formatPercent(data.totals.successRate)}
+              hint={
+                data === undefined
+                  ? "Loading…"
+                  : data.totals.successRate === null
+                    ? "No terminal runs yet"
+                    : "Succeeded ÷ terminal runs"
+              }
+              icon={<Icon name="shield" className="text-sm" />}
+              tone="accent"
+            />
+            <MetricCard
+              label="P95 duration"
+              value={data === undefined ? "—" : formatDuration(data.executionDuration.p95Ms)}
+              hint={
+                data === undefined
+                  ? "Loading…"
+                  : `${data.executionDuration.sampleSize} completed samples`
+              }
+              icon={<Icon name="timer" className="text-sm" />}
+            />
+            <MetricCard
+              label="In flight"
+              value={
+                data === undefined
+                  ? "—"
+                  : formatNumber(data.totals.running + data.totals.queued + data.totals.cancelling)
+              }
+              hint={
+                data === undefined
+                  ? "Loading…"
+                  : `${data.totals.queued} queued · ${data.totals.running} running · ${data.totals.cancelling} cancelling`
+              }
+              icon={<Icon name="gauge" className="text-sm" />}
+            />
+          </section>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-        <Card>
-          <CardHeader className="flex-row items-start justify-between">
-            <div className="flex flex-col gap-1">
-              <CardTitle>Execution volume</CardTitle>
-              <CardDescription>
-                Daily runs over the last {days} days, grouped by terminal outcome.
-              </CardDescription>
-            </div>
-            <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-faint">
-              last {days}d
-            </span>
-          </CardHeader>
-          <CardContent>
-            {data === undefined ? (
-              <Skeleton className="h-[210px] w-full" />
-            ) : (
-              <TrendChart data={data.trend} days={days} />
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Sandbox capacity</CardTitle>
-            <CardDescription>
-              Quotas are enforced server-side before a run is accepted.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {data === undefined ? (
-              <SkeletonRows rows={4} />
-            ) : (
-              <>
-                <QuotaBar
-                  label="Session daily runs"
-                  used={data.sandbox.sessionRunsToday}
-                  limit={data.sandbox.sessionDailyLimit}
-                />
-                <QuotaBar
-                  label="Session hourly runs"
-                  used={data.sandbox.sessionRunsThisHour}
-                  limit={data.sandbox.sessionHourlyLimit}
-                />
-                <QuotaBar
-                  label="Global daily runs"
-                  used={data.sandbox.globalRunsToday}
-                  limit={data.sandbox.globalDailyLimit}
-                />
-                <QuotaBar
-                  label="Active concurrency"
-                  used={data.sandbox.activeRuns}
-                  limit={data.sandbox.activeRunLimit}
-                />
-                <div className="flex items-center justify-between rounded-lg border border-line bg-canvas/50 px-3 py-2.5 text-[11px]">
-                  <span className="inline-flex items-center gap-1.5 text-muted">
-                    <Clock3 className="size-3.5 text-faint" />
-                    Retention
-                  </span>
-                  <span className="font-mono text-ink">{data.sandbox.retentionDays} days</span>
+          <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <Card>
+              <CardHeader className="flex-row items-start justify-between">
+                <div className="flex flex-col gap-1">
+                  <CardTitle>Execution volume</CardTitle>
+                  <CardDescription>
+                    Daily runs over the last {days} days, grouped by terminal outcome.
+                  </CardDescription>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-line bg-canvas/50 px-3 py-2.5 text-[11px]">
-                  <span className="inline-flex items-center gap-1.5 text-muted">
-                    <ShieldCheck className="size-3.5 text-faint" />
-                    Circuit breaker
-                  </span>
-                  <span
-                    className={
-                      data.sandbox.circuitOpenUntil === null ? "text-emerald-300" : "text-amber-300"
-                    }
-                  >
-                    {data.sandbox.circuitOpenUntil === null
-                      ? "closed"
-                      : `open until ${new Date(data.sandbox.circuitOpenUntil).toLocaleTimeString()}`}
-                  </span>
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </section>
+                <span className="mt-1 font-mono text-[10px] uppercase tracking-wider text-faint">
+                  last {days}d
+                </span>
+              </CardHeader>
+              <CardContent>
+                {data === undefined ? (
+                  <Skeleton className="h-[210px] w-full" />
+                ) : (
+                  <TrendChart data={data.trend} days={days} />
+                )}
+              </CardContent>
+            </Card>
 
-      <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+            <Card>
+              <CardHeader>
+                <CardTitle>Sandbox capacity</CardTitle>
+                <CardDescription>
+                  Quotas are enforced server-side before a run is accepted.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {data === undefined ? (
+                  <SkeletonRows rows={4} />
+                ) : (
+                  <>
+                    <QuotaBar
+                      label="Session daily runs"
+                      used={data.sandbox.sessionRunsToday}
+                      limit={data.sandbox.sessionDailyLimit}
+                    />
+                    <QuotaBar
+                      label="Session hourly runs"
+                      used={data.sandbox.sessionRunsThisHour}
+                      limit={data.sandbox.sessionHourlyLimit}
+                    />
+                    <QuotaBar
+                      label="Global daily runs"
+                      used={data.sandbox.globalRunsToday}
+                      limit={data.sandbox.globalDailyLimit}
+                    />
+                    <QuotaBar
+                      label="Active concurrency"
+                      used={data.sandbox.activeRuns}
+                      limit={data.sandbox.activeRunLimit}
+                    />
+                    <div className="flex items-center justify-between rounded-lg border border-line bg-canvas/50 px-3 py-2.5 text-[11px]">
+                      <span className="inline-flex items-center gap-1.5 text-muted">
+                        <Icon name="clock" className="text-xs text-faint" />
+                        Retention
+                      </span>
+                      <span className="font-mono text-ink">{data.sandbox.retentionDays} days</span>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-line bg-canvas/50 px-3 py-2.5 text-[11px]">
+                      <span className="inline-flex items-center gap-1.5 text-muted">
+                        <Icon name="shield" className="text-xs text-faint" />
+                        Circuit breaker
+                      </span>
+                      <span
+                        className={
+                          data.sandbox.circuitOpenUntil === null
+                            ? "text-muted"
+                            : "text-ink font-medium"
+                        }
+                      >
+                        {data.sandbox.circuitOpenUntil === null
+                          ? "closed"
+                          : `open until ${new Date(data.sandbox.circuitOpenUntil).toLocaleTimeString()}`}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+        </>
+      ) : null}
+
+      <section
+        className={`mt-4 grid gap-4 ${
+          hasActivity ? "xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]" : ""
+        }`}
+      >
         <Card>
           <CardHeader className="flex-row items-center justify-between">
             <div className="flex flex-col gap-1">
@@ -226,7 +321,7 @@ export function OverviewPage() {
               to="/executions"
               className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent"
             >
-              View all <ArrowUpRight className="size-3.5" />
+              View all <Icon name="arrow-up-right" className="text-[10px]" />
             </Link>
           </CardHeader>
           <CardContent className="px-0 pb-1">
@@ -237,14 +332,14 @@ export function OverviewPage() {
             ) : data.recentRuns.length === 0 ? (
               <div className="px-5">
                 <EmptyState
-                  icon={<Inbox className="size-4" />}
+                  icon={<Icon name="inbox" className="text-sm" />}
                   title="No executions yet"
-                  description="Launch the document-intelligence workflow to create a real run with persisted steps, attempts and events."
+                  description="Launch an available workflow to create a real run with persisted steps, attempts and events."
                   action={
                     <Button
                       variant="primary"
                       size="sm"
-                      icon={<Play className="size-3.5" />}
+                      icon={<Icon name="play" className="text-[10px]" />}
                       onClick={() => setLaunchOpen(true)}
                       disabled={workflows.data === undefined || workflows.data.length === 0}
                     >
@@ -259,77 +354,81 @@ export function OverviewPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Failure classes</CardTitle>
-            <CardDescription>
-              Classified run failures across the current {days}-day window.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {data === undefined ? (
-              <SkeletonRows rows={3} />
-            ) : data.failureClasses.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line px-4 py-8 text-center">
-                <ShieldCheck className="size-5 text-emerald-400/80" />
-                <p className="text-xs text-muted">No classified failures in this window.</p>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {data.failureClasses.map((failure) => {
-                  const max = Math.max(...data.failureClasses.map((item) => item.count), 1);
-                  return (
-                    <div key={failure.class} className="flex flex-col gap-1.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-mono text-[11px] text-ink">{failure.class}</span>
-                        <span className="font-mono text-[11px] text-muted">{failure.count}</span>
+        {hasActivity ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Failure classes</CardTitle>
+              <CardDescription>
+                Classified run failures across the current {days}-day window.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {data === undefined ? (
+                <SkeletonRows rows={3} />
+              ) : data.failureClasses.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line px-4 py-8 text-center">
+                  <Icon name="shield" className="mb-1 text-base text-muted" />
+                  <p className="text-xs text-muted">No classified failures in this window.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {data.failureClasses.map((failure) => {
+                    const max = Math.max(...data.failureClasses.map((item) => item.count), 1);
+                    return (
+                      <div key={failure.class} className="flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-mono text-[11px] text-ink">{failure.class}</span>
+                          <span className="font-mono text-[11px] text-muted">{failure.count}</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-raised">
+                          <div
+                            className="h-full rounded-full bg-ink/65"
+                            style={{ width: `${Math.max(6, (failure.count / max) * 100)}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-raised">
-                        <div
-                          className="h-full rounded-full bg-rose-400/70"
-                          style={{ width: `${Math.max(6, (failure.count / max) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </section>
 
-      <section className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MiniStat
-          label="Median duration"
-          value={data === undefined ? "—" : formatDuration(data.executionDuration.p50Ms)}
-          loading={data === undefined}
-        />
-        <MiniStat
-          label="Max duration"
-          value={data === undefined ? "—" : formatDuration(data.executionDuration.maxMs)}
-          loading={data === undefined}
-        />
-        <MiniStat
-          label="Median queue delay"
-          value={data === undefined ? "—" : formatDuration(data.queueDelay.p50Ms)}
-          loading={data === undefined}
-        />
-        <MiniStat
-          label="Window runs"
-          value={data === undefined ? "—" : formatNumber(data.window.runs)}
-          loading={data === undefined}
-          hint={
-            data === undefined
-              ? undefined
-              : `${data.window.succeeded} succeeded · ${data.window.failed} failed`
-          }
-        />
-      </section>
+      {hasActivity ? (
+        <section className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <MiniStat
+            label="Median duration"
+            value={data === undefined ? "—" : formatDuration(data.executionDuration.p50Ms)}
+            loading={data === undefined}
+          />
+          <MiniStat
+            label="Max duration"
+            value={data === undefined ? "—" : formatDuration(data.executionDuration.maxMs)}
+            loading={data === undefined}
+          />
+          <MiniStat
+            label="Median queue delay"
+            value={data === undefined ? "—" : formatDuration(data.queueDelay.p50Ms)}
+            loading={data === undefined}
+          />
+          <MiniStat
+            label="Window runs"
+            value={data === undefined ? "—" : formatNumber(data.window.runs)}
+            loading={data === undefined}
+            hint={
+              data === undefined
+                ? undefined
+                : `${data.window.succeeded} succeeded · ${data.window.failed} failed`
+            }
+          />
+        </section>
+      ) : null}
 
       {data !== undefined && data.totals.cancelled > 0 ? (
         <p className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-faint">
-          <TriangleAlert className="size-3.5" />
+          <Icon name="triangle-alert" className="text-xs" />
           {data.totals.cancelled} cancelled run{data.totals.cancelled === 1 ? "" : "s"} retained for
           audit.
         </p>
@@ -358,9 +457,7 @@ function QuotaBar({ label, used, limit }: { label: string; used: number; limit: 
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-raised">
         <div
-          className={
-            hot ? "h-full rounded-full bg-amber-400/80" : "h-full rounded-full bg-accent/70"
-          }
+          className={hot ? "h-full rounded-full bg-ink" : "h-full rounded-full bg-ink/60"}
           style={{ width: `${Math.max(ratio === 0 ? 0 : 3, ratio * 100)}%` }}
         />
       </div>

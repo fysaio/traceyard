@@ -3,8 +3,10 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { AppConfig } from "../config";
 import { getConfig } from "../config";
 import { resolveSession } from "../persistence/sessions";
+import { resolveUserSession, type DeveloperIdentity } from "../persistence/identity";
 import { log, logError } from "../observability/logger";
 import { ApiError, badRequest } from "./errors";
+import { clearCookie, readAuthSessionToken, AUTH_COOKIE_NAME } from "../lib/cookie";
 
 export interface SandboxSession {
   idHash: string;
@@ -17,9 +19,16 @@ export interface RequestContext {
   config: AppConfig;
 }
 
+export interface AuthenticatedPrincipal {
+  user: DeveloperIdentity;
+  sessionId: string;
+  sessionHash: string;
+}
+
 export interface AppVariables {
   requestContext: RequestContext;
   session: SandboxSession;
+  auth: AuthenticatedPrincipal | null;
 }
 
 export type AppEnv = {
@@ -77,6 +86,33 @@ export function sessionMiddleware(): MiddlewareHandler<AppEnv> {
     if (resolved.cookie !== null) {
       c.header("Set-Cookie", resolved.cookie);
     }
+    await next();
+  };
+}
+
+export function authSessionMiddleware(): MiddlewareHandler<AppEnv> {
+  return async (c, next) => {
+    const secureCookies = new URL(c.req.url).protocol === "https:";
+    const token = readAuthSessionToken(c.req.header("cookie") ?? null);
+    if (token === null) {
+      c.set("auth", null);
+      await next();
+      return;
+    }
+
+    const resolved = await resolveUserSession(c.env.DB, token);
+    if (resolved === null) {
+      c.set("auth", null);
+      c.header("Set-Cookie", clearCookie(AUTH_COOKIE_NAME, secureCookies), { append: true });
+      await next();
+      return;
+    }
+
+    c.set("auth", {
+      user: resolved.user,
+      sessionId: resolved.sessionId,
+      sessionHash: resolved.sessionHash,
+    });
     await next();
   };
 }

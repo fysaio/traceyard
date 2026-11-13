@@ -1,9 +1,8 @@
-import { Compass } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
-import { Button } from "../components/ui/button";
+import { Icon } from "../components/ui/icon";
 
 export function NotFoundPage() {
   return (
@@ -14,13 +13,16 @@ export function NotFoundPage() {
         description="This route does not exist in the Traceyard console."
       />
       <EmptyState
-        icon={<Compass className="size-4" />}
+        icon={<Icon name="compass" />}
         title="Nothing at this address"
         description="The console exposes Overview, Executions, Workflows, Analytics and Settings. Execution detail pages require a run ID created by this session."
         action={
-          <Button variant="primary" size="sm">
-            <Link to="/">Return to overview</Link>
-          </Button>
+          <Link
+            to="/"
+            className="inline-flex h-8 items-center rounded-md bg-ink px-3 text-xs font-medium text-canvas no-underline hover:opacity-80"
+          >
+            Return to overview
+          </Link>
         }
       />
     </>

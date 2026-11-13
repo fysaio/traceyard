@@ -38,6 +38,7 @@ function readIdempotencyKey(header: string | undefined): string | null {
 runRoutes.post("/runs", async (c) => {
   const { config, requestId } = getRequestContext(c);
   const session = c.get("session");
+  const userId = c.get("auth")?.user.id ?? null;
   const idempotencyKey = readIdempotencyKey(c.req.header("idempotency-key"));
   const body = parseWith(
     launchRunRequestSchema,
@@ -47,6 +48,7 @@ runRoutes.post("/runs", async (c) => {
 
   const { result, status } = await launchRun(c.env, {
     session,
+    userId,
     requestId,
     body,
     idempotencyKey,
@@ -78,13 +80,18 @@ runRoutes.get("/runs", async (c) => {
     workflowId: query.workflowId,
     cursor,
     limit: query.limit,
-  });
+  }, c.get("auth")?.user.id ?? null);
   return c.json({ data: page, meta: { requestId } });
 });
 
 runRoutes.get("/runs/:id", async (c) => {
   const { requestId } = getRequestContext(c);
-  const detail = await getRunDetailForSession(c.env.DB, c.req.param("id"), c.get("session").idHash);
+  const detail = await getRunDetailForSession(
+    c.env.DB,
+    c.req.param("id"),
+    c.get("session").idHash,
+    c.get("auth")?.user.id ?? null,
+  );
   if (detail === null) {
     return c.json(
       {
@@ -113,6 +120,7 @@ runRoutes.get("/runs/:id/events", async (c) => {
     c.get("session").idHash,
     query.after,
     query.limit,
+    c.get("auth")?.user.id ?? null,
   );
   return c.json(
     {
@@ -125,7 +133,13 @@ runRoutes.get("/runs/:id/events", async (c) => {
 
 runRoutes.post("/runs/:id/cancel", async (c) => {
   const { requestId } = getRequestContext(c);
-  const result = await cancelRun(c.env.DB, c.get("session").idHash, c.req.param("id"), requestId);
+  const result = await cancelRun(
+    c.env.DB,
+    c.get("session").idHash,
+    c.req.param("id"),
+    requestId,
+    c.get("auth")?.user.id ?? null,
+  );
   return c.json({ data: result, meta: { requestId } }, 200);
 });
 
@@ -136,6 +150,7 @@ runRoutes.post("/runs/:id/retry", async (c) => {
     runId: c.req.param("id"),
     requestId,
     config,
+    userId: c.get("auth")?.user.id ?? null,
   });
   return c.json({ data: result, meta: { requestId } }, 202);
 });

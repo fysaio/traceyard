@@ -14,7 +14,13 @@ overviewRoutes.get("/overview", async (c) => {
     Object.fromEntries(new URL(c.req.url).searchParams),
     "The overview query is invalid.",
   );
-  const payload = await buildOverview(c.env.DB, config, c.get("session").idHash, query.days);
+  const payload = await buildOverview(
+    c.env.DB,
+    config,
+    c.get("session").idHash,
+    query.days,
+    c.get("auth")?.user.id ?? null,
+  );
   return c.json({ data: payload, meta: { requestId } });
 });
 
@@ -25,6 +31,12 @@ overviewRoutes.get("/analytics", async (c) => {
     Object.fromEntries(new URL(c.req.url).searchParams),
     "The analytics query is invalid.",
   );
-  const payload = await buildAnalytics(c.env.DB, config, c.get("session").idHash, query.days);
+  const payload = await buildAnalytics(
+    c.env.DB,
+    config,
+    c.get("session").idHash,
+    query.days,
+    c.get("auth")?.user.id ?? null,
+  );
   return c.json({ data: payload, meta: { requestId } });
 });

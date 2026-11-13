@@ -1,7 +1,7 @@
-import { ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import type { RunSummary } from "../../shared/contracts/api";
+import { Icon } from "./ui/icon";
 import { formatDuration, formatRelative, shortId } from "../lib/utils";
 import { StatusBadge } from "./status-badge";
 
@@ -53,7 +53,9 @@ export function RunTable({ runs }: { runs: RunSummary[] }) {
                 <td className="px-4 py-3 font-mono text-xs text-muted">
                   {finished}/{run.stepCounts.total}
                   {run.stepCounts.failed > 0 ? (
-                    <span className="ml-1.5 text-rose-300">·{run.stepCounts.failed} failed</span>
+                    <span className="ml-1.5 font-medium text-ink">
+                      ·{run.stepCounts.failed} failed
+                    </span>
                   ) : null}
                 </td>
                 <td className="px-4 py-3 font-mono text-xs text-muted">
@@ -69,7 +71,7 @@ export function RunTable({ runs }: { runs: RunSummary[] }) {
                     aria-label={`Open ${run.id}`}
                     className="flex size-7 items-center justify-center rounded-md text-faint transition-colors group-hover:bg-raised group-hover:text-ink"
                   >
-                    <ChevronRight className="size-4" />
+                    <Icon name="chevron-right" />
                   </Link>
                 </td>
               </tr>
