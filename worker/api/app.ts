@@ -1,0 +1,71 @@
+import { Hono } from "hono";
+
+import type { ApiFailure } from "../../shared/contracts/api";
+import { logError } from "../observability/logger";
+import { ApiError } from "./errors";
+import {
+  getRequestContext,
+  requestContextMiddleware,
+  sameOriginMiddleware,
+  securityHeadersMiddleware,
+  sessionMiddleware,
+  type AppEnv,
+} from "./middleware";
+import { healthRoutes } from "./routes/health";
+import { overviewRoutes } from "./routes/overview";
+import { runRoutes } from "./routes/runs";
+import { sandboxRoutes } from "./routes/sandbox";
+import { workflowRoutes } from "./routes/workflows";
+
+function failure(requestId: string, code: string, message: string, details?: unknown): ApiFailure {
+  return { error: { code, message, requestId, ...(details === undefined ? {} : { details }) } };
+}
+
+export function createApp(): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+
+  app.use("*", requestContextMiddleware());
+  app.use("*", securityHeadersMiddleware());
+  app.use("/api/*", sameOriginMiddleware());
+  app.use("/api/*", sessionMiddleware());
+
+  app.route("/api", healthRoutes);
+  app.route("/api", workflowRoutes);
+  app.route("/api", runRoutes);
+  app.route("/api", overviewRoutes);
+  app.route("/api", sandboxRoutes);
+
+  app.notFound((c) => {
+    let requestId = "unknown";
+    try {
+      requestId = getRequestContext(c).requestId;
+    } catch {
+      // Middleware did not run; the request context is unavailable.
+    }
+    return c.json(
+      failure(requestId, "NOT_FOUND", "The requested API endpoint does not exist."),
+      404,
+    );
+  });
+
+  app.onError((error, c) => {
+    let requestId = "unknown";
+    try {
+      requestId = getRequestContext(c).requestId;
+    } catch {
+      // Middleware did not run; the request context is unavailable.
+    }
+
+    if (error instanceof ApiError) {
+      for (const [name, value] of Object.entries(error.headers ?? {})) {
+        c.header(name, value);
+      }
+      return c.json(failure(requestId, error.code, error.message, error.details), error.status);
+    }
+
+    logError("api.unhandled_error", error, { requestId, path: new URL(c.req.url).pathname });
+    return c.json(failure(requestId, "INTERNAL_ERROR", "An unexpected error occurred."), 500);
+  });
+
+  return app;
+}
