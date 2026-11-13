@@ -2,18 +2,27 @@ import { DomainError, serializeError } from "../../shared/domain/errors";
 import { isoFromNow, nowIso } from "../lib/time";
 import { log, logError } from "../observability/logger";
 import { appendAudit } from "../persistence/audit";
+import { reconcileExecutionLeases } from "../persistence/admission";
 import {
   failDispatch,
   listDispatchesForReconciliation,
   reopenStaleClaims,
 } from "../persistence/dispatches";
-import { getFlag, setFlag } from "../persistence/quotas";
+import {
+  deleteResolvedQuotaReservations,
+  getFlag,
+  reconcileQuotaReservations,
+  setFlag,
+} from "../persistence/quotas";
 import { getRunRow } from "../persistence/runs";
 import { finalizeRunFailure } from "../execution/finalize";
 import { publishDispatch } from "../queue/producer";
 import type { DispatchRow, RunRow } from "../persistence/rows";
 
 export interface ScheduledSummary {
+  reconciledExecutionLeases: number;
+  committedQuotaReservations: number;
+  releasedQuotaReservations: number;
   republished: number;
   reopenedClaims: number;
   failedDispatches: number;
@@ -31,6 +40,9 @@ const STALE_CLAIM_MS = 5 * 60 * 1000;
  */
 export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
   const summary: ScheduledSummary = {
+    reconciledExecutionLeases: 0,
+    committedQuotaReservations: 0,
+    releasedQuotaReservations: 0,
     republished: 0,
     reopenedClaims: 0,
     failedDispatches: 0,
@@ -39,6 +51,13 @@ export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
     circuitOpened: false,
   };
 
+  summary.reconciledExecutionLeases = await reconcileExecutionLeases(env.DB);
+  const reservations = await reconcileQuotaReservations(
+    env.DB,
+    isoFromNow(-STALE_CLAIM_MS),
+  );
+  summary.committedQuotaReservations = reservations.committed;
+  summary.releasedQuotaReservations = reservations.released;
   summary.reopenedClaims = await reopenStaleClaims(env.DB, isoFromNow(-STALE_CLAIM_MS));
   summary.republished = await republishPendingDispatches(env);
   summary.failedDispatches = await failExhaustedDispatches(env);
@@ -177,6 +196,22 @@ async function cleanupExpiredData(db: D1Database): Promise<number> {
   await db
     .prepare(`DELETE FROM audit_events WHERE created_at < ?`)
     .bind(isoFromNow(-90 * 24 * 60 * 60 * 1000))
+    .run();
+  await deleteResolvedQuotaReservations(db, isoFromNow(-30 * 24 * 60 * 60 * 1000));
+  await db
+    .prepare(
+      `DELETE FROM user_sessions
+        WHERE expires_at < ? OR revoked_at < ?`,
+    )
+    .bind(now, isoFromNow(-90 * 24 * 60 * 60 * 1000))
+    .run();
+  await db
+    .prepare(`DELETE FROM github_oauth_states WHERE expires_at < ?`)
+    .bind(now)
+    .run();
+  await db
+    .prepare(`DELETE FROM sandbox_sessions WHERE last_seen_at < ?`)
+    .bind(isoFromNow(-180 * 24 * 60 * 60 * 1000))
     .run();
   return deleted.results.length;
 }

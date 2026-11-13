@@ -17,6 +17,7 @@ import {
 export const launchRunRequestSchema = z
   .object({
     workflowId: z.string().trim().min(1).max(80),
+    projectId: z.string().trim().min(1).max(80).optional(),
     input: z.unknown(),
     scenario: z.enum(FAILURE_SCENARIOS).default("success"),
   })

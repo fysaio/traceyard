@@ -1,8 +1,8 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import { Icon } from "./icon";
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -43,7 +43,7 @@ export function DialogContent({
             className="rounded-md p-1.5 text-muted transition-colors hover:bg-raised hover:text-ink"
             aria-label="Close dialog"
           >
-            <X className="size-4" />
+            <Icon name="x" className="size-4" />
           </DialogPrimitive.Close>
         </div>
         {children}

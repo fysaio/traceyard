@@ -1,6 +1,6 @@
 # Traceyard
 
-Traceyard is an execution intelligence and reliability platform for workflows, background jobs and AI agents. This repository contains a working Cloudflare-native implementation: a durable execution engine, a persisted execution ledger, a queue-backed dispatch outbox, and a dark React console for inspecting real runs.
+Traceyard is an execution intelligence and reliability platform for workflows, background jobs and AI agents. This repository contains a working Cloudflare-native implementation: a durable execution engine, a persisted execution ledger, a queue-backed dispatch outbox, and a monochrome React interface for exploring and inspecting real runs.
 
 The public sandbox executes one deterministic document-intelligence workflow. It is a real execution path — every run, step, attempt, event, dispatch and output shown in the console is persisted in D1. There are no fabricated metrics, fake progress bars or client-side simulation.
 
@@ -15,6 +15,8 @@ The public sandbox executes one deterministic document-intelligence workflow. It
 - **Validated state machine** — run and step transitions use conditional SQL updates with expected current states. The schema itself also constrains valid status values.
 - **Cancellation and retry** — queued runs cancel immediately; running runs move to `CANCELLING` and finalize at the next step checkpoint. Retry creates a new run with a unique `retry_of_run_id` and a preserved scenario.
 - **Private anonymous sandbox** — HttpOnly session cookie, only a SHA-256 hash persisted, hashed IP/user-agent fingerprints, bounded input, strict Zod validation, server-side quotas and a circuit breaker.
+- **Durable developer accounts** — optional GitHub sign-in, server-side authorization-code/PKCE exchange, hashed and revocable 30-day sessions, personal workspaces, project-scoped saved definitions and explicit guest-run claiming.
+- **Shared public budget** — anonymous and authenticated launches reserve from the same global daily and concurrency limits; accounts do not increase the public infrastructure budget.
 - **Real analytics** — success rates, percentiles, throughput and failure classes computed from D1 over a configurable window. Small samples are shown as-is.
 - **Tested surfaces** — unit domain tests, integration tests running the actual Worker in Miniflare with D1/Queues/Workflows, and Playwright tests against the real dev server.
 
@@ -72,6 +74,16 @@ QUEUED ──dispatch──► RUNNING ──success──► SUCCEEDED
 | Side effects      | No exactly-once claim for external side effects. D1 commits are idempotent; external calls would need their own idempotency keys. |
 | Data retention    | Runs expire after 30 days by default and are deleted with dependent rows; audit events are retained for 90 days.                  |
 
+### Accounts, OAuth and retention
+
+GitHub sign-in is optional. The anonymous sandbox is available without an account. Sign-in requests no GitHub scopes or repository permissions; the authorization-code exchange and profile lookup happen in the Worker. Provider access tokens are used only for that lookup and are not persisted or sent to the browser. OAuth state is single-use, expires after 10 minutes, and is verified with an HttpOnly state cookie and PKCE S256 verifier.
+
+Configure `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` as Cloudflare secrets and set `PUBLIC_APP_ORIGIN` to the canonical HTTPS origin. Register `${PUBLIC_APP_ORIGIN}/api/auth/github/callback` as the GitHub OAuth callback URL. For local development, put these three values in the ignored `.dev.vars` file; use `http://localhost:5173` for the local origin. Without all three values, the sandbox remains usable and the sign-in endpoint reports that GitHub sign-in is unavailable.
+
+Authenticated session identifiers are random bearer values stored only as SHA-256 hashes. The HttpOnly, SameSite=Lax cookie expires after 30 days; users can revoke active sessions, and logout revokes the current session immediately. Personal projects, saved workflow definitions, and account identity have no automatic expiry and remain available across authenticated devices. This version does not yet include a self-service account deletion flow. Runs (including claimed guest runs) expire after 30 days, and audit events expire after 90 days.
+
+Guest runs are never claimed automatically. A signed-in user can explicitly claim eligible, unexpired runs only from the browser carrying the guest session that created them. Saved workflow definitions are stored as project data and are **not executable**; execution remains limited to the built-in compiled example workflow.
+
 ## Sandbox limits
 
 The sandbox is deliberately narrow:
@@ -109,7 +121,7 @@ npm run db:migrate:local
 npm run dev
 ```
 
-Open <http://localhost:5173>. The console starts empty for a new anonymous session. Use **Launch run** to execute the document workflow, then inspect its steps, attempts, events, input and committed output.
+Open <http://localhost:5173>. The public sandbox is usable without sign-in. Use **Launch run** to execute the built-in document workflow, then inspect its steps, attempts, events, input and committed output. GitHub sign-in is enabled only when the local OAuth settings above are configured.
 
 Useful local commands:
 
@@ -128,20 +140,29 @@ The Playwright config starts the dev server and applies local migrations automat
 
 All endpoints are under `/api` and are session-scoped unless noted.
 
-| Method | Path               | Purpose                                             |
-| ------ | ------------------ | --------------------------------------------------- |
-| `GET`  | `/health`          | Worker, D1, queue and workflow binding health       |
-| `GET`  | `/workflows`       | Executable workflow catalog                         |
-| `GET`  | `/workflows/:id`   | Workflow metadata and step manifest                 |
-| `POST` | `/runs`            | Launch a run (requires `Idempotency-Key` header)    |
-| `GET`  | `/runs`            | Paginated run list with status/workflow filters     |
-| `GET`  | `/runs/:id`        | Run detail: steps, attempts, dispatch, input/output |
-| `GET`  | `/runs/:id/events` | Cursor-paginated event stream                       |
-| `POST` | `/runs/:id/cancel` | Request cancellation                                |
-| `POST` | `/runs/:id/retry`  | Create a retry run for a failed execution           |
-| `GET`  | `/overview`        | Dashboard totals, trend, recent runs, quotas        |
-| `GET`  | `/analytics`       | Percentiles, throughput and failure classes         |
-| `GET`  | `/sandbox`         | Current session/deployment sandbox status           |
+| Method         | Path                                         | Purpose                                                       |
+| -------------- | -------------------------------------------- | ------------------------------------------------------------- |
+| `GET`          | `/health`                                    | Worker, D1, queue and workflow binding health                 |
+| `GET`          | `/workflows`                                 | Executable workflow catalog                                   |
+| `GET`          | `/workflows/:id`                             | Workflow metadata and step manifest                           |
+| `POST`         | `/runs`                                      | Launch a run (requires `Idempotency-Key` header)              |
+| `GET`          | `/runs`                                      | Paginated run list with status/workflow filters               |
+| `GET`          | `/runs/:id`                                  | Run detail: steps, attempts, dispatch, input/output           |
+| `GET`          | `/runs/:id/events`                           | Cursor-paginated event stream                                 |
+| `POST`         | `/runs/:id/cancel`                           | Request cancellation                                          |
+| `POST`         | `/runs/:id/retry`                            | Create a retry run for a failed execution                     |
+| `GET`          | `/overview`                                  | Dashboard totals, trend, recent runs, quotas                  |
+| `GET`          | `/analytics`                                 | Percentiles, throughput and failure classes                   |
+| `GET`          | `/sandbox`                                   | Current session/deployment sandbox status                     |
+| `GET`          | `/auth/session`                              | Current developer identity, sessions and sign-in availability |
+| `GET`          | `/auth/github/start`                         | Begin GitHub OAuth sign-in (requires OAuth configuration)     |
+| `GET`          | `/auth/github/callback`                      | Validate OAuth state and complete server-side code exchange   |
+| `POST`         | `/auth/logout`                               | Revoke the current authenticated session                      |
+| `POST`         | `/auth/claim`                                | Explicitly claim eligible runs from the active guest session  |
+| `POST`         | `/auth/sessions/:id/revoke`                  | Revoke an account session                                     |
+| `GET`/`POST`   | `/projects`                                  | List or create personal projects (authenticated)              |
+| `GET`/`POST`   | `/projects/:projectId/workflows`             | List or save non-executable project definitions               |
+| `GET`/`DELETE` | `/projects/:projectId/workflows/:workflowId` | Read or delete a saved definition                             |
 
 Example launch:
 
@@ -166,8 +187,8 @@ Mutations require a same-origin browser context. Use the console for anonymous s
 The repository currently has:
 
 - **54 unit tests** — state transitions, retry arithmetic, cursor encoding, document normalization/extraction/digest, error serialization.
-- **50 integration tests** — the real Worker running in Miniflare with D1, Queues and Workflows: API validation, idempotency, session isolation, pagination, cancel/retry, quotas, success/retry/terminal failure/cancellation/recovery, queue duplicates, outbox behavior, reconciliation, cleanup and circuit breaker.
-- **4 Playwright tests** — honest empty state, real launch to successful completion, terminal failure plus retry lineage, and navigation across every console surface.
+- **57 integration tests** — the real Worker running in Miniflare with D1, Queues and Workflows: API validation, idempotency, session isolation, GitHub OAuth state/PKCE, logout, guest claiming, project ownership, cross-device persistence, shared global quotas, pagination, cancel/retry, recovery, outbox behavior, reconciliation, cleanup and circuit breaker.
+- **7 Playwright tests** — anonymous first-run experience, real execution and retry inspection, navigation, project/definition creation, account-session revocation, theme persistence, mobile overflow and no-SVG checks.
 
 ```bash
 npm test

@@ -31,6 +31,9 @@ export default defineConfig(async () => {
                 bindings: {
                   TEST_MODE: "true",
                   TEST_MIGRATIONS: migrations,
+                  GITHUB_CLIENT_ID: "traceyard-test-client",
+                  GITHUB_CLIENT_SECRET: "test-only-not-a-github-secret",
+                  PUBLIC_APP_ORIGIN: "https://traceyard.test",
                 },
               },
             }),

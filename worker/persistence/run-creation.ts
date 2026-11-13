@@ -18,6 +18,7 @@ export interface NewRunBundle {
     scenario: string;
     visibility: "private" | "public";
     ownerSessionHash: string;
+    ownerUserId: string | null;
     ownerIpHash: string;
     parentRunId: string | null;
     retryOfRunId: string | null;
@@ -46,7 +47,7 @@ export interface NewRunBundle {
   }>;
   audit: {
     projectId: string;
-    actorType: "anonymous" | "system";
+    actorType: "anonymous" | "system" | "user";
     actorIdHash: string;
     action: string;
     targetType: string;
@@ -69,9 +70,9 @@ export async function insertRunBundle(db: D1Database, bundle: NewRunBundle): Pro
       .prepare(
         `INSERT INTO runs (
            id, project_id, workflow_id, workflow_version, status, trigger_source, scenario,
-           visibility, owner_session_hash, owner_ip_hash, parent_run_id, retry_of_run_id,
+           visibility, owner_session_hash, owner_user_id, owner_ip_hash, parent_run_id, retry_of_run_id,
            idempotency_key, input_hash, input_json, correlation_id, created_at, updated_at, expires_at
-         ) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         bundle.run.id,
@@ -82,6 +83,7 @@ export async function insertRunBundle(db: D1Database, bundle: NewRunBundle): Pro
         bundle.run.scenario,
         bundle.run.visibility,
         bundle.run.ownerSessionHash,
+        bundle.run.ownerUserId,
         bundle.run.ownerIpHash,
         bundle.run.parentRunId,
         bundle.run.retryOfRunId,

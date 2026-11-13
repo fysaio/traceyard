@@ -101,19 +101,21 @@ export async function buildOverview(
   config: AppConfig,
   sessionHash: string,
   days: number,
+  userId: string | null = null,
 ): Promise<OverviewPayload> {
   const since = daysAgoIso(days - 1);
   const [statusRows, trend, failureClasses, recentRows, timings, sandbox] = await Promise.all([
-    getStatusTotals(db, sessionHash),
-    getTrend(db, sessionHash, days),
-    getFailureClasses(db, sessionHash, since),
+    getStatusTotals(db, sessionHash, null, userId),
+    getTrend(db, sessionHash, days, userId),
+    getFailureClasses(db, sessionHash, since, userId),
     listRuns(db, {
-      projectId: SANDBOX_PROJECT_ID,
+      projectId: userId === null ? SANDBOX_PROJECT_ID : null,
       sessionHash,
+      userId,
       cursor: null,
       limit: 6,
     }),
-    getRunTimings(db, sessionHash, 500),
+    getRunTimings(db, sessionHash, 500, userId),
     getSandboxStatus(db, config, sessionHash),
   ]);
 
@@ -157,14 +159,15 @@ export async function buildAnalytics(
   config: AppConfig,
   sessionHash: string,
   days: number,
+  userId: string | null = null,
 ): Promise<AnalyticsPayload> {
   const since = daysAgoIso(days - 1);
   const [statusRows, trend, failureClasses, timings, stepTimings, sandbox] = await Promise.all([
-    getStatusTotals(db, sessionHash),
-    getTrend(db, sessionHash, days),
-    getFailureClasses(db, sessionHash, since),
-    getRunTimings(db, sessionHash, 1_000),
-    getStepTimings(db, sessionHash, 2_000),
+    getStatusTotals(db, sessionHash, null, userId),
+    getTrend(db, sessionHash, days, userId),
+    getFailureClasses(db, sessionHash, since, userId),
+    getRunTimings(db, sessionHash, 1_000, userId),
+    getStepTimings(db, sessionHash, 2_000, userId),
     getSandboxStatus(db, config, sessionHash),
   ]);
 

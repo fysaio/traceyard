@@ -54,6 +54,14 @@ export async function finalizeRunSuccess(
           WHERE id = ? AND status = 'RUNNING'`,
       )
       .bind(outputJson, now, now, runId),
+    db
+      .prepare(
+        `DELETE FROM execution_leases
+          WHERE run_id = ? AND EXISTS (
+            SELECT 1 FROM runs WHERE id = ? AND status = 'SUCCEEDED'
+          )`,
+      )
+      .bind(runId, runId),
     eventInsertStatement(db, {
       runId,
       type: "run.succeeded",
@@ -83,6 +91,14 @@ export async function finalizeRunFailure(
           WHERE id = ? AND status IN ('QUEUED', 'RUNNING', 'CANCELLING')`,
       )
       .bind(errorJson, errorClass, now, now, runId),
+    db
+      .prepare(
+        `DELETE FROM execution_leases
+          WHERE run_id = ? AND EXISTS (
+            SELECT 1 FROM runs WHERE id = ? AND status = 'FAILED'
+          )`,
+      )
+      .bind(runId, runId),
     db
       .prepare(
         `UPDATE execution_steps
@@ -123,6 +139,14 @@ export async function finalizeRunCancelled(
           WHERE id = ? AND status IN ('RUNNING', 'CANCELLING')`,
       )
       .bind(now, now, runId),
+    db
+      .prepare(
+        `DELETE FROM execution_leases
+          WHERE run_id = ? AND EXISTS (
+            SELECT 1 FROM runs WHERE id = ? AND status = 'CANCELLED'
+          )`,
+      )
+      .bind(runId, runId),
     db
       .prepare(
         `UPDATE execution_steps SET status = 'SKIPPED', completed_at = ?, updated_at = ?

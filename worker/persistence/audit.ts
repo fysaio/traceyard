@@ -2,7 +2,7 @@ import { nowIso } from "../lib/time";
 
 export interface AuditInput {
   projectId: string;
-  actorType: "anonymous" | "system";
+  actorType: "anonymous" | "system" | "user";
   actorIdHash: string | null;
   action: string;
   targetType: string;

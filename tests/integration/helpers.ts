@@ -15,6 +15,7 @@ import { DOCUMENT_WORKFLOW, type FailureScenario } from "../../shared/workflow/d
 import { randomId, sha256Hex } from "../../worker/lib/crypto";
 import { isoFromNow, nowIso } from "../../worker/lib/time";
 import { insertRunBundle } from "../../worker/persistence/run-creation";
+import { createApp } from "../../worker/api/app";
 
 export const ORIGIN = "https://traceyard.test";
 
@@ -58,6 +59,19 @@ export async function apiFetch(
   return SELF.fetch(`${ORIGIN}${path}`, { ...init, headers });
 }
 
+export async function apiFetchWithGitHub(
+  path: string,
+  init: RequestInit,
+  githubFetch: typeof fetch,
+  cookie?: string,
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("origin")) headers.set("origin", ORIGIN);
+  if (cookie !== undefined) headers.set("cookie", cookie);
+  const request = new Request(`${ORIGIN}${path}`, { ...init, headers });
+  return createApp({ githubFetch }).fetch(request, env, createExecutionContext());
+}
+
 export async function postJson(
   path: string,
   body: unknown,
@@ -92,8 +106,13 @@ export async function readFailure(response: Response): Promise<ApiFailure["error
 }
 
 export function launchBody(
-  overrides: Partial<{ workflowId: string; input: unknown; scenario: FailureScenario }> = {},
-): { workflowId: string; input: unknown; scenario: FailureScenario } {
+  overrides: Partial<{
+    workflowId: string;
+    projectId: string;
+    input: unknown;
+    scenario: FailureScenario;
+  }> = {},
+): { workflowId: string; projectId?: string; input: unknown; scenario: FailureScenario } {
   return {
     workflowId: "document-intelligence",
     input: VALID_INPUT,
@@ -134,6 +153,7 @@ export async function seedRun(options: {
       scenario,
       visibility: "private",
       ownerSessionHash: options.session.idHash,
+      ownerUserId: null,
       ownerIpHash: await sha256Hex("127.0.0.1"),
       parentRunId: null,
       retryOfRunId: null,

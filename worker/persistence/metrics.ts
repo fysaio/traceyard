@@ -6,15 +6,17 @@ export async function getStatusTotals(
   db: D1Database,
   sessionHash: string,
   since: string | null = null,
+  userId: string | null = null,
 ): Promise<Array<{ status: string; count: number }>> {
+  const owner = ownershipFilter(sessionHash, userId);
   const result = await db
     .prepare(
       `SELECT status, COUNT(*) AS count FROM runs
-        WHERE project_id = 'prj_sandbox' AND owner_session_hash = ?
+        WHERE ${owner.sql}
           ${since === null ? "" : "AND created_at >= ?"}
         GROUP BY status`,
     )
-    .bind(...(since === null ? [sessionHash] : [sessionHash, since]))
+    .bind(...(since === null ? owner.bindings : [...owner.bindings, since]))
     .all<{ status: string; count: number }>();
   return result.results;
 }
@@ -23,16 +25,18 @@ export async function getTrend(
   db: D1Database,
   sessionHash: string,
   days: number,
+  userId: string | null = null,
 ): Promise<TrendPoint[]> {
   const since = daysAgoIso(days - 1);
+  const owner = ownershipFilter(sessionHash, userId, "r.");
   const result = await db
     .prepare(
       `SELECT substr(created_at, 1, 10) AS date, status, COUNT(*) AS count
-         FROM runs
-        WHERE project_id = 'prj_sandbox' AND owner_session_hash = ? AND created_at >= ?
+         FROM runs r
+        WHERE ${owner.sql} AND created_at >= ?
         GROUP BY date, status`,
     )
-    .bind(sessionHash, since)
+    .bind(...owner.bindings, since)
     .all<{ date: string; status: string; count: number }>();
 
   const byDate = new Map<string, TrendPoint>();
@@ -60,15 +64,17 @@ export async function getFailureClasses(
   db: D1Database,
   sessionHash: string,
   since: string,
+  userId: string | null = null,
 ): Promise<FailureClassCount[]> {
+  const owner = ownershipFilter(sessionHash, userId);
   const result = await db
     .prepare(
       `SELECT error_class, COUNT(*) AS count FROM runs
-        WHERE project_id = 'prj_sandbox' AND owner_session_hash = ?
+        WHERE ${owner.sql}
           AND status = 'FAILED' AND error_class IS NOT NULL AND created_at >= ?
         GROUP BY error_class ORDER BY count DESC`,
     )
-    .bind(sessionHash, since)
+    .bind(...owner.bindings, since)
     .all<{ error_class: string; count: number }>();
   return result.results.map((row) => ({
     class: row.error_class as ErrorClass,
@@ -80,14 +86,16 @@ export async function getRunTimings(
   db: D1Database,
   sessionHash: string,
   limit = 1_000,
+  userId: string | null = null,
 ): Promise<Array<{ created_at: string; started_at: string | null; completed_at: string | null }>> {
+  const owner = ownershipFilter(sessionHash, userId);
   const result = await db
     .prepare(
       `SELECT created_at, started_at, completed_at FROM runs
-        WHERE project_id = 'prj_sandbox' AND owner_session_hash = ?
+        WHERE ${owner.sql}
         ORDER BY created_at DESC LIMIT ?`,
     )
-    .bind(sessionHash, limit)
+    .bind(...owner.bindings, limit)
     .all<{ created_at: string; started_at: string | null; completed_at: string | null }>();
   return result.results;
 }
@@ -96,19 +104,39 @@ export async function getStepTimings(
   db: D1Database,
   sessionHash: string,
   limit = 2_000,
+  userId: string | null = null,
 ): Promise<Array<{ step_key: string; name: string; started_at: string; completed_at: string }>> {
+  const owner = ownershipFilter(sessionHash, userId, "r.");
   const result = await db
     .prepare(
       `SELECT s.step_key, s.name, s.started_at, s.completed_at
          FROM execution_steps s
          JOIN runs r ON r.id = s.run_id
-        WHERE r.project_id = 'prj_sandbox' AND r.owner_session_hash = ?
+        WHERE ${owner.sql}
           AND s.status = 'SUCCEEDED' AND s.started_at IS NOT NULL AND s.completed_at IS NOT NULL
         ORDER BY s.completed_at DESC LIMIT ?`,
     )
-    .bind(sessionHash, limit)
+    .bind(...owner.bindings, limit)
     .all<{ step_key: string; name: string; started_at: string; completed_at: string }>();
   return result.results;
+}
+
+function ownershipFilter(
+  sessionHash: string,
+  userId: string | null,
+  prefix = "",
+): { sql: string; bindings: string[] } {
+  const projectScope = userId === null ? `${prefix}project_id = 'prj_sandbox' AND ` : "";
+  if (userId === null) {
+    return {
+      sql: `${projectScope}${prefix}owner_user_id IS NULL AND ${prefix}owner_session_hash = ?`,
+      bindings: [sessionHash],
+    };
+  }
+  return {
+    sql: `${projectScope}(${prefix}owner_user_id = ? OR (${prefix}owner_user_id IS NULL AND ${prefix}owner_session_hash = ?))`,
+    bindings: [userId, sessionHash],
+  };
 }
 
 export function durationStats(values: number[]): DurationStats {

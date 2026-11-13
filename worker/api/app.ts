@@ -5,14 +5,17 @@ import { logError } from "../observability/logger";
 import { ApiError } from "./errors";
 import {
   getRequestContext,
+  authSessionMiddleware,
   requestContextMiddleware,
   sameOriginMiddleware,
   securityHeadersMiddleware,
   sessionMiddleware,
   type AppEnv,
 } from "./middleware";
+import { createAuthRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
 import { overviewRoutes } from "./routes/overview";
+import { projectRoutes } from "./routes/projects";
 import { runRoutes } from "./routes/runs";
 import { sandboxRoutes } from "./routes/sandbox";
 import { workflowRoutes } from "./routes/workflows";
@@ -21,14 +24,17 @@ function failure(requestId: string, code: string, message: string, details?: unk
   return { error: { code, message, requestId, ...(details === undefined ? {} : { details }) } };
 }
 
-export function createApp(): Hono<AppEnv> {
+export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.use("*", requestContextMiddleware());
   app.use("*", securityHeadersMiddleware());
   app.use("/api/*", sameOriginMiddleware());
   app.use("/api/*", sessionMiddleware());
+  app.use("/api/*", authSessionMiddleware());
 
+  app.route("/api", createAuthRoutes(options.githubFetch));
+  app.route("/api", projectRoutes);
   app.route("/api", healthRoutes);
   app.route("/api", workflowRoutes);
   app.route("/api", runRoutes);

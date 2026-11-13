@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Filter, Inbox, Play, RefreshCw } from "lucide-react";
 
 import { EmptyState, ErrorState } from "../components/empty-state";
 import { LaunchDialog } from "../components/launch-dialog";
@@ -10,6 +9,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Select } from "../components/ui/input";
 import { SkeletonRows } from "../components/ui/skeleton";
+import { Icon } from "../components/ui/icon";
 import type { RunStatus } from "../../shared/domain/status";
 import { RUN_STATUSES } from "../../shared/domain/status";
 import { api, ApiClientError } from "../lib/api";
@@ -64,11 +64,11 @@ export function ExecutionsPage() {
               size="icon"
               aria-label="Refresh executions"
               onClick={() => void runs.refetch()}
-              icon={<RefreshCw className={runs.isFetching ? "size-4 animate-spin" : "size-4"} />}
+              icon={<Icon name="refresh" className={runs.isFetching ? "animate-spin" : ""} />}
             />
             <Button
               variant="primary"
-              icon={<Play className="size-3.5" />}
+              icon={<Icon name="play" />}
               onClick={() => setLaunchOpen(true)}
               disabled={workflows.data === undefined || workflows.data.length === 0}
             >
@@ -82,7 +82,7 @@ export function ExecutionsPage() {
         <CardContent className="flex flex-col gap-4 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-faint">
-              <Filter className="size-3.5" />
+              <Icon name="filter" />
               Filters
             </div>
             <Select
@@ -130,7 +130,7 @@ export function ExecutionsPage() {
             <SkeletonRows rows={6} />
           ) : items.length === 0 ? (
             <EmptyState
-              icon={<Inbox className="size-4" />}
+              icon={<Icon name="inbox" />}
               title={
                 status === "" && workflowId === ""
                   ? "No executions yet"
@@ -138,7 +138,7 @@ export function ExecutionsPage() {
               }
               description={
                 status === "" && workflowId === ""
-                  ? "Launch the document-intelligence workflow to create a real execution with durable steps, retries and a dispatch record."
+                  ? "Launch an available workflow to create a real execution with durable steps, retries and a dispatch record."
                   : "Change or clear the filters to inspect other executions in this session."
               }
               action={
@@ -146,7 +146,7 @@ export function ExecutionsPage() {
                   <Button
                     variant="primary"
                     size="sm"
-                    icon={<Play className="size-3.5" />}
+                    icon={<Icon name="play" />}
                     onClick={() => setLaunchOpen(true)}
                     disabled={workflows.data === undefined || workflows.data.length === 0}
                   >

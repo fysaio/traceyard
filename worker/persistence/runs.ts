@@ -16,8 +16,9 @@ const RUN_SELECT = `SELECT r.*, w.slug AS workflow_slug, w.name AS workflow_name
                        FROM runs r JOIN workflows w ON w.id = r.workflow_id`;
 
 export interface ListRunsOptions {
-  projectId: string;
+  projectId?: string | null | undefined;
   sessionHash: string;
+  userId?: string | null | undefined;
   status?: RunStatus | undefined;
   workflowId?: string | undefined;
   cursor: { createdAt: string; id: string } | null;
@@ -28,8 +29,24 @@ export async function listRuns(
   db: D1Database,
   options: ListRunsOptions,
 ): Promise<RunWithWorkflowRow[]> {
-  const conditions = ["r.project_id = ?", "(r.owner_session_hash = ? OR r.visibility = 'public')"];
-  const bindings: unknown[] = [options.projectId, options.sessionHash];
+  const conditions: string[] = [];
+  const bindings: unknown[] = [];
+
+  if (options.projectId !== undefined && options.projectId !== null) {
+    conditions.push("r.project_id = ?");
+    bindings.push(options.projectId);
+  }
+  if (options.userId !== undefined && options.userId !== null) {
+    conditions.push(
+      "(r.owner_user_id = ? OR (r.owner_user_id IS NULL AND (r.owner_session_hash = ? OR r.visibility = 'public')))",
+    );
+    bindings.push(options.userId, options.sessionHash);
+  } else {
+    conditions.push(
+      "(r.owner_user_id IS NULL AND (r.owner_session_hash = ? OR r.visibility = 'public'))",
+    );
+    bindings.push(options.sessionHash);
+  }
 
   if (options.status !== undefined) {
     conditions.push("r.status = ?");
@@ -60,16 +77,31 @@ export async function listRuns(
 export async function getRunForSession(
   db: D1Database,
   runId: string,
-  projectId: string,
+  projectId: string | null,
   sessionHash: string,
+  userId: string | null = null,
 ): Promise<RunWithWorkflowRow | null> {
+  const projectCondition = projectId === null ? "" : "AND r.project_id = ?";
+  const ownerCondition =
+    userId === null
+      ? "(r.owner_user_id IS NULL AND (r.owner_session_hash = ? OR r.visibility = 'public'))"
+      : "(r.owner_user_id = ? OR (r.owner_user_id IS NULL AND (r.owner_session_hash = ? OR r.visibility = 'public')))";
+  const bindings =
+    userId === null
+      ? [runId, ...(projectId === null ? [] : [projectId]), sessionHash]
+      : [
+          runId,
+          ...(projectId === null ? [] : [projectId]),
+          userId,
+          sessionHash,
+        ];
   return db
     .prepare(
       `${RUN_SELECT}
-        WHERE r.id = ? AND r.project_id = ?
-          AND (r.owner_session_hash = ? OR r.visibility = 'public')`,
+        WHERE r.id = ? ${projectCondition}
+          AND ${ownerCondition}`,
     )
-    .bind(runId, projectId, sessionHash)
+    .bind(...bindings)
     .first<RunWithWorkflowRow>();
 }
 
@@ -81,10 +113,20 @@ export async function getRunForOwner(
   db: D1Database,
   runId: string,
   sessionHash: string,
+  userId: string | null = null,
 ): Promise<RunRow | null> {
+  const query =
+    userId === null
+      ? `SELECT * FROM runs
+          WHERE id = ? AND owner_user_id IS NULL AND owner_session_hash = ?`
+      : `SELECT * FROM runs
+          WHERE id = ? AND (
+            owner_user_id = ? OR (owner_user_id IS NULL AND owner_session_hash = ?)
+          )`;
+  const bindings = userId === null ? [runId, sessionHash] : [runId, userId, sessionHash];
   return db
-    .prepare(`SELECT * FROM runs WHERE id = ? AND owner_session_hash = ?`)
-    .bind(runId, sessionHash)
+    .prepare(query)
+    .bind(...bindings)
     .first<RunRow>();
 }
 

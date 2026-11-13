@@ -447,7 +447,9 @@ describe("operational endpoints", () => {
       input: { ...VALID_INPUT, title: "Document number seven" },
     });
     expect(seventh.response.status).toBe(429);
-    expect((await readFailure(seventh.response)).code).toBe("SANDBOX_QUOTA_EXCEEDED");
+    const failure = await readFailure(seventh.response);
+    expect(failure.code).toBe("SESSION_HOURLY_QUOTA");
+    expect(failure.message).toContain("hourly execution allowance");
     expect(seventh.response.headers.get("retry-after")).not.toBeNull();
   });
 });

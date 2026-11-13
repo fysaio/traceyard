@@ -12,6 +12,7 @@ export interface RunRow {
   scenario: FailureScenario;
   visibility: "private" | "public";
   owner_session_hash: string | null;
+  owner_user_id: string | null;
   owner_ip_hash: string | null;
   parent_run_id: string | null;
   retry_of_run_id: string | null;

@@ -29,12 +29,12 @@ test("a fresh anonymous session starts with an honest empty state", async ({ pag
 
   await expect(page.getByRole("heading", { level: 1, name: "Overview" })).toBeVisible();
   await expect(page.getByText("No executions yet")).toBeVisible();
-  await expect(page.getByText("No classified failures in this window.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Launch first run" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Execution volume" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Failure classes" })).toHaveCount(0);
 
-  // The session-scoped quotas are real, so a new session starts at zero.
-  await expect(page.getByText("Session daily runs")).toBeVisible();
-  await expect(page.getByText("0/20", { exact: true })).toBeVisible();
+  await expect(page.getByText("20 runs per session each day")).toBeVisible();
+  await expect(page.getByText(/daily runs used/u)).toBeVisible();
 });
 
 test("launching a run persists a real execution with steps, events and output", async ({

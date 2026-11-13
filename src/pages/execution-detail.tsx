@@ -1,21 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  Ban,
-  CheckCircle2,
-  ChevronDown,
-  Circle,
-  Clock3,
-  Copy,
-  ExternalLink,
-  Loader2,
-  MinusCircle,
-  RefreshCw,
-  RotateCcw,
-  Terminal,
-  XCircle,
-} from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import type { EventView, RunDetail, StepView } from "../../shared/contracts/api";
@@ -24,6 +8,7 @@ import { PageHeader } from "../components/page-header";
 import { StatusBadge } from "../components/status-badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Icon, type IconName } from "../components/ui/icon";
 import { Skeleton } from "../components/ui/skeleton";
 import { api, ApiClientError } from "../lib/api";
 import { cn, formatDate, formatDuration, formatRelative, shortId } from "../lib/utils";
@@ -116,7 +101,7 @@ export function ExecutionDetailPage() {
         to="/executions"
         className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink"
       >
-        <ArrowLeft className="size-3.5" /> Back to executions
+        <Icon name="arrow-left" className="text-xs" /> Back to executions
       </Link>
 
       <PageHeader
@@ -140,12 +125,12 @@ export function ExecutionDetailPage() {
                 void run.refetch();
                 void events.refetch();
               }}
-              icon={<RefreshCw className={run.isFetching ? "size-4 animate-spin" : "size-4"} />}
+              icon={<Icon name="refresh" className={run.isFetching ? "animate-spin" : ""} />}
             />
             {canCancel ? (
               <Button
                 variant="danger"
-                icon={<Ban className="size-3.5" />}
+                icon={<Icon name="ban" />}
                 loading={cancel.isPending}
                 onClick={() => cancel.mutate()}
               >
@@ -155,7 +140,7 @@ export function ExecutionDetailPage() {
             {canRetry ? (
               <Button
                 variant="primary"
-                icon={<RotateCcw className="size-3.5" />}
+                icon={<Icon name="retry" />}
                 loading={retry.isPending}
                 onClick={() => retry.mutate()}
               >
@@ -167,7 +152,7 @@ export function ExecutionDetailPage() {
       />
 
       {replayed ? (
-        <div className="mb-4 rounded-lg border border-sky-400/25 bg-sky-400/5 px-4 py-2.5 text-xs text-sky-200">
+        <div className="mb-4 rounded-lg border border-line-strong bg-raised px-4 py-2.5 text-xs text-muted">
           Idempotency key matched an existing request. The original run was returned instead of
           creating a duplicate.
         </div>
@@ -206,7 +191,7 @@ export function ExecutionDetailPage() {
             <Card className="mb-4 border-danger/30 bg-danger/5">
               <CardContent className="flex flex-col gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <XCircle className="size-4 text-danger" />
+                  <Icon name="x-circle" className="text-sm text-danger" />
                   <span className="text-sm font-medium text-danger">{data.error.message}</span>
                 </div>
                 <div className="flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-wider text-muted">
@@ -303,7 +288,7 @@ export function ExecutionDetailPage() {
                     {canCancel ? "Polling every 2s." : "Terminal state."}
                   </CardDescription>
                 </div>
-                <Terminal className="size-4 text-faint" />
+                <Icon name="terminal" className="text-sm text-faint" />
               </CardHeader>
               <CardContent className="px-0">
                 {events.isPending ? (
@@ -354,25 +339,24 @@ function Detail({ label, value, mono = false }: { label: string; value: string; 
 }
 
 const STEP_ICON = {
-  PENDING: Circle,
-  RUNNING: Loader2,
-  SUCCEEDED: CheckCircle2,
-  FAILED: XCircle,
-  SKIPPED: MinusCircle,
-  CANCELLED: Ban,
-} as const;
+  PENDING: "circle",
+  RUNNING: "loader",
+  SUCCEEDED: "check-circle",
+  FAILED: "x-circle",
+  SKIPPED: "minus",
+  CANCELLED: "ban",
+} as const satisfies Record<StepView["status"], IconName>;
 
 const STEP_COLOR = {
   PENDING: "text-faint",
-  RUNNING: "text-sky-300",
-  SUCCEEDED: "text-emerald-300",
-  FAILED: "text-rose-300",
+  RUNNING: "text-ink",
+  SUCCEEDED: "text-muted",
+  FAILED: "text-ink",
   SKIPPED: "text-faint",
   CANCELLED: "text-muted",
 } as const;
 
 function StepTimeline({ step, isLast }: { step: StepView; isLast: boolean }) {
-  const Icon = STEP_ICON[step.status];
   return (
     <div className="relative flex gap-3">
       {isLast ? null : (
@@ -383,8 +367,9 @@ function StepTimeline({ step, isLast }: { step: StepView; isLast: boolean }) {
       )}
       <div className="relative z-10 mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-line bg-canvas">
         <Icon
+          name={STEP_ICON[step.status]}
           className={cn(
-            "size-3.5",
+            "text-[11px]",
             STEP_COLOR[step.status],
             step.status === "RUNNING" && "animate-spin",
           )}
@@ -402,7 +387,10 @@ function StepTimeline({ step, isLast }: { step: StepView; isLast: boolean }) {
               {step.attemptCount}/{step.maxAttempts} attempts
             </span>
             <span>{formatDuration(step.durationMs)}</span>
-            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+            <Icon
+              name="chevron-down"
+              className="text-[10px] transition-transform group-open:rotate-180"
+            />
           </span>
         </summary>
         <div className="flex flex-col gap-3 border-t border-line px-3 py-3">
@@ -468,16 +456,12 @@ function StepTimeline({ step, isLast }: { step: StepView; isLast: boolean }) {
 }
 
 function EventRow({ event }: { event: EventView }) {
-  const tone =
-    event.level === "error"
-      ? "bg-rose-400"
-      : event.level === "warn"
-        ? "bg-amber-400"
-        : "bg-sky-400";
+  const marker =
+    event.level === "error" ? "x-circle" : event.level === "warn" ? "triangle-alert" : "activity";
   return (
     <li className="border-b border-line/60 px-5 py-2.5 last:border-0">
       <div className="flex items-start gap-2.5">
-        <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", tone)} />
+        <Icon name={marker} className="mt-0.5 shrink-0 text-[10px] text-muted" />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
             <span className="font-mono text-[10px] text-accent/80">{event.type}</span>
@@ -521,7 +505,7 @@ function JsonCard({ title, value }: { title: string; value: unknown }) {
           onClick={() => void copy()}
           className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-faint hover:bg-raised hover:text-ink"
         >
-          <Copy className="size-3" />
+          <Icon name="copy" />
           {copied ? "copied" : "copy"}
         </button>
       </CardHeader>
@@ -575,21 +559,21 @@ export function ExecutionLink({ id }: { id: string }) {
       to={`/executions/${id}`}
       className="inline-flex items-center gap-1 text-accent hover:underline"
     >
-      {shortId(id)} <ExternalLink className="size-3" />
+      {shortId(id)} <Icon name="external" className="text-[10px]" />
     </Link>
   );
 }
 
 export function RunStateIcon({ status }: { status: RunDetail["status"] }) {
-  const Icon =
+  const icon: IconName =
     status === "SUCCEEDED"
-      ? CheckCircle2
+      ? "check-circle"
       : status === "FAILED"
-        ? XCircle
+        ? "x-circle"
         : status === "CANCELLED"
-          ? Ban
+          ? "ban"
           : status === "RUNNING"
-            ? Loader2
-            : Clock3;
-  return <Icon className="size-4" />;
+            ? "loader"
+            : "clock";
+  return <Icon name={icon} />;
 }

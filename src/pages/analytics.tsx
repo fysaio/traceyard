@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, BarChart3, RefreshCw, ShieldCheck, Timer, TrendingUp } from "lucide-react";
 
 import { ErrorState } from "../components/empty-state";
 import { MetricCard } from "../components/metric-card";
@@ -10,6 +9,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Select } from "../components/ui/input";
 import { Skeleton, SkeletonRows } from "../components/ui/skeleton";
+import { Icon } from "../components/ui/icon";
 import { api, ApiClientError } from "../lib/api";
 import { formatDuration, formatNumber, formatPercent } from "../lib/utils";
 
@@ -49,9 +49,7 @@ export function AnalyticsPage() {
               size="icon"
               aria-label="Refresh analytics"
               onClick={() => void analytics.refetch()}
-              icon={
-                <RefreshCw className={analytics.isFetching ? "size-4 animate-spin" : "size-4"} />
-              }
+              icon={<Icon name="refresh" className={analytics.isFetching ? "animate-spin" : ""} />}
             />
           </>
         }
@@ -73,26 +71,26 @@ export function AnalyticsPage() {
           label="Throughput / day"
           value={data === undefined ? "—" : formatNumber(data.throughputPerDay, 2)}
           hint={`${data?.windowDays ?? days}-day average`}
-          icon={<TrendingUp className="size-4" />}
+          icon={<Icon name="trending" />}
         />
         <MetricCard
           label="Success rate"
           value={data === undefined ? "—" : formatPercent(data.totals.successRate)}
           hint="All terminal runs in session"
-          icon={<ShieldCheck className="size-4" />}
+          icon={<Icon name="shield" />}
           tone="accent"
         />
         <MetricCard
           label="Run P95"
           value={data === undefined ? "—" : formatDuration(data.executionDuration.p95Ms)}
           hint={data === undefined ? undefined : `${data.executionDuration.sampleSize} samples`}
-          icon={<Timer className="size-4" />}
+          icon={<Icon name="timer" />}
         />
         <MetricCard
           label="Total executions"
           value={data === undefined ? "—" : formatNumber(data.totals.runs)}
           hint={`${data?.totals.succeeded ?? 0} succeeded · ${data?.totals.failed ?? 0} failed`}
-          icon={<Activity className="size-4" />}
+          icon={<Icon name="activity" />}
         />
       </section>
 
@@ -156,7 +154,7 @@ export function AnalyticsPage() {
               <SkeletonRows rows={3} />
             ) : data.failureClasses.length === 0 ? (
               <div className="flex items-center gap-2 rounded-lg border border-dashed border-line px-4 py-8 text-xs text-muted">
-                <ShieldCheck className="size-4 text-emerald-400/80" />
+                <Icon name="shield" className="text-sm text-muted" />
                 No classified failures in this window.
               </div>
             ) : (
@@ -170,7 +168,7 @@ export function AnalyticsPage() {
                       </span>
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-raised">
                         <div
-                          className="h-full rounded-full bg-rose-400/70"
+                          className="h-full rounded-full bg-ink/65"
                           style={{ width: `${Math.max(4, (failure.count / max) * 100)}%` }}
                         />
                       </div>
@@ -197,7 +195,7 @@ export function AnalyticsPage() {
               <SkeletonRows rows={4} />
             ) : data.stepDurations.length === 0 ? (
               <div className="flex items-center gap-2 rounded-lg border border-dashed border-line px-4 py-8 text-xs text-muted">
-                <BarChart3 className="size-4 text-faint" />
+                <Icon name="bar-chart" className="text-sm text-faint" />
                 No completed steps yet.
               </div>
             ) : (
@@ -309,7 +307,7 @@ function Quota({ label, used, limit }: { label: string; used: number; limit: num
       </span>
       <div className="h-1.5 overflow-hidden rounded-full bg-raised">
         <div
-          className={ratio >= 0.8 ? "h-full bg-amber-400/80" : "h-full bg-accent/70"}
+          className={ratio >= 0.8 ? "h-full bg-ink" : "h-full bg-ink/60"}
           style={{ width: `${ratio * 100}%` }}
         />
       </div>
