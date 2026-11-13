@@ -1,0 +1,147 @@
+import type {
+  AnalyticsPayload,
+  ApiFailure,
+  CancelRunResult,
+  EventListPage,
+  HealthPayload,
+  LaunchRunResult,
+  OverviewPayload,
+  RetryRunResult,
+  RunDetail,
+  RunListPage,
+  SandboxStatus,
+  WorkflowSummary,
+} from "../../shared/contracts/api";
+import type { RunStatus } from "../../shared/domain/status";
+import type { FailureScenario } from "../../shared/workflow/document";
+
+interface ApiSuccess<T> {
+  data: T;
+  meta: { requestId: string; replayed?: boolean };
+}
+
+export class ApiClientError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly details: unknown;
+
+  constructor(status: number, code: string, message: string, details?: unknown) {
+    super(message);
+    this.name = "ApiClientError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<T>> {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      Accept: "application/json",
+      ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...init?.headers,
+    },
+  });
+
+  const text = await response.text();
+  let parsed: unknown = null;
+  if (text.length > 0) {
+    try {
+      parsed = JSON.parse(text) as unknown;
+    } catch {
+      throw new ApiClientError(
+        response.status,
+        "INVALID_RESPONSE",
+        "The server returned an unreadable response.",
+      );
+    }
+  }
+
+  if (!response.ok) {
+    const failure = parsed as ApiFailure | null;
+    throw new ApiClientError(
+      response.status,
+      failure?.error.code ?? "REQUEST_FAILED",
+      failure?.error.message ?? `Request failed with status ${response.status}.`,
+      failure?.error.details,
+    );
+  }
+
+  if (parsed === null || typeof parsed !== "object" || !("data" in parsed)) {
+    throw new ApiClientError(response.status, "INVALID_RESPONSE", "The server returned no data.");
+  }
+
+  return parsed as ApiSuccess<T>;
+}
+
+export interface RunListParams {
+  status?: RunStatus | undefined;
+  workflowId?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
+}
+
+export const api = {
+  health: (): Promise<HealthPayload> =>
+    request<HealthPayload>("/api/health").then((body) => body.data),
+
+  workflows: (): Promise<WorkflowSummary[]> =>
+    request<{ items: WorkflowSummary[] }>("/api/workflows").then((body) => body.data.items),
+
+  workflow: (id: string): Promise<WorkflowSummary> =>
+    request<WorkflowSummary>(`/api/workflows/${encodeURIComponent(id)}`).then((body) => body.data),
+
+  overview: (days: number): Promise<OverviewPayload> =>
+    request<OverviewPayload>(`/api/overview?days=${days}`).then((body) => body.data),
+
+  analytics: (days: number): Promise<AnalyticsPayload> =>
+    request<AnalyticsPayload>(`/api/analytics?days=${days}`).then((body) => body.data),
+
+  sandbox: (): Promise<SandboxStatus> =>
+    request<SandboxStatus>("/api/sandbox").then((body) => body.data),
+
+  runs: (params: RunListParams = {}): Promise<RunListPage> => {
+    const search = new URLSearchParams();
+    if (params.status !== undefined) search.set("status", params.status);
+    if (params.workflowId !== undefined) search.set("workflowId", params.workflowId);
+    if (params.cursor !== undefined) search.set("cursor", params.cursor);
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    const query = search.toString();
+    return request<RunListPage>(`/api/runs${query.length === 0 ? "" : `?${query}`}`).then(
+      (body) => body.data,
+    );
+  },
+
+  run: (id: string): Promise<RunDetail> =>
+    request<RunDetail>(`/api/runs/${encodeURIComponent(id)}`).then((body) => body.data),
+
+  events: (id: string, after = 0): Promise<EventListPage> =>
+    request<EventListPage>(
+      `/api/runs/${encodeURIComponent(id)}/events?after=${after}&limit=200`,
+    ).then((body) => body.data),
+
+  launch: (
+    input: { workflowId: string; input: unknown; scenario: FailureScenario },
+    idempotencyKey: string,
+  ): Promise<{ result: LaunchRunResult; replayed: boolean }> =>
+    request<LaunchRunResult>("/api/runs", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(input),
+    }).then((body) => ({ result: body.data, replayed: body.meta.replayed === true })),
+
+  cancel: (id: string): Promise<CancelRunResult> =>
+    request<CancelRunResult>(`/api/runs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    }).then((body) => body.data),
+
+  retry: (id: string): Promise<RetryRunResult> =>
+    request<RetryRunResult>(`/api/runs/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    }).then((body) => body.data),
+};
+
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
