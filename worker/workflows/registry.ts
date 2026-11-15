@@ -1,3 +1,4 @@
+import { graphSchema, graphLayers } from "../../shared/workflow/graph";
 import { DOCUMENT_WORKFLOW, validateDocumentInput } from "../../shared/workflow/document";
 import type { WorkflowCatalogEntry } from "../persistence/catalog";
 
@@ -45,6 +46,26 @@ export function getWorkflowRuntime(slug: string): WorkflowRuntime | null {
 }
 
 export function assertCatalogMatchesRuntime(entry: WorkflowCatalogEntry): WorkflowRuntime {
+  if (entry.version.graph_json) {
+    const graph = graphSchema.parse(JSON.parse(entry.version.graph_json));
+    return {
+      slug: entry.workflow.slug,
+      version: entry.version.version,
+      steps: graphLayers(graph)
+        .flat()
+        .map((n, i) => ({
+          key: n.id,
+          name: n.name,
+          ordinal: i + 1,
+          maxAttempts: 1,
+          timeoutMs: 10000,
+          baseDelayMs: 0,
+          backoff: "fixed" as const,
+          maxDelayMs: 0,
+        })),
+      validateInput: (value) => value,
+    };
+  }
   const runtime = getWorkflowRuntime(entry.workflow.slug);
   if (runtime === null) {
     throw new Error(`Workflow "${entry.workflow.slug}" is registered in D1 but has no runtime.`);

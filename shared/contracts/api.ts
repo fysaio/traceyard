@@ -1,14 +1,11 @@
+import type { WorkflowGraph } from "../workflow/graph";
 import { z } from "zod";
 
 import type { ErrorClass } from "../domain/errors";
 import type { BackoffStrategy } from "../domain/retry";
 import { RUN_STATUSES } from "../domain/status";
 import type { StepStatus } from "../domain/status";
-import {
-  FAILURE_SCENARIOS,
-  type DocumentStepKey,
-  type FailureScenario,
-} from "../workflow/document";
+import { FAILURE_SCENARIOS, type FailureScenario } from "../workflow/document";
 
 /* ------------------------------------------------------------------------- */
 /* Requests                                                                   */
@@ -18,6 +15,7 @@ export const launchRunRequestSchema = z
   .object({
     workflowId: z.string().trim().min(1).max(80),
     projectId: z.string().trim().min(1).max(80).optional(),
+    version: z.number().int().positive().optional(),
     input: z.unknown(),
     scenario: z.enum(FAILURE_SCENARIOS).default("success"),
   })
@@ -29,6 +27,7 @@ export const runListQuerySchema = z
   .object({
     status: z.enum(RUN_STATUSES).optional(),
     workflowId: z.string().trim().max(80).optional(),
+    projectId: z.string().trim().min(1).max(80).optional(),
     cursor: z.string().max(512).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(25),
   })
@@ -75,7 +74,7 @@ export interface ErrorView {
 }
 
 export interface WorkflowStepContract {
-  key: DocumentStepKey;
+  key: string;
   name: string;
   ordinal: number;
   description: string;
@@ -89,6 +88,7 @@ export interface WorkflowStepContract {
 }
 
 export interface WorkflowSummary {
+  graph?: WorkflowGraph | null;
   id: string;
   slug: string;
   name: string;

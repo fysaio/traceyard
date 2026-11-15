@@ -258,3 +258,77 @@ dialog.launch-surface .modal-head {
 .product-main > .connected-panel + .connected-panel {
   margin-top: 28px;
 }
+.draft-library {
+  margin-bottom: 28px;
+}
+.studio-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+}
+.studio-editor-layout > div {
+  min-width: 0;
+}
+.studio-editor-layout aside {
+  align-self: start;
+  max-height: 80dvh;
+  overflow: auto;
+}
+.studio-editor-layout aside label {
+  display: block;
+  margin-top: 20px;
+  margin-bottom: 8px;
+}
+.studio-add {
+  margin-bottom: 20px;
+}
+.studio-real-viewport {
+  height: 500px;
+  overflow: auto;
+  background: var(--surface);
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  overscroll-behavior: contain;
+}
+.studio-real-graph {
+  position: relative;
+}
+.studio-real-graph .graph-node {
+  position: absolute;
+  width: 216px;
+  min-height: 90px;
+  touch-action: none;
+  text-align: left;
+}
+.connection-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+.connection-list > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.connection-list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.connection-list .btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  min-height: 38px;
+}
+@media (max-width: 1000px) {
+  .studio-editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .studio-editor-layout aside {
+    max-height: none;
+  }
+  .studio-real-viewport {
+    height: 420px;
+  }
+}
+.analytics-table{overflow:auto;max-width:100%}.analytics-table table{width:100%;border-collapse:separate;border-spacing:0 12px;text-align:left;white-space:nowrap}.analytics-table th,.analytics-table td{padding:10px 16px}.analytics-table th:first-child,.analytics-table td:first-child{padding-left:0}

@@ -28,7 +28,7 @@ export function OverviewPage() {
       return data.totals.queued + data.totals.running + data.totals.cancelling > 0 ? 4_000 : false;
     },
   });
-  const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+  const workflows = useQuery({ queryKey: ["workflows"], queryFn: () => api.workflows() });
   const session = useQuery({ queryKey: ["auth-session"], queryFn: api.authSession });
   const sandbox = useQuery({ queryKey: ["sandbox"], queryFn: api.sandbox });
 

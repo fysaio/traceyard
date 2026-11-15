@@ -106,6 +106,7 @@ export interface WorkflowRow {
 }
 
 export interface WorkflowVersionRow {
+  graph_json?: string | null;
   id: string;
   workflow_id: string;
   version: number;

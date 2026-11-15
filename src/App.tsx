@@ -1,5 +1,15 @@
+import { Studio } from "./pages/studio";
+import { studioApi } from "./lib/studio-api";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
-import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   api,
@@ -258,10 +268,15 @@ function Workspace({ session }: { session: AuthSession }) {
             <Routes>
               <Route path="/" element={<Workflows projectId={projectId} />} />
               <Route path="/workflows" element={<Navigate to="/" replace />} />
-              <Route path="/workflow/:id" element={<Workflow />} />
-              <Route path="/executions" element={<Executions />} />
+              <Route path="/workflow/:id" element={<Workflow projectId={projectId} />} />
+              <Route
+                path="/executions"
+                element={<Executions key={projectId} projectId={projectId} />}
+              />
               <Route path="/executions/:id" element={<Execution />} />
-              <Route path="/laboratory" element={<Laboratory />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/laboratory" element={<Laboratory projectId={projectId} />} />
+              <Route path="/studio/:id" element={<Studio projectId={projectId} />} />
               <Route path="/settings" element={<Settings session={session} />} />
               <Route
                 path="*"
@@ -280,7 +295,31 @@ function Workspace({ session }: { session: AuthSession }) {
   );
 }
 function Workflows({ projectId }: { projectId: string }) {
-  const catalog = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+  const navigate = useNavigate(),
+    cache = useQueryClient();
+  const drafts = useQuery({
+    queryKey: ["studio-list", projectId],
+    queryFn: () => studioApi.list(projectId),
+    enabled: !!projectId,
+  });
+  const create = useMutation({
+    mutationFn: () => studioApi.create(projectId, "Untitled workflow"),
+    onSuccess: (w) => {
+      void cache.invalidateQueries({ queryKey: ["studio-list", projectId] });
+      navigate("/studio/" + w.id);
+    },
+  });
+  const archive = useMutation({
+    mutationFn: (id: string) => studioApi.archive(projectId, id),
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: ["studio-list", projectId] });
+      void cache.invalidateQueries({ queryKey: ["workflows"] });
+    },
+  });
+  const catalog = useQuery({
+    queryKey: ["workflows", projectId],
+    queryFn: () => api.workflows(projectId),
+  });
   const saved = useQuery({
     queryKey: ["saved", projectId],
     queryFn: () => api.savedWorkflows(projectId),
@@ -292,9 +331,50 @@ function Workflows({ projectId }: { projectId: string }) {
     [launch, setLaunch] = useState<WorkflowSummary | null>(null);
   return (
     <>
-      <Heading title="Workflows">
+      <Heading
+        title="Workflows"
+        actions={
+          <button
+            className="btn primary"
+            disabled={create.isPending || !projectId}
+            onClick={() => create.mutate()}
+          >
+            + Create workflow
+          </button>
+        }
+      >
         Choose a published workflow and run it with your own input.
       </Heading>
+      {(create.error || archive.error) && <Notice error={create.error || archive.error} />}
+      {drafts.error && <Notice error={drafts.error} />}
+      {!!drafts.data?.items.length && (
+        <section className="connected-panel draft-library">
+          <h2>Your workflow drafts</h2>
+          {drafts.data.items.map((w) => (
+            <div key={w.id} className="stat-row">
+              <div>
+                <strong>{w.name}</strong>
+                <p>{w.current_version ? "Published v" + w.current_version : "Not published"}</p>
+              </div>
+              <div className="actions">
+                <Link className="btn" to={"/studio/" + w.id}>
+                  Edit in Studio
+                </Link>
+                <button
+                  className="btn"
+                  disabled={archive.isPending}
+                  onClick={() => {
+                    if (confirm("Archive " + w.name + "? Existing execution history is retained."))
+                      archive.mutate(w.id);
+                  }}
+                >
+                  Archive
+                </button>
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
       <div className="content-toolbar">
         <div className="product-tabs" role="tablist">
           <button role="tab" aria-selected={tab === "catalog"} onClick={() => setTab("catalog")}>
@@ -393,6 +473,21 @@ function SavedConfigurations({
   search: string;
 }) {
   const [launch, setLaunch] = useState<SavedWorkflowSummary | null>(null);
+  const [target, setTarget] = useState<WorkflowSummary | null>(null);
+  const open = useMutation({
+    mutationFn: async (row: SavedWorkflowSummary) => {
+      const definition = row.definition as Record<string, unknown>;
+      return api.workflow(
+        String(definition.runtimeWorkflowId),
+        projectId,
+        Number(definition.runtimeVersion),
+      );
+    },
+    onSuccess: (workflow, row) => {
+      setTarget(workflow);
+      setLaunch(row);
+    },
+  });
   const cache = useQueryClient();
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteSavedWorkflow(projectId, id),
@@ -410,9 +505,9 @@ function SavedConfigurations({
     catalog.find(
       (w) =>
         w.id === runtimeId(row) &&
-        (row.definition as Record<string, unknown>).runtimeVersion === w.version,
+        Number.isSafeInteger((row.definition as Record<string, unknown>).runtimeVersion) &&
+        Number((row.definition as Record<string, unknown>).runtimeVersion) > 0,
     );
-  const target = launch ? compatible(launch) : null;
   return (
     <>
       {rows.length === 0 ? (
@@ -440,7 +535,11 @@ function SavedConfigurations({
                   </div>
                 </div>
                 <div className="workflow-actions">
-                  <button className="btn" disabled={!compatible(w)} onClick={() => setLaunch(w)}>
+                  <button
+                    className="btn"
+                    disabled={!compatible(w) || open.isPending}
+                    onClick={() => open.mutate(w)}
+                  >
                     Run
                   </button>
                   <button
@@ -458,6 +557,7 @@ function SavedConfigurations({
         </div>
       )}
       {remove.isError && <Notice error={remove.error} />}
+      {open.isError && <Notice error={open.error} />}
       {launch && target && (
         <Launch
           workflow={target}
@@ -469,9 +569,14 @@ function SavedConfigurations({
     </>
   );
 }
-function Workflow() {
+function Workflow({ projectId }: { projectId: string }) {
+  const [searchParams] = useSearchParams();
+  const version = searchParams.has("version") ? Number(searchParams.get("version")) : undefined;
   const { id = "" } = useParams();
-  const workflow = useQuery({ queryKey: ["workflow", id], queryFn: () => api.workflow(id) });
+  const workflow = useQuery({
+    queryKey: ["workflow", id, projectId, version],
+    queryFn: () => api.workflow(id, projectId, version),
+  });
   const [launch, setLaunch] = useState(false);
   if (workflow.isPending) return <Loading />;
   if (workflow.isError) return <Notice error={workflow.error} />;
@@ -492,8 +597,10 @@ function Workflow() {
         {w.description}
       </Heading>
       <p className="hint">
-        Published version {w.version}. This pipeline runs deterministic document processing; it does
-        not call an AI provider.
+        Published version {w.version}.{" "}
+        {w.graph
+          ? "This graph runs in the durable workflow engine."
+          : "This pipeline performs deterministic document processing."}
       </p>
       <div className="runtime-steps">
         {w.steps.map((s, i) => (
@@ -510,7 +617,7 @@ function Workflow() {
           </article>
         ))}
       </div>
-      {launch && <Launch workflow={w} close={() => setLaunch(false)} />}
+      {launch && <Launch workflow={w} projectId={projectId} close={() => setLaunch(false)} />}
     </>
   );
 }
@@ -539,6 +646,9 @@ function Launch({
       trigger?.focus();
     };
   }, []);
+  const [graphInput, setGraphInput] = useState(JSON.stringify(initialInput ?? {}, null, 2));
+  const inputValue = () =>
+    workflow.graph ? (JSON.parse(graphInput) as unknown) : { title, document };
   const initial = documentInputSchema.safeParse(initialInput);
   const [title, setTitle] = useState(initial.success ? initial.data.title : ""),
     [document, setDocument] = useState(initial.success ? initial.data.document : "");
@@ -551,7 +661,8 @@ function Launch({
         {
           workflowId: workflow.id,
           ...(projectId ? { projectId } : {}),
-          input: { title, document },
+          version: workflow.version,
+          input: inputValue(),
           scenario: fault,
         },
         idempotencyKey,
@@ -570,7 +681,8 @@ function Launch({
         definition: {
           runtimeWorkflowId: workflow.id,
           runtimeVersion: workflow.version,
-          input: { title, document },
+          version: workflow.version,
+          input: inputValue(),
         },
       }),
     onSuccess: () => {
@@ -580,6 +692,16 @@ function Launch({
     },
   });
   const validate = () => {
+    if (workflow.graph) {
+      try {
+        JSON.parse(graphInput);
+        setError("");
+        return true;
+      } catch {
+        setError("Enter valid JSON input.");
+        return false;
+      }
+    }
     const parsed = documentInputSchema.safeParse({ title, document });
     if (!parsed.success) {
       setError(parsed.error.issues.map((i) => i.message).join(" "));
@@ -611,36 +733,54 @@ function Launch({
         </button>
       </div>
       <form onSubmit={submit}>
-        <div className="field">
-          <label htmlFor="document-title">Document title</label>
-          <input
-            autoFocus
-            id="document-title"
-            required
-            minLength={3}
-            maxLength={120}
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              setKey(newIdempotencyKey());
-            }}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="document-body">Document</label>
-          <textarea
-            id="document-body"
-            rows={7}
-            required
-            minLength={24}
-            maxLength={10000}
-            value={document}
-            onChange={(e) => {
-              setDocument(e.target.value);
-              setKey(newIdempotencyKey());
-            }}
-          />
-        </div>
+        {workflow.graph ? (
+          <div className="field">
+            <label htmlFor="graph-input">JSON input</label>
+            <textarea
+              id="graph-input"
+              rows={10}
+              value={graphInput}
+              onChange={(e) => {
+                setGraphInput(e.target.value);
+                setKey(newIdempotencyKey());
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            {" "}
+            <div className="field">
+              <label htmlFor="document-title">Document title</label>
+              <input
+                autoFocus
+                id="document-title"
+                required
+                minLength={3}
+                maxLength={120}
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  setKey(newIdempotencyKey());
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="document-body">Document</label>
+              <textarea
+                id="document-body"
+                rows={7}
+                required
+                minLength={24}
+                maxLength={10000}
+                value={document}
+                onChange={(e) => {
+                  setDocument(e.target.value);
+                  setKey(newIdempotencyKey());
+                }}
+              />
+            </div>
+          </>
+        )}
         {fault !== "success" && (
           <p className="hint">Controlled failure scenario: {label(fault)}.</p>
         )}
@@ -681,19 +821,21 @@ function Launch({
     </dialog>
   );
 }
-function Executions() {
+function Executions({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState("");
   const runs = useQuery({
-    queryKey: ["runs", status],
-    queryFn: () => api.runs(status ? { status: status as RunDetail["status"] } : {}),
+    queryKey: ["runs", projectId, status],
+    queryFn: () =>
+      api.runs({ projectId, ...(status ? { status: status as RunDetail["status"] } : {}) }),
     refetchInterval: 2500,
   });
   const [cursor, setCursor] = useState<string | null>(null);
   const more = useQuery({
-    queryKey: ["run-page", status, cursor],
+    queryKey: ["run-page", projectId, status, cursor],
     queryFn: () =>
       api.runs({
         ...(status ? { status: status as RunDetail["status"] } : {}),
+        projectId,
         cursor: cursor!,
         limit: 25,
       }),
@@ -702,7 +844,16 @@ function Executions() {
   const data = cursor ? more : runs;
   return (
     <>
-      <Heading title="Executions">Your account’s persisted execution history.</Heading>
+      <Heading
+        title="Executions"
+        actions={
+          <Link className="btn" to="/analytics">
+            Account analytics
+          </Link>
+        }
+      >
+        Persisted execution history for the selected project.
+      </Heading>
       <div className="content-toolbar">
         <div className="field">
           <label htmlFor="run-status">Status</label>
@@ -833,7 +984,7 @@ function Execution() {
                 Cancel execution
               </button>
             )}
-            {["FAILED", "CANCELLED"].includes(r.status) && (
+            {r.status === "FAILED" && (
               <button
                 className="btn primary"
                 disabled={retry.isPending}
@@ -1027,8 +1178,11 @@ function Execution() {
     </>
   );
 }
-function Laboratory() {
-  const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+function Laboratory({ projectId }: { projectId: string }) {
+  const workflows = useQuery({
+    queryKey: ["workflows", projectId],
+    queryFn: () => api.workflows(projectId),
+  });
   const [fault, setFault] = useState<FailureScenario>("retryable_failure"),
     [launch, setLaunch] = useState(false);
   return (
@@ -1058,15 +1212,20 @@ function Laboratory() {
         </div>
         <button
           className="btn primary"
-          disabled={!workflows.data?.[0]}
+          disabled={!workflows.data?.find((w) => w.slug === "document-intelligence")}
           onClick={() => setLaunch(true)}
         >
           Configure execution
         </button>
         {workflows.isError && <Notice error={workflows.error} />}
       </section>
-      {launch && workflows.data?.[0] && (
-        <Launch workflow={workflows.data[0]} fault={fault} close={() => setLaunch(false)} />
+      {launch && workflows.data?.find((w) => w.slug === "document-intelligence") && (
+        <Launch
+          projectId={projectId}
+          workflow={workflows.data.find((w) => w.slug === "document-intelligence")!}
+          fault={fault}
+          close={() => setLaunch(false)}
+        />
       )}
     </>
   );
@@ -1110,10 +1269,120 @@ function Settings({ session }: { session: AuthSession }) {
           D1. Saved configurations are stored in your project.
         </p>
         <p>
-          Graph publishing, model providers, approval tasks and webhooks do not yet have executable
-          backend contracts. They are unavailable in this release.
+          Studio publishes versioned data workflows. Model providers, approval tasks and webhooks
+          are still being implemented.
         </p>
       </section>
+    </>
+  );
+}
+
+function Analytics() {
+  const [days, setDays] = useState(14);
+  const query = useQuery({
+    queryKey: ["analytics", days],
+    queryFn: () => api.analytics(days),
+    refetchInterval: 30000,
+  });
+  return (
+    <>
+      <Link className="back" to="/executions">
+        ← Executions
+      </Link>
+      <Heading title="Account analytics">
+        Metrics from persisted executions across your account.
+      </Heading>
+      <div className="field">
+        <label htmlFor="analytics-days">Time window</label>
+        <select id="analytics-days" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          {[7, 14, 30].map((n) => (
+            <option key={n} value={n}>
+              Last {n} days
+            </option>
+          ))}
+        </select>
+      </div>
+      {query.isPending ? (
+        <Loading />
+      ) : query.isError ? (
+        <Notice error={query.error} retry={() => void query.refetch()} />
+      ) : (
+        <>
+          <div className="metrics">
+            {[
+              ["Window", query.data.windowDays + " days"],
+              [
+                "Throughput",
+                query.data.throughputPerDay === null
+                  ? "—"
+                  : query.data.throughputPerDay.toFixed(1) + " / day",
+              ],
+              ["Execution p95", duration(query.data.executionDuration.p95Ms)],
+              ["Queue p95", duration(query.data.queueDelay.p95Ms)],
+            ].map(([name, value]) => (
+              <div key={name}>
+                <span>{name}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+          <section className="connected-panel">
+            <h2>Execution history</h2>
+            <div className="analytics-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Runs</th>
+                    <th>Succeeded</th>
+                    <th>Failed</th>
+                    <th>Cancelled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {query.data.trend.map((row) => (
+                    <tr key={row.date}>
+                      <td>{row.date}</td>
+                      <td>{row.total}</td>
+                      <td>{row.succeeded}</td>
+                      <td>{row.failed}</td>
+                      <td>{row.cancelled}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="connected-panel section">
+            <h2>Failure classes</h2>
+            {query.data.failureClasses.length ? (
+              query.data.failureClasses.map((row) => (
+                <div className="stat-row" key={row.class}>
+                  <strong>{row.class}</strong>
+                  <span>{row.count}</span>
+                </div>
+              ))
+            ) : (
+              <p>No recorded failures in this window.</p>
+            )}
+          </section>
+          <section className="connected-panel section">
+            <h2>Step performance</h2>
+            {query.data.stepDurations.length ? (
+              query.data.stepDurations.map((row) => (
+                <div className="stat-row" key={row.stepKey}>
+                  <strong>{row.name}</strong>
+                  <span>
+                    {row.sampleSize} samples · p95 {duration(row.p95Ms)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p>Complete a workflow to see step timings.</p>
+            )}
+          </section>
+        </>
+      )}
     </>
   );
 }
