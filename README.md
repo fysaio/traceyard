@@ -6,7 +6,9 @@ This branch contains the integrated application. The separate chatgpt.site UI pr
 
 ## Product flow
 
-Sign in with GitHub → choose a project → create or import a workflow → configure steps → publish a version → run it → inspect its output, attempts and events.
+Sign in with GitHub → choose or create a project → create a workflow, use a template, or import exported JSON → configure steps → publish a version → run it → inspect retained output and trace evidence.
+
+Already have an application? Select **Connect application** on Workflows. Create a project-scoped server key, use the supplied TypeScript or direct HTTP example, and send a real span. Connection status changes only after ingestion. Workflow spans appear in My workflows with an Inspect trace action; they are observations from your application, not Studio definitions that Traceyard can launch. GitHub sign-in authenticates your identity; it does not import repositories.
 
 | Screen                   | Working behavior                                                                                                                       |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -18,7 +20,7 @@ Sign in with GitHub → choose a project → create or import a workflow → con
 | Laboratory               | Stored experiment definitions, bounded repeat groups, real assertions and side-by-side execution comparison                            |
 | Settings / project tools | Sessions, scoped API keys, schedules, outgoing completion webhooks and delivery results                                                |
 
-Studio supports Input, Literal JSON, Pick, Merge, Output, Condition, bounded Map, Model and Approval. Condition executes one connected path and skips the other; Merge joins the surviving results. Map selects a field from each array item, up to 20 items. Model uses a project-owned Gateway route captured at launch. Up to four approval steps can wait for an owner decision, for at most an hour each. Independent ready steps run together.
+Studio supports Input, Literal JSON, Pick, Merge, Output, Condition, bounded Map, Model, Approval, Parse JSON and HTTP Tool. Parse checks JSON and required fields. HTTP Tool calls a project-owned, allowlisted HTTPS JSON destination configured under Settings → HTTP connections, with optional encrypted bearer credentials. The destination/method are captured at launch; deleting the connection prevents later requests that need its credential. Condition executes one connected path and skips the other; Merge joins the surviving results. Map selects a field from each array item, up to 20 items. Model uses a project-owned Gateway route captured at launch. Up to four approval steps can wait for an owner decision, for at most an hour each. Independent ready steps run together.
 
 The compiled document pipeline also remains available. Its extraction is deterministic. Controlled retryable/permanent extraction faults are restricted to that pipeline; they are deliberately selected tests, not provider inference.
 
@@ -28,11 +30,10 @@ Requirements: Node.js ≥22.12, npm, and a GitHub OAuth application for your loc
 
 ```bash
 npm ci
-npm run db:migrate:local
 npm run dev
 ```
 
-Open <http://localhost:5173>. Create an ignored `.dev.vars` file with:
+`npm run dev` applies outstanding local migrations before starting Vite. Open <http://localhost:5173>. Create an ignored `.dev.vars` file with:
 
 ```text
 PUBLIC_APP_ORIGIN=http://localhost:5173
@@ -42,7 +43,7 @@ INTEGRATION_ENCRYPTION_KEY=<base64 encoding of 32 random bytes>
 OUTBOUND_ALLOWED_HOSTS=hooks.your-domain.example
 ```
 
-Register `http://localhost:5173/api/auth/github/callback` on the GitHub OAuth app. Use a separate production OAuth configuration for the deployed HTTPS origin. The frontend requires real sign-in; missing OAuth configuration never creates a fake user.
+Register `http://localhost:5173/api/auth/github/callback` on the GitHub OAuth app. Use a separate production OAuth configuration for the deployed HTTPS origin. Account features require real sign-in; missing OAuth configuration never creates a fake user. Explore sandbox runs the compiled document pipeline anonymously. For isolated UI acceptance without GitHub credentials, see [local acceptance](docs/LOCAL_ACCEPTANCE.md).
 
 Provider keys are entered in Gateway, encrypted with AES-GCM and project-bound authenticated context, and never returned by credential metadata endpoints. Workers AI also requires your Cloudflare account ID. Keep the encryption master key stable and backed up securely; changing it makes existing encrypted credentials unreadable. Configure outgoing destination hosts explicitly before creating webhooks.
 
@@ -69,7 +70,7 @@ Provider calls and webhook delivery can repeat after infrastructure interruption
 
 The existing shared admission budget still applies: 100 runs/day, 8 active executions, 6/hour/session and 20/day/session by default. Experiment groups can therefore partially launch; “Continue launches” resumes remaining trials. Gateway separately limits a project to 60 model requests/hour. Rates entered on model routes produce estimates from reported token counts; they are not billed charges. Missing provider usage/cost stays unavailable.
 
-Runs and external spans retain 30 days by default; audit events retain 90. Trace views show the latest 100 traces and up to 1,000 external spans per trace. Redaction covers known credential field names and common token patterns; callers must avoid sending unnecessary sensitive attributes. Projects are owner-scoped. Team roles, arbitrary user code, arbitrary HTTP/CRM tool adapters, OpenTelemetry OTLP ingestion, and a published package registry are outside this build.
+Runs and external spans retain 30 days by default; audit events retain 90. Trace views show the latest 100 traces and up to 1,000 external spans per trace. Redaction covers known credential field names and common token patterns; callers must avoid sending unnecessary sensitive attributes. Projects are owner-scoped. Team roles, arbitrary user code, specialized CRM/search adapters, OpenTelemetry OTLP ingestion, and a published package registry are outside this build.
 
 ## Validation and deployment
 
@@ -80,6 +81,6 @@ npm run build
 npm run test:e2e
 ```
 
-Unit and integration tests exercise the actual Miniflare D1, Queue and Workflow bindings. GitHub/provider HTTP responses are test doubles where an external service is involved; these are not live credential verification. Browser test files exist, but the current workspace's preview server fails inside the Cloudflare Vite plugin (`uv_interface_addresses`), so browser/visual readiness remains unverified here.
+Unit and integration tests exercise the actual Miniflare D1, Queue and Workflow bindings. GitHub/provider HTTP responses are test doubles where an external service is involved; these are not live credential verification. The repair checkpoint passes 68 unit tests and 84 Worker integration tests. A local browser journey created and switched projects, used a template, published a graph, executed it and inspected persisted output. See [repair evidence and limits](docs/PRODUCT_EXPERIENCE_REPAIR.md). Browser contract test files exist but were not executed through the Playwright runner in this environment. Live GitHub OAuth, provider calls, physical touch-device QA and a complete all-screen browser audit remain unverified.
 
-See [implementation status](docs/IMPLEMENTATION_STATUS.md), [integration contracts](docs/FRONTEND_BACKEND_INTEGRATION.md) and [local acceptance checks](docs/LOCAL_ACCEPTANCE.md). Keep the PR unmerged until required browser and configured-provider checks have actually passed. Review migrations and intended Cloudflare resource IDs before deployment; never replace production resources to make setup pass.
+See [implementation status](docs/IMPLEMENTATION_STATUS.md), [integration contracts](docs/FRONTEND_BACKEND_INTEGRATION.md) and [local acceptance checks](docs/LOCAL_ACCEPTANCE.md). Review the repair PR and run the remaining configured-service and device acceptance checks before treating the app as release-ready. Review migrations and intended Cloudflare resource IDs before deployment; never replace production resources to make setup pass.

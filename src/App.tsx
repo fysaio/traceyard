@@ -1,3 +1,8 @@
+import { ProjectLink as Link } from "./components/project-link";
+import { WorkflowDetail } from "./pages/workflow-detail";
+import { WorkspaceShell } from "./pages/workspace-shell";
+import { WorkflowLibrary, TemplateDetail } from "./pages/workflow-library";
+import { SettingsLayout, ConnectApplication } from "./pages/project-settings";
 import {
   Gateway,
   Approvals,
@@ -8,26 +13,10 @@ import {
 } from "./pages/integrations";
 import { Compare } from "./pages/compare";
 import { Studio } from "./pages/studio";
-import { studioApi } from "./lib/studio-api";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
-import {
-  Link,
-  Navigate,
-  NavLink,
-  Route,
-  Routes,
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate, useLocation, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  api,
-  readAllEvents,
-  newIdempotencyKey,
-  type AuthSession,
-  type SavedWorkflowSummary,
-} from "./lib/api";
+import { api, readAllEvents, newIdempotencyKey, type AuthSession } from "./lib/api";
 import type { RunDetail, WorkflowSummary } from "../shared/contracts/api";
 import { documentInputSchema, type FailureScenario } from "../shared/workflow/document";
 
@@ -109,6 +98,7 @@ function Empty({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function App() {
+  const location = useLocation();
   const session = useQuery({
     queryKey: ["auth"],
     queryFn: api.authSession,
@@ -129,7 +119,13 @@ export function App() {
         <Notice error={session.error} retry={() => void session.refetch()} />
       </main>
     );
-  if (!session.data.user) return <Welcome session={session.data} />;
+  if (!session.data.user)
+    return location.pathname.startsWith("/sandbox") ||
+      location.pathname.startsWith("/executions/") ? (
+      <GuestWorkspace session={session.data} />
+    ) : (
+      <Welcome session={session.data} />
+    );
   return <Workspace session={session.data} />;
 }
 function Welcome({ session }: { session: AuthSession }) {
@@ -159,529 +155,76 @@ function Welcome({ session }: { session: AuthSession }) {
               </p>
             </>
           )}
+          <Link className="btn" to="/sandbox">
+            Explore the sandbox
+          </Link>
         </div>
+        <span className="entry-foot">Open source. Self-hostable.</span>
       </main>
     </div>
   );
 }
 function Workspace({ session }: { session: AuthSession }) {
-  const projects = useQuery({ queryKey: ["projects", session.user?.id], queryFn: api.projects });
-  const [selectedProject, setProject] = useState("");
-  const projectId = projects.data?.some((p) => p.id === selectedProject)
-    ? selectedProject
-    : (projects.data?.[0]?.id ?? "");
-  const [newProject, setNewProject] = useState(false);
-  const [name, setName] = useState("");
-  const cache = useQueryClient();
-  const create = useMutation({
-    mutationFn: api.createProject,
-    onSuccess: (p) => {
-      setProject(p.id);
-      setNewProject(false);
-      setName("");
-      void cache.invalidateQueries({ queryKey: ["projects"] });
-    },
-  });
-  const logout = useMutation({
-    mutationFn: api.logout,
-    onSuccess: () => {
-      cache.clear();
-      void cache.invalidateQueries();
-      window.location.assign("/");
-    },
-  });
   return (
-    <div className="product-shell">
-      <header className="product-header">
-        <Link className="brand" to="/">
-          Traceyard.
-        </Link>
-        <nav aria-label="Main navigation">
-          {[
-            ["/", "Workflows", "layer-group"],
-            ["/executions", "Executions", "clock-rotate-left"],
-            ["/traces", "Traces", "diagram-project"],
-            ["/gateway", "Gateway", "shuffle"],
-            ["/settings", "Settings", "gear"],
-          ].map(([path, text, icon]) => (
-            <NavLink key={path} to={path!} end={path === "/"}>
-              <Icon name={icon!} />
-              <span>{text}</span>
-            </NavLink>
-          ))}
-        </nav>
-        <div className="header-tools">
-          <label className="sr-only" htmlFor="project-switch">
-            Current project
-          </label>
-          <select
-            id="project-switch"
-            value={projectId}
-            onChange={(e) => setProject(e.target.value)}
-            disabled={!projects.data?.length}
-          >
-            {projects.data?.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn icon-only"
-            aria-label="Create project"
-            onClick={() => setNewProject(!newProject)}
-          >
-            <Icon name="plus" />
-          </button>
-          <button className="btn" onClick={() => logout.mutate()} disabled={logout.isPending}>
-            Sign out
-          </button>
-        </div>
-      </header>
-      <main className="product-main">
-        {projects.isPending ? (
-          <Loading />
-        ) : projects.isError ? (
-          <Notice error={projects.error} retry={() => void projects.refetch()} />
-        ) : (
-          <>
-            {newProject && (
-              <form
-                className="connected-panel inline-project"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  create.mutate(name);
-                }}
-              >
-                <label htmlFor="new-project">Project name</label>
-                <input
-                  id="new-project"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  maxLength={80}
-                />
-                <div className="actions">
-                  <button className="btn" type="button" onClick={() => setNewProject(false)}>
-                    Cancel
-                  </button>
-                  <button className="btn primary" disabled={create.isPending}>
-                    Create project
-                  </button>
-                </div>
-                {create.isError && <Notice error={create.error} />}
-              </form>
-            )}
-            <Routes>
-              <Route path="/" element={<Workflows projectId={projectId} />} />
-              <Route path="/workflows" element={<Navigate to="/" replace />} />
-              <Route path="/workflow/:id" element={<Workflow projectId={projectId} />} />
-              <Route
-                path="/executions"
-                element={<Executions key={projectId} projectId={projectId} />}
-              />
-              <Route path="/executions/:id" element={<Execution />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route
-                path="/laboratory"
-                element={<Experiments key={projectId} projectId={projectId} />}
-              />
-              <Route path="/studio/:id" element={<Studio projectId={projectId} />} />
-              <Route path="/gateway" element={<Gateway key={projectId} projectId={projectId} />} />
-              <Route path="/traces" element={<Traces key={projectId} projectId={projectId} />} />
-              <Route
-                path="/approvals"
-                element={<Approvals key={projectId} projectId={projectId} />}
-              />
-              <Route
-                path="/developer"
-                element={<Developer key={projectId} projectId={projectId} />}
-              />
-              <Route
-                path="/automations"
-                element={<Automations key={projectId} projectId={projectId} />}
-              />
-              <Route path="/compare" element={<Compare projectId={projectId} />} />
-              <Route path="/settings" element={<Settings session={session} />} />
-              <Route
-                path="*"
-                element={
-                  <Empty title="Page not found">
-                    <Link to="/">Return to workflows</Link>
-                  </Empty>
-                }
-              />
-            </Routes>
-          </>
-        )}
-        {logout.isError && <Notice error={logout.error} />}
-      </main>
-    </div>
-  );
-}
-function Workflows({ projectId }: { projectId: string }) {
-  const navigate = useNavigate(),
-    cache = useQueryClient();
-  const drafts = useQuery({
-    queryKey: ["studio-list", projectId],
-    queryFn: () => studioApi.list(projectId),
-    enabled: !!projectId,
-  });
-  const create = useMutation({
-    mutationFn: () => studioApi.create(projectId, "Untitled workflow"),
-    onSuccess: (w) => {
-      void cache.invalidateQueries({ queryKey: ["studio-list", projectId] });
-      navigate("/studio/" + w.id);
-    },
-  });
-  const importWorkflow = useMutation({
-    mutationFn: async (file: File) => {
-      if (file.size > 30000) throw new Error("Workflow files must be smaller than 30 KB.");
-      return studioApi.import(projectId, JSON.parse(await file.text()) as unknown);
-    },
-    onSuccess: (w) => {
-      void cache.invalidateQueries({ queryKey: ["studio-list", projectId] });
-      navigate("/studio/" + w.id);
-    },
-  });
-  const archive = useMutation({
-    mutationFn: (id: string) => studioApi.archive(projectId, id),
-    onSuccess: () => {
-      void cache.invalidateQueries({ queryKey: ["studio-list", projectId] });
-      void cache.invalidateQueries({ queryKey: ["workflows"] });
-    },
-  });
-  const catalog = useQuery({
-    queryKey: ["workflows", projectId],
-    queryFn: () => api.workflows(projectId),
-  });
-  const saved = useQuery({
-    queryKey: ["saved", projectId],
-    queryFn: () => api.savedWorkflows(projectId),
-    enabled: !!projectId,
-  });
-  const [layout, setLayout] = useState("grid"),
-    [tab, setTab] = useState("catalog"),
-    [search, setSearch] = useState(""),
-    [launch, setLaunch] = useState<WorkflowSummary | null>(null);
-  return (
-    <>
-      <Heading
-        title="Workflows"
-        actions={
-          <>
-            <label className="btn import-button">
-              Import workflow
-              <input
-                className="sr-only"
-                type="file"
-                accept=".json,application/json"
-                disabled={importWorkflow.isPending || !projectId}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) importWorkflow.mutate(file);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            <button
-              className="btn primary"
-              disabled={create.isPending || !projectId}
-              onClick={() => create.mutate()}
-            >
-              + Create workflow
-            </button>
-          </>
-        }
-      >
-        Choose a published workflow and run it with your own input.
-      </Heading>
-      {(create.error || archive.error || importWorkflow.error) && (
-        <Notice error={create.error || archive.error || importWorkflow.error} />
-      )}
-      {drafts.error && <Notice error={drafts.error} />}
-      {!!drafts.data?.items.length && (
-        <section className="connected-panel draft-library">
-          <h2>Your workflow drafts</h2>
-          {drafts.data.items.map((w) => (
-            <div key={w.id} className="stat-row">
-              <div>
-                <strong>{w.name}</strong>
-                <p>{w.current_version ? "Published v" + w.current_version : "Not published"}</p>
-              </div>
-              <div className="actions">
-                <Link className="btn" to={"/studio/" + w.id}>
-                  Edit in Studio
-                </Link>
-                <button
-                  className="btn"
-                  disabled={archive.isPending}
-                  onClick={() => {
-                    if (confirm("Archive " + w.name + "? Existing execution history is retained."))
-                      archive.mutate(w.id);
-                  }}
-                >
-                  Archive
-                </button>
-              </div>
-            </div>
-          ))}
-        </section>
-      )}
-      <div className="content-toolbar">
-        <div className="product-tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "catalog"} onClick={() => setTab("catalog")}>
-            Published workflows
-          </button>
-          <button role="tab" aria-selected={tab === "saved"} onClick={() => setTab("saved")}>
-            Saved configurations
-          </button>
-        </div>
-        <div className="view-controls">
-          <input
-            className="search"
-            aria-label="Search workflows"
-            placeholder="Search workflows"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+    <WorkspaceShell session={session}>
+      {(projectId) => (
+        <Routes>
+          <Route path="/" element={<WorkflowLibrary key={projectId} projectId={projectId} />} />
+          <Route path="/workflows" element={<Navigate to="/" replace />} />
+          <Route path="/workflow/:id" element={<WorkflowDetail projectId={projectId} />} />
+          <Route
+            path="/executions"
+            element={<Executions key={projectId} projectId={projectId} />}
           />
-          <div className="segmented" role="group" aria-label="Workflow layout">
-            {["list", "grid"].map((x) => (
-              <button
-                key={x}
-                aria-pressed={layout === x}
-                className={layout === x ? "selected" : ""}
-                onClick={() => setLayout(x)}
-              >
-                <Icon name={x === "list" ? "list" : "border-all"} />
-                {x === "list" ? "List view" : "Grid view"}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      {catalog.isPending ? (
-        <Loading />
-      ) : catalog.isError ? (
-        <Notice error={catalog.error} retry={() => void catalog.refetch()} />
-      ) : tab === "catalog" ? (
-        <div className={`saved-workflows ${layout}`}>
-          {catalog.data
-            .filter((w) =>
-              `${w.name} ${w.description}`.toLowerCase().includes(search.toLowerCase()),
-            )
-            .map((w) => (
-              <article className="saved-workflow" key={w.id}>
-                <Link to={`/workflow/${w.id}`} className="workflow-main">
-                  <span className="workflow-icon">
-                    <Icon name="file-lines" />
-                  </span>
-                  <div>
-                    <h2>{w.name}</h2>
-                    <p>{w.description}</p>
-                    <div className="quiet-meta">
-                      <span>Version {w.version}</span>
-                      <span>{w.steps.length} steps</span>
-                    </div>
-                  </div>
-                </Link>
-                <div className="workflow-actions">
-                  <Link className="btn" to={`/workflow/${w.id}`}>
-                    Inspect
-                  </Link>
-                  <button className="btn primary" onClick={() => setLaunch(w)}>
-                    <Icon name="play" /> Run
-                  </button>
-                </div>
-              </article>
-            ))}
-        </div>
-      ) : (
-        <SavedConfigurations
-          rows={saved.data ?? []}
-          error={saved.error}
-          loading={saved.isPending && !!projectId}
-          projectId={projectId}
-          catalog={catalog.data}
-          search={search}
-        />
+          <Route path="/executions/:id" element={<Execution />} />
+          <Route path="/analytics" element={<Analytics />} />
+          <Route
+            path="/laboratory"
+            element={<Experiments key={projectId} projectId={projectId} />}
+          />
+          <Route path="/studio/:id" element={<Studio projectId={projectId} />} />
+          <Route path="/gateway" element={<Gateway key={projectId} projectId={projectId} />} />
+          <Route path="/traces" element={<Traces key={projectId} projectId={projectId} />} />
+          <Route path="/approvals" element={<Approvals key={projectId} projectId={projectId} />} />
+          <Route path="/developer" element={<Developer key={projectId} projectId={projectId} />} />
+          <Route
+            path="/automations"
+            element={<Automations key={projectId} projectId={projectId} />}
+          />
+          <Route path="/compare" element={<Compare projectId={projectId} />} />
+          <Route
+            path="/template/:id"
+            element={<TemplateDetail key={projectId} projectId={projectId} />}
+          />
+          <Route path="/connect" element={<ConnectApplication key={projectId} />} />
+          <Route path="/settings" element={<Navigate to="/settings/projects" replace />} />
+          <Route
+            path="/settings/:section"
+            element={<SettingsLayout account={<Settings session={session} />} />}
+          />
+          <Route
+            path="*"
+            element={
+              <Empty title="Page not found">
+                <Link to="/">Return to workflows</Link>
+              </Empty>
+            }
+          />
+        </Routes>
       )}
-      {launch && <Launch workflow={launch} projectId={projectId} close={() => setLaunch(null)} />}
-    </>
+    </WorkspaceShell>
   );
 }
-function SavedConfigurations({
-  rows,
-  error,
-  loading,
-  projectId,
-  catalog,
-  search,
-}: {
-  rows: SavedWorkflowSummary[];
-  error: unknown;
-  loading: boolean;
-  projectId: string;
-  catalog: WorkflowSummary[];
-  search: string;
-}) {
-  const [launch, setLaunch] = useState<SavedWorkflowSummary | null>(null);
-  const [target, setTarget] = useState<WorkflowSummary | null>(null);
-  const open = useMutation({
-    mutationFn: async (row: SavedWorkflowSummary) => {
-      const definition = row.definition as Record<string, unknown>;
-      return api.workflow(
-        String(definition.runtimeWorkflowId),
-        projectId,
-        Number(definition.runtimeVersion),
-      );
-    },
-    onSuccess: (workflow, row) => {
-      setTarget(workflow);
-      setLaunch(row);
-    },
-  });
-  const cache = useQueryClient();
-  const remove = useMutation({
-    mutationFn: (id: string) => api.deleteSavedWorkflow(projectId, id),
-    onSuccess: () => cache.invalidateQueries({ queryKey: ["saved", projectId] }),
-  });
-  if (loading) return <Loading />;
-  if (error) return <Notice error={error} />;
-  const runtimeId = (row: SavedWorkflowSummary) =>
-    typeof row.definition === "object" &&
-    row.definition !== null &&
-    "runtimeWorkflowId" in row.definition
-      ? String(row.definition.runtimeWorkflowId)
-      : "";
-  const compatible = (row: SavedWorkflowSummary) =>
-    catalog.find(
-      (w) =>
-        w.id === runtimeId(row) &&
-        Number.isSafeInteger((row.definition as Record<string, unknown>).runtimeVersion) &&
-        Number((row.definition as Record<string, unknown>).runtimeVersion) > 0,
-    );
-  return (
-    <>
-      {rows.length === 0 ? (
-        <Empty title="No saved configurations">
-          Run a published workflow and save its input to reuse it here.
-        </Empty>
-      ) : (
-        <div className="saved-workflows list">
-          {rows
-            .filter((w) => w.name.toLowerCase().includes(search.toLowerCase()))
-            .map((w) => (
-              <article key={w.id} className="saved-workflow">
-                <div className="workflow-main">
-                  <span className="workflow-icon">
-                    <Icon name="bookmark" />
-                  </span>
-                  <div>
-                    <h2>{w.name}</h2>
-                    <p>{w.description}</p>
-                    {!compatible(w) && (
-                      <p className="hint">
-                        This definition has no matching published runtime version.
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <div className="workflow-actions">
-                  <button
-                    className="btn"
-                    disabled={!compatible(w) || open.isPending}
-                    onClick={() => open.mutate(w)}
-                  >
-                    Run
-                  </button>
-                  <button
-                    className="btn"
-                    disabled={remove.isPending}
-                    onClick={() => {
-                      if (confirm(`Delete saved configuration “${w.name}”?`)) remove.mutate(w.id);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
-        </div>
-      )}
-      {remove.isError && <Notice error={remove.error} />}
-      {open.isError && <Notice error={open.error} />}
-      {launch && target && (
-        <Launch
-          workflow={target}
-          projectId={projectId}
-          initialInput={(launch.definition as Record<string, unknown>).input}
-          close={() => setLaunch(null)}
-        />
-      )}
-    </>
-  );
-}
-function Workflow({ projectId }: { projectId: string }) {
-  const [searchParams] = useSearchParams();
-  const version = searchParams.has("version") ? Number(searchParams.get("version")) : undefined;
-  const { id = "" } = useParams();
-  const workflow = useQuery({
-    queryKey: ["workflow", id, projectId, version],
-    queryFn: () => api.workflow(id, projectId, version),
-  });
-  const [launch, setLaunch] = useState(false);
-  if (workflow.isPending) return <Loading />;
-  if (workflow.isError) return <Notice error={workflow.error} />;
-  const w = workflow.data;
-  return (
-    <>
-      <Link className="back" to="/">
-        ← Workflows
-      </Link>
-      <Heading
-        title={w.name}
-        actions={
-          <button className="btn primary" onClick={() => setLaunch(true)}>
-            <Icon name="play" /> Run workflow
-          </button>
-        }
-      >
-        {w.description}
-      </Heading>
-      <p className="hint">
-        Published version {w.version}.{" "}
-        {w.graph
-          ? "This graph runs in the durable workflow engine."
-          : "This pipeline performs deterministic document processing."}
-      </p>
-      <div className="runtime-steps">
-        {w.steps.map((s, i) => (
-          <article className="connected-panel" key={s.key}>
-            <span className="step-number">{i + 1}</span>
-            <div>
-              <h2>{s.name}</h2>
-              <p>{s.description}</p>
-              <div className="quiet-meta">
-                <span>{s.timeoutMs / 1000}s timeout</span>
-                <span>Up to {s.retry.maxAttempts} attempts</span>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
-      {launch && <Launch workflow={w} projectId={projectId} close={() => setLaunch(false)} />}
-    </>
-  );
-}
-function Launch({
+export function Launch({
   workflow,
   projectId,
   close,
   initialInput,
   fault = "success",
+  guest = false,
 }: {
   workflow: WorkflowSummary;
+  guest?: boolean;
   projectId?: string;
   close: () => void;
   initialInput?: unknown;
@@ -699,7 +242,13 @@ function Launch({
       trigger?.focus();
     };
   }, []);
-  const [graphInput, setGraphInput] = useState(JSON.stringify(initialInput ?? {}, null, 2));
+  const [graphInput, setGraphInput] = useState(
+    JSON.stringify(
+      initialInput ?? workflow.graph?.nodes.find((n) => n.type === "input")?.config.value ?? {},
+      null,
+      2,
+    ),
+  );
   const inputValue = () =>
     workflow.graph ? (JSON.parse(graphInput) as unknown) : { title, document };
   const initial = documentInputSchema.safeParse(initialInput);
@@ -722,7 +271,9 @@ function Launch({
       ),
     onSuccess: (result) => {
       void cache.invalidateQueries({ queryKey: ["runs"] });
-      navigate(`/executions/${result.result.run.id}`);
+      navigate(
+        `${guest ? "/sandbox" : ""}/executions/${result.result.run.id}${projectId ? "?project=" + projectId : ""}`,
+      );
       close();
     },
   });
@@ -874,7 +425,7 @@ function Launch({
     </dialog>
   );
 }
-function Executions({ projectId }: { projectId: string }) {
+function Executions({ projectId, guest = false }: { projectId: string; guest?: boolean }) {
   const [status, setStatus] = useState("");
   const runs = useQuery({
     queryKey: ["runs", projectId, status],
@@ -900,7 +451,7 @@ function Executions({ projectId }: { projectId: string }) {
       <Heading
         title="Executions"
         actions={
-          <Link className="btn" to="/analytics">
+          <Link className="btn" to={guest ? "/sandbox/analytics" : "/analytics"}>
             Account analytics
           </Link>
         }
@@ -939,7 +490,11 @@ function Executions({ projectId }: { projectId: string }) {
       ) : (
         <div className="execution-list">
           {data.data.items.map((r) => (
-            <Link key={r.id} className="execution-item connected-panel" to={`/executions/${r.id}`}>
+            <Link
+              key={r.id}
+              className="execution-item connected-panel"
+              to={`${guest ? "/sandbox" : ""}/executions/${r.id}`}
+            >
               <div>
                 <h2>{r.workflow.name}</h2>
                 <p>{new Date(r.createdAt).toLocaleString()}</p>
@@ -966,7 +521,7 @@ function Executions({ projectId }: { projectId: string }) {
     </>
   );
 }
-function Execution() {
+function Execution({ guest = false }: { guest?: boolean }) {
   const { id = "" } = useParams(),
     navigate = useNavigate(),
     cache = useQueryClient();
@@ -996,7 +551,7 @@ function Execution() {
     onSuccess: (result) => {
       setStep(null);
       setTab("summary");
-      navigate(`/executions/${result.run.id}`);
+      navigate(`${guest ? "/sandbox" : ""}/executions/${result.run.id}`);
     },
   });
   const exportTrace = useMutation({ mutationFn: () => readAllEvents(id) });
@@ -1021,7 +576,7 @@ function Execution() {
   };
   return (
     <>
-      <Link className="back" to="/executions">
+      <Link className="back" to={guest ? "/sandbox/executions" : "/executions"}>
         ← Executions
       </Link>
       <Heading
@@ -1061,15 +616,19 @@ function Execution() {
         <span>Version {r.workflow.version}</span>
         <span>{duration(r.durationMs)}</span>
         <span>{r.id}</span>
-        <Link className="text-link" to="/approvals">
-          Review approvals
-        </Link>
-        <Link className="text-link" to={"/compare?left=" + r.id}>
-          Compare
-        </Link>
+        {!guest && (
+          <Link className="text-link" to="/approvals">
+            Review approvals
+          </Link>
+        )}
+        {!guest && (
+          <Link className="text-link" to={"/compare?left=" + r.id}>
+            Compare
+          </Link>
+        )}
       </div>
       {r.parentRunId && (
-        <Link to={`/executions/${r.parentRunId}`} className="text-link">
+        <Link to={`${guest ? "/sandbox" : ""}/executions/${r.parentRunId}`} className="text-link">
           Original execution
         </Link>
       )}
@@ -1272,36 +831,6 @@ function Settings({ session }: { session: AuthSession }) {
         ))}
         {revoke.isError && <Notice error={revoke.error} />}
       </section>
-      <section className="connected-panel section">
-        <h2>Project tools</h2>
-        <div className="actions section">
-          <Link className="btn" to="/approvals">
-            Approvals
-          </Link>
-          <Link className="btn" to="/laboratory">
-            Laboratory
-          </Link>
-        </div>
-        <div className="actions section">
-          <Link className="btn" to="/automations">
-            Schedules &amp; webhooks
-          </Link>
-          <Link className="btn" to="/developer">
-            API keys &amp; SDK
-          </Link>
-          <Link className="btn" to="/compare">
-            Compare executions
-          </Link>
-        </div>
-        <p>
-          Published document workflows execute in Cloudflare Workflows and persist their results in
-          D1. Saved configurations are stored in your project.
-        </p>
-        <p>
-          Studio publishes versioned workflows with data transforms, model routes and approval
-          steps.
-        </p>
-      </section>
     </>
   );
 }
@@ -1412,6 +941,93 @@ function Analytics() {
           </section>
         </>
       )}
+    </>
+  );
+}
+
+function GuestWorkspace({ session }: { session: AuthSession }) {
+  return (
+    <div className="product-shell">
+      <header className="product-header">
+        <Link className="brand" to="/sandbox">
+          Traceyard.
+        </Link>
+        <nav aria-label="Main navigation">
+          <Link to="/sandbox">Workflows</Link>
+          <Link to="/sandbox/executions">Executions</Link>
+        </nav>
+        <div className="header-tools">
+          <span className="badge">Sandbox</span>
+          {session.githubSignInAvailable ? (
+            <a className="btn" href="/api/auth/github/start">
+              Continue with GitHub
+            </a>
+          ) : (
+            <Link className="btn" to="/">
+              Sign-in setup
+            </Link>
+          )}
+        </div>
+      </header>
+      <main className="product-main">
+        <Routes>
+          <Route path="/sandbox" element={<SandboxWorkflows />} />
+          <Route path="/sandbox/executions" element={<Executions projectId="" guest />} />
+          <Route path="/sandbox/executions/:id" element={<Execution guest />} />
+          <Route path="/executions/:id" element={<Execution guest />} />
+          <Route path="/sandbox/analytics" element={<Analytics />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+function SandboxWorkflows() {
+  const q = useQuery({ queryKey: ["sandbox-workflows"], queryFn: () => api.workflows() }),
+    [launch, setLaunch] = useState<WorkflowSummary | null>(null);
+  return (
+    <>
+      <Heading title="Workflows">
+        Run the document pipeline and inspect its actual execution history.
+      </Heading>
+      {q.isPending ? (
+        <Loading />
+      ) : q.isError ? (
+        <Notice error={q.error} />
+      ) : (
+        <div className="saved-workflows list">
+          {q.data.map((w) => (
+            <article className="saved-workflow" key={w.id}>
+              <div className="workflow-main">
+                <span className="workflow-icon">
+                  <Icon name="file-lines" />
+                </span>
+                <div>
+                  <h2>{w.name}</h2>
+                  <p>{w.description}</p>
+                  <p className="hint">{w.steps.length} steps</p>
+                </div>
+              </div>
+              <button className="btn" onClick={() => setLaunch(w)}>
+                <Icon name="play" />
+                Run workflow
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
+      <section className="connect-strip">
+        <div>
+          <Icon name="folder" />
+          <div>
+            <h3>Build in your own project</h3>
+            <p>Sign in to create workflows, connect applications and configure providers.</p>
+          </div>
+        </div>
+        <Link className="btn" to="/">
+          Continue with GitHub
+        </Link>
+      </section>
+      {launch && <Launch workflow={launch} close={() => setLaunch(null)} guest />}
     </>
   );
 }

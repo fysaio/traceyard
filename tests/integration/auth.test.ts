@@ -43,9 +43,7 @@ function providerFetch(profile = PROFILE): typeof fetch {
       return Response.json({ access_token: "mock-provider-token", token_type: "bearer" });
     }
     if (url === "https://api.github.com/user") {
-      expect(new Headers(init?.headers).get("authorization")).toBe(
-        "Bearer mock-provider-token",
-      );
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer mock-provider-token");
       return Response.json(profile);
     }
     throw new Error(`Unexpected GitHub endpoint ${url}`);
@@ -67,9 +65,7 @@ function cookieValue(cookies: string[], name: string): string {
 }
 
 function authCookie(cookieHeader: string): string {
-  const cookie = cookieHeader
-    .split(/;\s*/u)
-    .find((part) => part.startsWith("ty_auth_session="));
+  const cookie = cookieHeader.split(/;\s*/u).find((part) => part.startsWith("ty_auth_session="));
   if (cookie === undefined) throw new Error("The auth session cookie is missing.");
   return cookie;
 }
@@ -119,12 +115,7 @@ async function signIn(
   const authCookie = cookiePairs(callback).find((cookie) => cookie.startsWith("ty_auth_session="));
   if (authCookie === undefined) throw new Error("The auth session cookie was not set.");
   const cookie = [guestCookie, authCookie].filter((value) => value !== undefined).join("; ");
-  const sessionResponse = await apiFetchWithGitHub(
-    "/api/auth/session",
-    {},
-    githubFetch,
-    cookie,
-  );
+  const sessionResponse = await apiFetchWithGitHub("/api/auth/session", {}, githubFetch, cookie);
   const payload = (await sessionResponse.json()) as {
     data: {
       user: { id: string };
@@ -159,21 +150,14 @@ describe("GitHub authentication", () => {
         return Response.json({ access_token: "mock-provider-token", token_type: "bearer" });
       }
       if (String(input) === "https://api.github.com/user") {
-        expect(new Headers(init?.headers).get("authorization")).toBe(
-          "Bearer mock-provider-token",
-        );
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer mock-provider-token");
         return Response.json(PROFILE);
       }
       throw new Error(`Unexpected GitHub endpoint ${String(input)}`);
     };
 
     const signedIn = await signIn(githubFetch);
-    const session = await apiFetchWithGitHub(
-      "/api/auth/session",
-      {},
-      githubFetch,
-      signedIn.cookie,
-    );
+    const session = await apiFetchWithGitHub("/api/auth/session", {}, githubFetch, signedIn.cookie);
     const body = (await session.json()) as {
       data: {
         user: { id: string; login: string; name: string; avatarUrl: string };
@@ -313,12 +297,41 @@ describe("GitHub authentication", () => {
       .first<{ metadata_json: string }>();
     expect(JSON.parse(claimAudit?.metadata_json ?? "{}")).toEqual({ claimedRuns: 1 });
 
-    const noLongerGuestOwned = await apiFetch(
-      `/api/runs/${created.run.id}`,
-      {},
-      originalGuest,
-    );
+    const noLongerGuestOwned = await apiFetch(`/api/runs/${created.run.id}`, {}, originalGuest);
     expect(noLongerGuestOwned.status).toBe(404);
+  });
+
+  it("moves eligible sandbox work into the selected owned project only", async () => {
+    const signedIn = await signIn();
+    const guest = await guestSession(signedIn.cookie);
+    const run = await launchGuestRun(guest);
+    const cookie = `${guest.cookie}; ${authCookie(signedIn.cookie)}`;
+    const invoke = (path: string, method = "GET", body?: unknown) =>
+      apiFetchWithGitHub(
+        path,
+        {
+          method,
+          ...(body === undefined
+            ? {}
+            : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+        },
+        providerFetch(),
+        cookie,
+      );
+    expect(await readSuccess(await invoke("/api/auth/guest-work"))).toEqual({ executions: 1 });
+    expect(
+      (await invoke("/api/auth/claim", "POST", { projectId: "prj_other_account" })).status,
+    ).toBe(404);
+    const project = await readSuccess<{ id: string }>(
+      await invoke("/api/projects", "POST", { name: "Claim destination" }),
+    );
+    expect(
+      await readSuccess(await invoke("/api/auth/claim", "POST", { projectId: project.id })),
+    ).toEqual({ claimedRuns: 1 });
+    expect(await readSuccess(await invoke("/api/auth/guest-work"))).toEqual({ executions: 0 });
+    expect(
+      await env.DB.prepare("SELECT project_id FROM runs WHERE id=?").bind(run.run.id).first(),
+    ).toEqual({ project_id: project.id });
   });
 
   it("keeps projects, saved definitions, and run history available on another authenticated device", async () => {
@@ -399,11 +412,13 @@ describe("GitHub authentication", () => {
 
   it("denies cross-user and cross-project run and workflow requests", async () => {
     const owner = await signIn();
-    const outsider = await signIn(providerFetch({
-      ...PROFILE,
-      id: PROFILE.id + 1,
-      login: "different-developer",
-    }));
+    const outsider = await signIn(
+      providerFetch({
+        ...PROFILE,
+        id: PROFILE.id + 1,
+        login: "different-developer",
+      }),
+    );
     const foreignSessionRevoke = await apiFetchWithGitHub(
       `/api/auth/sessions/${owner.sessionId}/revoke`,
       { method: "POST" },

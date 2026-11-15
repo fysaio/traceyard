@@ -1,6 +1,8 @@
+import { useSearchParams } from "react-router-dom";
+import { ProjectLink as Link } from "../components/project-link";
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+
 import { api } from "../lib/api";
 import {
   integrationRequest as request,
@@ -568,7 +570,8 @@ export function Approvals({ projectId: p }: { projectId: string }) {
   );
 }
 export function Traces({ projectId: p }: { projectId: string }) {
-  const [id, setId] = useState(""),
+  const [searchParams] = useSearchParams();
+  const [id, setId] = useState(searchParams.get("trace") ?? ""),
     [selected, setSelected] = useState(""),
     [search, setSearch] = useState("");
   const q = useQuery({

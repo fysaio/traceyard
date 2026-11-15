@@ -1,7 +1,15 @@
+import { ProjectLink as Link } from "../components/project-link";
+import { Launch } from "../App";
+import { api } from "../lib/api";
+import type { WorkflowSummary } from "../../shared/contracts/api";
+import type { RefObject } from "react";
+import { Modal, Icon } from "../components/product-ui";
+import { WORKFLOW_ICONS } from "../../shared/workflow/templates";
+import { integrationRequest } from "../lib/integrations-api";
 import { integrations } from "../lib/integrations-api";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { graphErrors, type WorkflowGraph, type GraphNode } from "../../shared/workflow/graph";
 import { studioApi, type StudioWorkflow } from "../lib/studio-api";
 
@@ -48,6 +56,21 @@ function Editor({
     queryKey: ["gateway", projectId],
     queryFn: () => integrations.gateway(projectId),
   });
+  const httpConnections = useQuery({
+    queryKey: ["http-connections", projectId],
+    queryFn: () =>
+      integrationRequest<{ items: { id: string; name: string }[] }>(projectId, "http-connections"),
+  });
+  const [picker, setPicker] = useState(false),
+    [history, setHistory] = useState<StudioWorkflow[]>([]),
+    [future, setFuture] = useState<StudioWorkflow[]>([]);
+  const viewport = useRef<HTMLDivElement>(null),
+    [run, setRun] = useState<WorkflowSummary | null>(null),
+    [connecting, setConnecting] = useState<string | null>(null);
+  const runPublished = useMutation({
+    mutationFn: () => api.workflow(w.id, projectId, w.current_version),
+    onSuccess: setRun,
+  });
   const [w, setW] = useState(initial),
     [selected, setSelected] = useState<string | null>(null),
     [zoom, setZoom] = useState(1),
@@ -55,11 +78,34 @@ function Editor({
     [source, setSource] = useState("input"),
     [target, setTarget] = useState("output");
   const signature = (value: StudioWorkflow) =>
-    JSON.stringify({ name: value.name, description: value.description, graph: value.graph });
+    JSON.stringify({
+      name: value.name,
+      description: value.description,
+      graph: value.graph,
+      icon: value.icon,
+    });
+  const [jsonDrafts, setJsonDrafts] = useState<Record<string, string>>({});
+  const jsonIssues = Object.entries(jsonDrafts).flatMap(([id, text]) => {
+    if (!w.graph.nodes.some((n) => n.id === id)) return [];
+    try {
+      JSON.parse(text);
+      return [];
+    } catch {
+      return ["Enter valid JSON for " + w.graph.nodes.find((n) => n.id === id)!.name + "."];
+    }
+  });
   const [saved, setSaved] = useState(signature(initial));
   const node = w.graph.nodes.find((n) => n.id === selected),
-    issues = graphErrors(w.graph),
-    dirty = signature(w) !== saved;
+    issues = [...graphErrors(w.graph), ...jsonIssues],
+    dirty = signature(w) !== saved || jsonIssues.length > 0;
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const save = useMutation({
     mutationFn: (snapshot: StudioWorkflow) => studioApi.save(projectId, snapshot),
     onSuccess: (r, snapshot) => {
@@ -90,6 +136,8 @@ function Editor({
     },
   });
   const update = (fn: (graph: WorkflowGraph) => WorkflowGraph) => {
+    setHistory((old) => [...old.slice(-39), w]);
+    setFuture([]);
     setW((old) => ({ ...old, graph: fn(old.graph) }));
     setStatus("Unsaved changes");
   };
@@ -104,13 +152,15 @@ function Editor({
           name: type[0]!.toUpperCase() + type.slice(1),
           type,
           config:
-            type === "literal"
-              ? { value: {} }
-              : type === "map"
-                ? { limit: 20, path: "" }
-                : type === "approval"
-                  ? { expiresMinutes: 30 }
-                  : {},
+            type === "condition"
+              ? { equals: true }
+              : type === "literal"
+                ? { value: {} }
+                : type === "map"
+                  ? { limit: 20, path: "" }
+                  : type === "approval"
+                    ? { expiresMinutes: 30 }
+                    : {},
           x: 100 + (g.nodes.length % 3) * 260,
           y: 100 + Math.floor(g.nodes.length / 3) * 150,
         },
@@ -123,7 +173,7 @@ function Editor({
       <Link className="back" to="/">
         ← Workflows
       </Link>
-      <div className="page-head">
+      <div className="page-head studio-toolbar-restored">
         <div>
           <input
             aria-label="Workflow name"
@@ -138,6 +188,48 @@ function Editor({
         </div>
         <div className="actions">
           <button
+            className="btn icon-only"
+            aria-label="Undo"
+            disabled={!history.length}
+            onClick={() => {
+              const previous = history.at(-1);
+              if (previous) {
+                setJsonDrafts({});
+                setFuture((old) => [w, ...old]);
+                setHistory((old) => old.slice(0, -1));
+                setW({
+                  ...previous,
+                  revision: w.revision,
+                  current_version: w.current_version,
+                  versions: w.versions,
+                });
+              }
+            }}
+          >
+            <Icon name="rotate-left" />
+          </button>
+          <button
+            className="btn icon-only"
+            aria-label="Redo"
+            disabled={!future.length}
+            onClick={() => {
+              const next = future[0];
+              if (next) {
+                setJsonDrafts({});
+                setHistory((old) => [...old, w]);
+                setFuture((old) => old.slice(1));
+                setW({
+                  ...next,
+                  revision: w.revision,
+                  current_version: w.current_version,
+                  versions: w.versions,
+                });
+              }
+            }}
+          >
+            <Icon name="rotate-right" />
+          </button>
+          <button
             className="btn"
             onClick={() => {
               const url = URL.createObjectURL(
@@ -149,6 +241,7 @@ function Editor({
                         name: w.name,
                         description: w.description,
                         graph: w.graph,
+                        icon: w.icon ?? "diagram-project",
                       },
                       null,
                       2,
@@ -168,11 +261,21 @@ function Editor({
           </button>
           <button
             className="btn"
-            disabled={save.isPending || publish.isPending || !dirty}
+            disabled={save.isPending || publish.isPending || !dirty || jsonIssues.length > 0}
             onClick={() => save.mutate(w)}
           >
             Save draft
           </button>
+          {w.current_version > 0 && (
+            <button
+              className="btn"
+              disabled={runPublished.isPending}
+              onClick={() => runPublished.mutate()}
+            >
+              <Icon name="play" />
+              Run v{w.current_version}
+            </button>
+          )}
           <button
             className="btn primary"
             disabled={publish.isPending || save.isPending || issues.length > 0 || !w.name.trim()}
@@ -185,15 +288,43 @@ function Editor({
       <div className="studio-editor-layout">
         <div>
           <div className="actions studio-add">
-            {(["literal", "pick", "merge", "map", "condition", "model", "approval"] as const).map(
-              (type) => (
-                <button key={type} className="btn" onClick={() => add(type)}>
-                  + {type}
-                </button>
-              ),
-            )}
+            <button className="btn primary" onClick={() => setPicker(true)}>
+              <Icon name="plus" />
+              Add step
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                const ordered = w.graph.nodes;
+                update((g) => ({
+                  ...g,
+                  nodes: ordered.map((n, i) => ({
+                    ...n,
+                    x: 70 + (i % 4) * 290,
+                    y: 100 + Math.floor(i / 4) * 180,
+                  })),
+                }));
+              }}
+            >
+              Auto-layout
+            </button>
           </div>
           <GraphCanvas
+            viewportRef={viewport}
+            connectFrom={(id) => {
+              setConnecting(id);
+              setStatus("Select an input port to connect this step.");
+            }}
+            connectTo={(id) => {
+              if (
+                connecting &&
+                connecting !== id &&
+                !w.graph.edges.some(([a, b]) => a === connecting && b === id)
+              ) {
+                update((g) => ({ ...g, edges: [...g.edges, [connecting, id]] }));
+                setConnecting(null);
+              }
+            }}
             graph={w.graph}
             zoom={zoom}
             selected={selected}
@@ -221,13 +352,62 @@ function Editor({
             >
               +
             </button>
+            <button
+              className="btn"
+              onClick={() => {
+                if (viewport.current) {
+                  const width = Math.max(...w.graph.nodes.map((n) => n.x + 260)),
+                    height = Math.max(...w.graph.nodes.map((n) => n.y + 130));
+                  setZoom(
+                    Math.max(
+                      0.25,
+                      Math.min(
+                        1.25,
+                        (viewport.current.clientWidth - 32) / width,
+                        (viewport.current.clientHeight - 32) / height,
+                      ),
+                    ),
+                  );
+                  viewport.current.scrollTo(0, 0);
+                }
+              }}
+            >
+              <Icon name="expand" />
+              Fit graph
+            </button>
             <button className="btn" onClick={() => setZoom(1)}>
               Actual size
             </button>
           </div>
         </div>
         <aside className="connected-panel">
-          <h2>{node ? "Configure step" : "Connections"}</h2>
+          <h2>{node ? "Configure step" : "Workflow"}</h2>
+          {!node && (
+            <>
+              <label>
+                Description
+                <textarea
+                  maxLength={500}
+                  value={w.description}
+                  onChange={(e) => setW({ ...w, description: e.target.value })}
+                />
+              </label>
+              <label>Workflow icon</label>
+              <div className="icon-picker">
+                {WORKFLOW_ICONS.map((icon) => (
+                  <button
+                    className={"icon-option " + (w.icon === icon ? "selected" : "")}
+                    key={icon}
+                    aria-label={icon.replaceAll("-", " ")}
+                    aria-pressed={w.icon === icon}
+                    onClick={() => setW({ ...w, icon })}
+                  >
+                    <Icon name={icon} />
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {node && (
             <>
               <label htmlFor="step-name">Step name</label>
@@ -267,6 +447,8 @@ function Editor({
                 <Literal
                   key={node.id}
                   value={node.config.value}
+                  text={jsonDrafts[node.id]}
+                  onText={(text) => setJsonDrafts((old) => ({ ...old, [node.id]: text }))}
                   save={(value) =>
                     update((g) => ({
                       ...g,
@@ -380,6 +562,8 @@ function Editor({
                     key={node.id + "equals"}
                     label="Compare field to JSON"
                     value={node.config.equals}
+                    text={jsonDrafts[node.id]}
+                    onText={(text) => setJsonDrafts((old) => ({ ...old, [node.id]: text }))}
                     save={(value) =>
                       update((g) => ({
                         ...g,
@@ -420,9 +604,69 @@ function Editor({
                   ))}
                 </>
               )}
+              {node.type === "http" && (
+                <>
+                  <label>
+                    HTTP connection
+                    <select
+                      value={node.config.connectionId ?? ""}
+                      onChange={(e) =>
+                        update((g) => ({
+                          ...g,
+                          nodes: g.nodes.map((n) =>
+                            n.id === node.id
+                              ? { ...n, config: { ...n.config, connectionId: e.target.value } }
+                              : n,
+                          ),
+                        }))
+                      }
+                    >
+                      <option value="">Choose a connection</option>
+                      {httpConnections.data?.items.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Link className="text-link" to="/settings/connections">
+                    Configure HTTP connections
+                  </Link>
+                  {httpConnections.error && <p role="alert">{httpConnections.error.message}</p>}
+                </>
+              )}
+              {node.type === "parse" && (
+                <label>
+                  Required fields (comma separated)
+                  <input
+                    value={node.config.requiredFields?.join(", ") ?? ""}
+                    onChange={(e) =>
+                      update((g) => ({
+                        ...g,
+                        nodes: g.nodes.map((n) =>
+                          n.id === node.id
+                            ? {
+                                ...n,
+                                config: {
+                                  ...n.config,
+                                  requiredFields: e.target.value
+                                    .split(",")
+                                    .map((s) => s.trim())
+                                    .filter(Boolean),
+                                },
+                              }
+                            : n,
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+              )}
               <p className="hint">
                 {
                   {
+                    http: "Sends its input as JSON to the captured HTTP connection. GET requests omit the body.",
+                    parse: "Parses text as JSON and checks that configured fields are present.",
                     input: "Receives the JSON submitted when the workflow runs.",
                     literal: "Produces the configured JSON value.",
                     pick: "Selects a field from its single input. Use dot notation.",
@@ -519,6 +763,39 @@ function Editor({
           {save.error?.message || publish.error?.message} Your local edits remain on screen.
         </p>
       )}
+      {run && <Launch workflow={run} projectId={projectId} close={() => setRun(null)} />}
+      {runPublished.error && <p role="alert">{runPublished.error.message}</p>}
+      {picker && (
+        <Modal title="Add step" close={() => setPicker(false)}>
+          <div className="creation-options">
+            {(
+              [
+                ["literal", "code", "Literal JSON"],
+                ["pick", "filter", "Select field"],
+                ["parse", "code", "Parse JSON"],
+                ["merge", "layer-group", "Merge results"],
+                ["map", "arrows-rotate", "Map items"],
+                ["condition", "code-branch", "Condition"],
+                ["model", "robot", "Model"],
+                ["http", "globe", "HTTP tool"],
+                ["approval", "check-double", "Approval"],
+              ] as const
+            ).map(([type, icon, label]) => (
+              <button
+                key={type}
+                onClick={() => {
+                  add(type);
+                  setPicker(false);
+                }}
+              >
+                <Icon name={icon} />
+                <strong>{label}</strong>
+                <Icon name="plus" />
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
       <section className="connected-panel section">
         <h2>Published versions</h2>
         {w.versions.length ? (
@@ -542,27 +819,36 @@ function Editor({
 function Literal({
   value,
   save,
+  text,
+  onText,
   label = "JSON value",
 }: {
   value: unknown;
   save: (value: unknown) => void;
+  text?: string;
+  onText: (text: string) => void;
   label?: string;
 }) {
-  const [text, setText] = useState(JSON.stringify(value ?? {}, null, 2)),
-    [error, setError] = useState("");
+  const displayed = text ?? JSON.stringify(value ?? {}, null, 2);
+  let error = "";
+  try {
+    JSON.parse(displayed);
+  } catch {
+    error = "Enter valid JSON before saving or publishing.";
+  }
   return (
     <>
       <label>
         {label}
         <textarea
-          value={text}
+          value={displayed}
+          aria-invalid={!!error}
           onChange={(e) => {
-            setText(e.target.value);
+            onText(e.target.value);
             try {
               save(JSON.parse(e.target.value) as unknown);
-              setError("");
             } catch {
-              setError("Enter valid JSON. The last valid value is retained.");
+              /* Keep incomplete edits visible. */
             }
           }}
         />
@@ -572,12 +858,18 @@ function Literal({
   );
 }
 function GraphCanvas({
+  viewportRef,
+  connectFrom,
+  connectTo,
   graph,
   zoom,
   selected,
   select,
   move,
 }: {
+  viewportRef: RefObject<HTMLDivElement | null>;
+  connectFrom: (id: string) => void;
+  connectTo: (id: string) => void;
   graph: WorkflowGraph;
   zoom: number;
   selected: string | null;
@@ -609,13 +901,56 @@ function GraphCanvas({
     }
   }, [graph, width, height]);
   return (
-    <div className="studio-real-viewport" aria-label="Workflow graph">
+    <div
+      ref={viewportRef}
+      className="studio-real-viewport"
+      aria-label="Workflow graph"
+      onPointerDown={(e) => {
+        if (e.pointerType !== "mouse" || (e.target as HTMLElement).closest("button")) return;
+        e.preventDefault();
+        const el = e.currentTarget,
+          start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+        el.setPointerCapture(e.pointerId);
+        const motion = (event: PointerEvent) => {
+          el.scrollLeft = start.left - (event.clientX - start.x);
+          el.scrollTop = start.top - (event.clientY - start.y);
+        };
+        const end = () => {
+          el.removeEventListener("pointermove", motion);
+          el.removeEventListener("pointerup", end);
+          el.removeEventListener("pointercancel", end);
+        };
+        el.addEventListener("pointermove", motion);
+        el.addEventListener("pointerup", end, { once: true });
+        el.addEventListener("pointercancel", end, { once: true });
+      }}
+    >
       <div style={{ width: width * zoom, height: height * zoom }}>
         <div
           className="studio-real-graph"
           style={{ width, height, transform: `scale(${zoom})`, transformOrigin: "top left" }}
         >
           <canvas ref={ref} style={{ position: "absolute", width, height }} aria-hidden="true" />
+          {graph.nodes.flatMap((node) => [
+            node.type !== "input" && (
+              <button
+                key={node.id + ":in"}
+                className="node-port input-port"
+                aria-label={"Connect into " + node.name}
+                style={{ left: node.x - 8, top: node.y + 36 }}
+                onClick={() => connectTo(node.id)}
+              />
+            ),
+            node.type !== "output" && (
+              <button
+                key={node.id + ":out"}
+                className="node-port output-port"
+                aria-label={"Connect from " + node.name}
+                style={{ left: node.x + 208, top: node.y + 36 }}
+                onClick={() => connectFrom(node.id)}
+              />
+            ),
+          ])}
           {graph.nodes.map((node) => (
             <button
               key={node.id}

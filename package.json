@@ -26,7 +26,11 @@
     "db:migrate:remote": "wrangler d1 migrations apply traceyard-prod-db --remote",
     "db:list:local": "wrangler d1 migrations list traceyard-prod-db --local",
     "cf:typegen": "wrangler types",
-    "bench:api": "node scripts/bench-api.mjs"
+    "bench:api": "node scripts/bench-api.mjs",
+    "dev:acceptance": "vite --mode acceptance",
+    "db:migrate:acceptance": "wrangler d1 migrations apply traceyard-acceptance-db --config wrangler.acceptance.jsonc --local",
+    "predev": "npm run db:migrate:local",
+    "predev:acceptance": "npm run db:migrate:acceptance"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",

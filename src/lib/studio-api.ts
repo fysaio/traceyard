@@ -2,6 +2,7 @@ import type { WorkflowGraph } from "../../shared/workflow/graph";
 import { ApiClientError } from "./api";
 export interface StudioWorkflow {
   id: string;
+  icon?: string;
   name: string;
   description: string;
   current_version: number;
@@ -33,8 +34,11 @@ const path = (projectId: string, id?: string) =>
 export const studioApi = {
   import: (p: string, body: unknown) => call<{ id: string }>(path(p) + "/import", "POST", body),
   list: (p: string) => call<{ items: Omit<StudioWorkflow, "graph" | "versions">[] }>(path(p)),
-  create: (p: string, name: string) =>
-    call<{ id: string; revision: number }>(path(p), "POST", { name }),
+  create: (p: string, name: string, templateId?: string) =>
+    call<{ id: string; revision: number }>(path(p), "POST", {
+      name,
+      ...(templateId ? { templateId } : {}),
+    }),
   get: (p: string, id: string) => call<StudioWorkflow>(path(p, id)),
   save: (p: string, w: StudioWorkflow) =>
     call<{ revision: number }>(path(p, w.id), "PUT", {
@@ -42,6 +46,7 @@ export const studioApi = {
       description: w.description,
       revision: w.revision,
       graph: w.graph,
+      icon: w.icon ?? "diagram-project",
     }),
   publish: (p: string, id: string, revision: number) =>
     call<{ version: number }>(path(p, id) + "/publish", "POST", { revision }),

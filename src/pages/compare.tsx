@@ -1,5 +1,6 @@
+import { ProjectLink as Link } from "../components/project-link";
 import { useState } from "react";
-import { useSearchParams, Link } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { Badge, ErrorNotice } from "./integrations";

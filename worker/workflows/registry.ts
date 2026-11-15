@@ -59,7 +59,7 @@ export function assertCatalogMatchesRuntime(entry: WorkflowCatalogEntry): Workfl
           name: n.name,
           ordinal: i + 1,
           maxAttempts: 1,
-          timeoutMs: n.type === "model" ? 120000 : 10000,
+          timeoutMs: n.type === "model" ? 120000 : n.type === "http" ? 30000 : 10000,
           baseDelayMs: 0,
           backoff: "fixed" as const,
           maxDelayMs: 0,
