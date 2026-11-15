@@ -68,6 +68,32 @@ studioRoutes.post("/projects/:projectId/studio", async (c) => {
     201,
   );
 });
+studioRoutes.post("/projects/:projectId/studio/import", async (c) => {
+  const projectId = c.req.param("projectId");
+  await owned(c.env.DB, c.get("auth")?.user.id, projectId);
+  const b = parseWith(
+    createSchema.extend({ schemaVersion: z.literal(1), graph: graphDraftSchema }),
+    await readJsonBody(c),
+    "Choose a Traceyard workflow JSON exported from Studio (schemaVersion 1).",
+  );
+  const json = JSON.stringify(b.graph);
+  if (new TextEncoder().encode(json).length > 24000)
+    throw badRequest("GRAPH_TOO_LARGE", "Workflows are limited to 24 KB.");
+  const id = randomId("wf"),
+    now = nowIso();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "INSERT INTO workflows (id,project_id,slug,name,description,current_version,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)",
+    ).bind(id, projectId, id, b.name, b.description, now, now),
+    c.env.DB.prepare(
+      "INSERT INTO workflow_drafts (workflow_id,graph_json,revision,updated_at) VALUES (?,?,1,?)",
+    ).bind(id, json, now),
+  ]);
+  return c.json(
+    { data: { id, revision: 1 }, meta: { requestId: getRequestContext(c).requestId } },
+    201,
+  );
+});
 studioRoutes.get("/projects/:projectId/studio/:id", async (c) => {
   const projectId = c.req.param("projectId"),
     id = c.req.param("id");
@@ -140,7 +166,7 @@ studioRoutes.post("/projects/:projectId/studio/:id/publish", async (c) => {
       name: n.name,
       ordinal: i + 1,
       description: n.type,
-      timeoutMs: 10000,
+      timeoutMs: n.type === "model" ? 120000 : 10000,
       retry: { maxAttempts: 1, baseDelayMs: 0, backoff: "fixed", maxDelayMs: 0 },
     }));
   const version = w.current_version + 1,

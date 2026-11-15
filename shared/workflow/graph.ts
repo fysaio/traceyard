@@ -5,9 +5,29 @@ export const graphNodeSchema = z
   .object({
     id: identifier,
     name: z.string().trim().min(1).max(100),
-    type: z.enum(["input", "literal", "pick", "merge", "output"]),
+    type: z.enum([
+      "input",
+      "literal",
+      "pick",
+      "merge",
+      "output",
+      "model",
+      "approval",
+      "map",
+      "condition",
+    ]),
     config: z
-      .object({ value: z.unknown().optional(), path: z.string().max(200).optional() })
+      .object({
+        value: z.unknown().optional(),
+        path: z.string().max(200).optional(),
+        routeId: z.string().max(80).optional(),
+        prompt: z.string().max(6000).optional(),
+        expiresMinutes: z.number().int().min(1).max(60).optional(),
+        limit: z.number().int().min(1).max(20).optional(),
+        equals: z.unknown().optional(),
+        thenTarget: identifier.optional(),
+        elseTarget: identifier.optional(),
+      })
       .strict()
       .default({}),
     x: z.number().min(0).max(10000).default(40),
@@ -34,6 +54,8 @@ export function graphErrors(graph: WorkflowGraph): string[] {
     errors.push("Use exactly one input step.");
   if (graph.nodes.filter((n) => n.type === "output").length !== 1)
     errors.push("Use exactly one output step.");
+  if (graph.nodes.filter((n) => n.type === "approval").length > 4)
+    errors.push("Use at most four approval steps per workflow.");
   const edges = new Set<string>();
   for (const [a, b] of graph.edges) {
     if (!ids.has(a) || !ids.has(b) || a === b)
@@ -51,8 +73,30 @@ export function graphErrors(graph: WorkflowGraph): string[] {
       errors.push("The output cannot have outgoing connections.");
     if (n.type !== "output" && !outgoing.length)
       errors.push(`Connect ${n.name} to the output path.`);
-    if (["pick", "output"].includes(n.type) && incoming.length !== 1)
+    if (["pick", "output", "map", "condition"].includes(n.type) && incoming.length !== 1)
       errors.push(`${n.name} needs exactly one incoming connection.`);
+  }
+  for (const node of graph.nodes) {
+    if (node.type === "condition") {
+      const targets = graph.edges.filter(([a]) => a === node.id).map(([, b]) => b);
+      if (!Object.hasOwn(node.config, "equals"))
+        errors.push(`Set a comparison value for ${node.name}.`);
+      if (
+        !node.config.thenTarget ||
+        !node.config.elseTarget ||
+        node.config.thenTarget === node.config.elseTarget ||
+        targets.length !== 2 ||
+        !targets.includes(node.config.thenTarget) ||
+        !targets.includes(node.config.elseTarget)
+      )
+        errors.push(
+          `Connect ${node.name} to two different steps and choose its true and false paths.`,
+        );
+    }
+    if (node.type === "model" && !node.config.routeId)
+      errors.push(`Choose a model route for ${node.name}.`);
+    if (node.type === "map" && !node.config.limit)
+      errors.push(`Set an iteration limit for ${node.name}.`);
   }
   if (graphLayers(graph).flat().length !== graph.nodes.length)
     errors.push("Connections must not form a cycle.");
@@ -76,6 +120,19 @@ export function evaluateGraphNode(node: GraphNode, input: unknown, sources: unkn
   if (node.type === "literal") return node.config.value ?? null;
   if (node.type === "output") return sources[0] ?? null;
   if (node.type === "merge") return sources;
+  if (node.type === "condition") {
+    const value = evaluateGraphNode({ ...node, type: "pick" }, null, sources);
+    return JSON.stringify(value) === JSON.stringify(node.config.equals);
+  }
+  if (node.type === "map") {
+    const items = sources[0];
+    if (!Array.isArray(items)) throw new Error("Map input must be an array.");
+    if (items.length > (node.config.limit ?? 20))
+      throw new Error("Map input exceeds its configured iteration limit.");
+    return items.map((item) => evaluateGraphNode({ ...node, type: "pick" }, null, [item]));
+  }
+  if (node.type === "model" || node.type === "approval")
+    throw new Error("This step requires the execution service.");
   let value = sources[0];
   for (const key of (node.config.path ?? "").split(".").filter(Boolean)) {
     if (

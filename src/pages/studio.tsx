@@ -1,3 +1,4 @@
+import { integrations } from "../lib/integrations-api";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
@@ -43,6 +44,10 @@ function Editor({
   projectId: string;
   changed: () => void;
 }) {
+  const routes = useQuery({
+    queryKey: ["gateway", projectId],
+    queryFn: () => integrations.gateway(projectId),
+  });
   const [w, setW] = useState(initial),
     [selected, setSelected] = useState<string | null>(null),
     [zoom, setZoom] = useState(1),
@@ -98,7 +103,14 @@ function Editor({
           id,
           name: type[0]!.toUpperCase() + type.slice(1),
           type,
-          config: type === "literal" ? { value: {} } : {},
+          config:
+            type === "literal"
+              ? { value: {} }
+              : type === "map"
+                ? { limit: 20, path: "" }
+                : type === "approval"
+                  ? { expiresMinutes: 30 }
+                  : {},
           x: 100 + (g.nodes.length % 3) * 260,
           y: 100 + Math.floor(g.nodes.length / 3) * 150,
         },
@@ -127,6 +139,35 @@ function Editor({
         <div className="actions">
           <button
             className="btn"
+            onClick={() => {
+              const url = URL.createObjectURL(
+                new Blob(
+                  [
+                    JSON.stringify(
+                      {
+                        schemaVersion: 1,
+                        name: w.name,
+                        description: w.description,
+                        graph: w.graph,
+                      },
+                      null,
+                      2,
+                    ),
+                  ],
+                  { type: "application/json" },
+                ),
+              );
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = w.id + ".traceyard.json";
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }}
+          >
+            Export workflow
+          </button>
+          <button
+            className="btn"
             disabled={save.isPending || publish.isPending || !dirty}
             onClick={() => save.mutate(w)}
           >
@@ -144,11 +185,13 @@ function Editor({
       <div className="studio-editor-layout">
         <div>
           <div className="actions studio-add">
-            {(["literal", "pick", "merge"] as const).map((type) => (
-              <button key={type} className="btn" onClick={() => add(type)}>
-                + {type}
-              </button>
-            ))}
+            {(["literal", "pick", "merge", "map", "condition", "model", "approval"] as const).map(
+              (type) => (
+                <button key={type} className="btn" onClick={() => add(type)}>
+                  + {type}
+                </button>
+              ),
+            )}
           </div>
           <GraphCanvas
             graph={w.graph}
@@ -200,7 +243,7 @@ function Editor({
                   }))
                 }
               />
-              {node.type === "pick" && (
+              {["pick", "map", "condition"].includes(node.type) && (
                 <>
                   <label htmlFor="pick-path">Field path</label>
                   <input
@@ -211,7 +254,9 @@ function Editor({
                       update((g) => ({
                         ...g,
                         nodes: g.nodes.map((n) =>
-                          n.id === node.id ? { ...n, config: { path: e.target.value } } : n,
+                          n.id === node.id
+                            ? { ...n, config: { ...n.config, path: e.target.value } }
+                            : n,
                         ),
                       }))
                     }
@@ -232,6 +277,149 @@ function Editor({
                   }
                 />
               )}
+              {node.type === "model" && (
+                <>
+                  <label>
+                    Model route
+                    <select
+                      value={node.config.routeId ?? ""}
+                      onChange={(e) =>
+                        update((g) => ({
+                          ...g,
+                          nodes: g.nodes.map((n) =>
+                            n.id === node.id
+                              ? { ...n, config: { ...n.config, routeId: e.target.value } }
+                              : n,
+                          ),
+                        }))
+                      }
+                    >
+                      <option value="">Choose a route</option>
+                      {routes.data?.routes.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Link className="text-link" to="/gateway">
+                    Configure routes in Gateway
+                  </Link>
+                  {routes.error && <p role="alert">{routes.error.message}</p>}
+                </>
+              )}
+              {["model", "approval"].includes(node.type) && (
+                <label>
+                  {node.type === "model" ? "Instructions" : "Review prompt"}
+                  <textarea
+                    maxLength={6000}
+                    value={node.config.prompt ?? ""}
+                    onChange={(e) =>
+                      update((g) => ({
+                        ...g,
+                        nodes: g.nodes.map((n) =>
+                          n.id === node.id
+                            ? { ...n, config: { ...n.config, prompt: e.target.value } }
+                            : n,
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+              )}
+              {node.type === "approval" && (
+                <label>
+                  Expires after (minutes)
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    required
+                    value={node.config.expiresMinutes ?? 30}
+                    onChange={(e) =>
+                      update((g) => ({
+                        ...g,
+                        nodes: g.nodes.map((n) =>
+                          n.id === node.id
+                            ? {
+                                ...n,
+                                config: { ...n.config, expiresMinutes: Number(e.target.value) },
+                              }
+                            : n,
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+              )}
+              {node.type === "map" && (
+                <label>
+                  Maximum items
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    required
+                    value={node.config.limit ?? 20}
+                    onChange={(e) =>
+                      update((g) => ({
+                        ...g,
+                        nodes: g.nodes.map((n) =>
+                          n.id === node.id
+                            ? { ...n, config: { ...n.config, limit: Number(e.target.value) } }
+                            : n,
+                        ),
+                      }))
+                    }
+                  />
+                </label>
+              )}
+              {node.type === "condition" && (
+                <>
+                  <Literal
+                    key={node.id + "equals"}
+                    label="Compare field to JSON"
+                    value={node.config.equals}
+                    save={(value) =>
+                      update((g) => ({
+                        ...g,
+                        nodes: g.nodes.map((n) =>
+                          n.id === node.id ? { ...n, config: { ...n.config, equals: value } } : n,
+                        ),
+                      }))
+                    }
+                  />
+                  {(["thenTarget", "elseTarget"] as const).map((field) => (
+                    <label key={field}>
+                      {field === "thenTarget"
+                        ? "When equal, continue to"
+                        : "Otherwise, continue to"}
+                      <select
+                        value={node.config[field] ?? ""}
+                        onChange={(e) =>
+                          update((g) => ({
+                            ...g,
+                            nodes: g.nodes.map((n) =>
+                              n.id === node.id
+                                ? { ...n, config: { ...n.config, [field]: e.target.value } }
+                                : n,
+                            ),
+                          }))
+                        }
+                      >
+                        <option value="">Choose a connected step</option>
+                        {w.graph.edges
+                          .filter(([a]) => a === node.id)
+                          .map(([, b]) => (
+                            <option key={b} value={b}>
+                              {w.graph.nodes.find((n) => n.id === b)?.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  ))}
+                </>
+              )}
               <p className="hint">
                 {
                   {
@@ -240,6 +428,13 @@ function Editor({
                     pick: "Selects a field from its single input. Use dot notation.",
                     merge: "Combines incoming results into an array in connection order.",
                     output: "Records the result from its single input.",
+                    model:
+                      "Calls the captured Gateway route with instructions and incoming JSON. Returns text, provider and measured usage.",
+                    approval:
+                      "Waits for a decision in Approvals before passing its input onward. Rejection or expiry stops the execution.",
+                    map: "Selects the field path from each item of an array, up to the configured limit.",
+                    condition:
+                      "Compares the selected field to JSON and runs one path. Steps exclusive to the other path are skipped. Rejoin paths with a Merge step.",
                   }[node.type]
                 }
               </p>
@@ -344,25 +539,34 @@ function Editor({
     </>
   );
 }
-function Literal({ value, save }: { value: unknown; save: (value: unknown) => void }) {
+function Literal({
+  value,
+  save,
+  label = "JSON value",
+}: {
+  value: unknown;
+  save: (value: unknown) => void;
+  label?: string;
+}) {
   const [text, setText] = useState(JSON.stringify(value ?? {}, null, 2)),
     [error, setError] = useState("");
   return (
     <>
-      <label htmlFor="literal-value">JSON value</label>
-      <textarea
-        id="literal-value"
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          try {
-            save(JSON.parse(e.target.value) as unknown);
-            setError("");
-          } catch {
-            setError("Enter valid JSON. The last valid value is retained.");
-          }
-        }}
-      />
+      <label>
+        {label}
+        <textarea
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            try {
+              save(JSON.parse(e.target.value) as unknown);
+              setError("");
+            } catch {
+              setError("Enter valid JSON. The last valid value is retained.");
+            }
+          }}
+        />
+      </label>
       {error && <p role="alert">{error}</p>}
     </>
   );
@@ -386,7 +590,7 @@ function GraphCanvas({
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 4096 / width, 4096 / height);
     c.width = width * dpr;
     c.height = height * dpr;
     const ctx = c.getContext("2d");

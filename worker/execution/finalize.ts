@@ -149,16 +149,16 @@ export async function finalizeRunCancelled(
       .bind(runId, runId),
     db
       .prepare(
-        `UPDATE execution_steps SET status = 'SKIPPED', completed_at = ?, updated_at = ?
-          WHERE run_id = ? AND status = 'PENDING'`,
+        `UPDATE execution_steps SET status = CASE WHEN status = 'RUNNING' THEN 'CANCELLED' ELSE 'SKIPPED' END, completed_at = ?, updated_at = ?
+          WHERE run_id = ? AND status IN ('PENDING','RUNNING') AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'CANCELLED')`,
       )
-      .bind(now, now, runId),
+      .bind(now, now, runId, runId),
     db
       .prepare(
         `UPDATE step_attempts SET status = 'ABANDONED', completed_at = ?
-          WHERE run_id = ? AND status = 'RUNNING'`,
+          WHERE run_id = ? AND status = 'RUNNING' AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'CANCELLED')`,
       )
-      .bind(now, runId),
+      .bind(now, runId, runId),
     eventInsertStatement(db, {
       runId,
       type: "run.cancelled",

@@ -30,6 +30,8 @@ export default defineConfig(async () => {
               miniflare: {
                 bindings: {
                   TEST_MODE: "true",
+                  INTEGRATION_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                  OUTBOUND_ALLOWED_HOSTS: "hooks.example.test",
                   TEST_MIGRATIONS: migrations,
                   GITHUB_CLIENT_ID: "traceyard-test-client",
                   GITHUB_CLIENT_SECRET: "test-only-not-a-github-secret",

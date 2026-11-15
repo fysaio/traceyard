@@ -1,3 +1,9 @@
+import { automationRoutes } from "./routes/automations";
+import { experimentRoutes } from "./routes/experiments";
+import { approvalRoutes } from "./routes/approvals";
+import { gatewayRoutes } from "./routes/gateway";
+import { traceRoutes } from "./routes/traces";
+import { developerRoutes } from "./routes/developer";
 import { studioRoutes } from "./routes/studio";
 import { Hono } from "hono";
 
@@ -37,6 +43,12 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
   app.route("/api", createAuthRoutes(options.githubFetch));
   app.route("/api", projectRoutes);
   app.route("/api", studioRoutes);
+  app.route("/api", traceRoutes);
+  app.route("/api", gatewayRoutes);
+  app.route("/api", approvalRoutes);
+  app.route("/api", automationRoutes);
+  app.route("/api", experimentRoutes);
+  app.route("/api", developerRoutes);
   app.route("/api", healthRoutes);
   app.route("/api", workflowRoutes);
   app.route("/api", runRoutes);

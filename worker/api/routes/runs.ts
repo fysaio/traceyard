@@ -1,3 +1,4 @@
+import { wakeApprovals } from "../../integrations/approvals";
 import { Hono } from "hono";
 
 import {
@@ -146,6 +147,7 @@ runRoutes.post("/runs/:id/cancel", async (c) => {
     requestId,
     c.get("auth")?.user.id ?? null,
   );
+  await wakeApprovals(c.env, c.req.param("id"));
   return c.json({ data: result, meta: { requestId } }, 200);
 });
 

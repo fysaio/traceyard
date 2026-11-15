@@ -1,9 +1,19 @@
+import {
+  Gateway,
+  Approvals,
+  Traces,
+  Developer,
+  Automations,
+  Experiments,
+} from "./pages/integrations";
+import { Compare } from "./pages/compare";
 import { Studio } from "./pages/studio";
 import { studioApi } from "./lib/studio-api";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
 import {
   Link,
   Navigate,
+  NavLink,
   Route,
   Routes,
   useNavigate,
@@ -19,11 +29,7 @@ import {
   type SavedWorkflowSummary,
 } from "./lib/api";
 import type { RunDetail, WorkflowSummary } from "../shared/contracts/api";
-import {
-  documentInputSchema,
-  FAILURE_SCENARIOS,
-  type FailureScenario,
-} from "../shared/workflow/document";
+import { documentInputSchema, type FailureScenario } from "../shared/workflow/document";
 
 const Icon = ({ name }: { name: string }) => (
   <i className={`fa-solid fa-${name}`} aria-hidden="true" />
@@ -194,13 +200,14 @@ function Workspace({ session }: { session: AuthSession }) {
           {[
             ["/", "Workflows", "layer-group"],
             ["/executions", "Executions", "clock-rotate-left"],
-            ["/laboratory", "Laboratory", "flask"],
+            ["/traces", "Traces", "diagram-project"],
+            ["/gateway", "Gateway", "shuffle"],
             ["/settings", "Settings", "gear"],
           ].map(([path, text, icon]) => (
-            <Link key={path} to={path!}>
+            <NavLink key={path} to={path!} end={path === "/"}>
               <Icon name={icon!} />
               <span>{text}</span>
-            </Link>
+            </NavLink>
           ))}
         </nav>
         <div className="header-tools">
@@ -275,8 +282,26 @@ function Workspace({ session }: { session: AuthSession }) {
               />
               <Route path="/executions/:id" element={<Execution />} />
               <Route path="/analytics" element={<Analytics />} />
-              <Route path="/laboratory" element={<Laboratory projectId={projectId} />} />
+              <Route
+                path="/laboratory"
+                element={<Experiments key={projectId} projectId={projectId} />}
+              />
               <Route path="/studio/:id" element={<Studio projectId={projectId} />} />
+              <Route path="/gateway" element={<Gateway key={projectId} projectId={projectId} />} />
+              <Route path="/traces" element={<Traces key={projectId} projectId={projectId} />} />
+              <Route
+                path="/approvals"
+                element={<Approvals key={projectId} projectId={projectId} />}
+              />
+              <Route
+                path="/developer"
+                element={<Developer key={projectId} projectId={projectId} />}
+              />
+              <Route
+                path="/automations"
+                element={<Automations key={projectId} projectId={projectId} />}
+              />
+              <Route path="/compare" element={<Compare projectId={projectId} />} />
               <Route path="/settings" element={<Settings session={session} />} />
               <Route
                 path="*"
@@ -309,6 +334,16 @@ function Workflows({ projectId }: { projectId: string }) {
       navigate("/studio/" + w.id);
     },
   });
+  const importWorkflow = useMutation({
+    mutationFn: async (file: File) => {
+      if (file.size > 30000) throw new Error("Workflow files must be smaller than 30 KB.");
+      return studioApi.import(projectId, JSON.parse(await file.text()) as unknown);
+    },
+    onSuccess: (w) => {
+      void cache.invalidateQueries({ queryKey: ["studio-list", projectId] });
+      navigate("/studio/" + w.id);
+    },
+  });
   const archive = useMutation({
     mutationFn: (id: string) => studioApi.archive(projectId, id),
     onSuccess: () => {
@@ -334,18 +369,36 @@ function Workflows({ projectId }: { projectId: string }) {
       <Heading
         title="Workflows"
         actions={
-          <button
-            className="btn primary"
-            disabled={create.isPending || !projectId}
-            onClick={() => create.mutate()}
-          >
-            + Create workflow
-          </button>
+          <>
+            <label className="btn import-button">
+              Import workflow
+              <input
+                className="sr-only"
+                type="file"
+                accept=".json,application/json"
+                disabled={importWorkflow.isPending || !projectId}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) importWorkflow.mutate(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button
+              className="btn primary"
+              disabled={create.isPending || !projectId}
+              onClick={() => create.mutate()}
+            >
+              + Create workflow
+            </button>
+          </>
         }
       >
         Choose a published workflow and run it with your own input.
       </Heading>
-      {(create.error || archive.error) && <Notice error={create.error || archive.error} />}
+      {(create.error || archive.error || importWorkflow.error) && (
+        <Notice error={create.error || archive.error || importWorkflow.error} />
+      )}
       {drafts.error && <Notice error={drafts.error} />}
       {!!drafts.data?.items.length && (
         <section className="connected-panel draft-library">
@@ -1008,6 +1061,12 @@ function Execution() {
         <span>Version {r.workflow.version}</span>
         <span>{duration(r.durationMs)}</span>
         <span>{r.id}</span>
+        <Link className="text-link" to="/approvals">
+          Review approvals
+        </Link>
+        <Link className="text-link" to={"/compare?left=" + r.id}>
+          Compare
+        </Link>
       </div>
       {r.parentRunId && (
         <Link to={`/executions/${r.parentRunId}`} className="text-link">
@@ -1166,6 +1225,9 @@ function Execution() {
                         <Status value={a.status} />
                         <span>{duration(a.durationMs)}</span>
                         {a.error && <p>{a.error.message}</p>}
+                        {a.input !== undefined && (
+                          <Json value={{ input: a.input, output: a.output }} />
+                        )}
                       </div>
                     ))}
                   </details>
@@ -1174,58 +1236,6 @@ function Execution() {
             )}
           </div>
         </>
-      )}
-    </>
-  );
-}
-function Laboratory({ projectId }: { projectId: string }) {
-  const workflows = useQuery({
-    queryKey: ["workflows", projectId],
-    queryFn: () => api.workflows(projectId),
-  });
-  const [fault, setFault] = useState<FailureScenario>("retryable_failure"),
-    [launch, setLaunch] = useState(false);
-  return (
-    <>
-      <Heading title="Laboratory">
-        Inspect how the registered workflow handles a controlled failure.
-      </Heading>
-      <section className="connected-panel">
-        <h2>Document workflow fault test</h2>
-        <p>
-          These scenarios run through the real queue, workflow engine and database. Failure
-          injection is deliberate; there is no external model call.
-        </p>
-        <div className="field">
-          <label htmlFor="fault">Scenario</label>
-          <select
-            id="fault"
-            value={fault}
-            onChange={(e) => setFault(e.target.value as FailureScenario)}
-          >
-            {FAILURE_SCENARIOS.map((s) => (
-              <option key={s} value={s}>
-                {label(s)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          className="btn primary"
-          disabled={!workflows.data?.find((w) => w.slug === "document-intelligence")}
-          onClick={() => setLaunch(true)}
-        >
-          Configure execution
-        </button>
-        {workflows.isError && <Notice error={workflows.error} />}
-      </section>
-      {launch && workflows.data?.find((w) => w.slug === "document-intelligence") && (
-        <Launch
-          projectId={projectId}
-          workflow={workflows.data.find((w) => w.slug === "document-intelligence")!}
-          fault={fault}
-          close={() => setLaunch(false)}
-        />
       )}
     </>
   );
@@ -1263,14 +1273,33 @@ function Settings({ session }: { session: AuthSession }) {
         {revoke.isError && <Notice error={revoke.error} />}
       </section>
       <section className="connected-panel section">
-        <h2>Available capabilities</h2>
+        <h2>Project tools</h2>
+        <div className="actions section">
+          <Link className="btn" to="/approvals">
+            Approvals
+          </Link>
+          <Link className="btn" to="/laboratory">
+            Laboratory
+          </Link>
+        </div>
+        <div className="actions section">
+          <Link className="btn" to="/automations">
+            Schedules &amp; webhooks
+          </Link>
+          <Link className="btn" to="/developer">
+            API keys &amp; SDK
+          </Link>
+          <Link className="btn" to="/compare">
+            Compare executions
+          </Link>
+        </div>
         <p>
           Published document workflows execute in Cloudflare Workflows and persist their results in
           D1. Saved configurations are stored in your project.
         </p>
         <p>
-          Studio publishes versioned data workflows. Model providers, approval tasks and webhooks
-          are still being implemented.
+          Studio publishes versioned workflows with data transforms, model routes and approval
+          steps.
         </p>
       </section>
     </>

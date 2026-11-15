@@ -1,3 +1,4 @@
+import { DomainError } from "../../shared/domain/errors";
 import { graphSchema, graphLayers } from "../../shared/workflow/graph";
 import { DOCUMENT_WORKFLOW, validateDocumentInput } from "../../shared/workflow/document";
 import type { WorkflowCatalogEntry } from "../persistence/catalog";
@@ -58,12 +59,21 @@ export function assertCatalogMatchesRuntime(entry: WorkflowCatalogEntry): Workfl
           name: n.name,
           ordinal: i + 1,
           maxAttempts: 1,
-          timeoutMs: 10000,
+          timeoutMs: n.type === "model" ? 120000 : 10000,
           baseDelayMs: 0,
           backoff: "fixed" as const,
           maxDelayMs: 0,
         })),
-      validateInput: (value) => value,
+      validateInput: (value) => {
+        if (value === undefined)
+          throw new DomainError({
+            errorClass: "VALIDATION",
+            code: "INPUT_REQUIRED",
+            message: "Provide an input JSON value.",
+            retryable: false,
+          });
+        return value;
+      },
     };
   }
   const runtime = getWorkflowRuntime(entry.workflow.slug);
