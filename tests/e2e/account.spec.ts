@@ -32,7 +32,7 @@ test("list and grid selection keep action controls within their cards", async ({
     ),
   );
   await page.route("**/api/projects/*/workflows", (r) => r.fulfill(json({ items: [] })));
-  await page.route("**/api/workflows", (r) =>
+  await page.route("**/api/workflows?*", (r) =>
     r.fulfill(
       json({
         items: [
@@ -49,6 +49,7 @@ test("list and grid selection keep action controls within their cards", async ({
       }),
     ),
   );
+  await page.route("**/api/projects/*/studio", (r) => r.fulfill(json({ items: [] })));
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toBeVisible();
   for (const width of [390, 768, 1009, 1440]) {

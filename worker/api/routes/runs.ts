@@ -75,12 +75,18 @@ runRoutes.get("/runs", async (c) => {
   if (query.cursor !== undefined && cursor === null) {
     throw badRequest("INVALID_CURSOR", "The pagination cursor is not valid.");
   }
-  const page = await listRunsForSession(c.env.DB, c.get("session").idHash, {
-    status: query.status,
-    workflowId: query.workflowId,
-    cursor,
-    limit: query.limit,
-  }, c.get("auth")?.user.id ?? null);
+  const page = await listRunsForSession(
+    c.env.DB,
+    c.get("session").idHash,
+    {
+      status: query.status,
+      workflowId: query.workflowId,
+      projectId: query.projectId,
+      cursor,
+      limit: query.limit,
+    },
+    c.get("auth")?.user.id ?? null,
+  );
   return c.json({ data: page, meta: { requestId } });
 });
 

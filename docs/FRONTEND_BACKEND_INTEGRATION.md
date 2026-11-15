@@ -49,3 +49,13 @@ The Worker integration tests use actual Miniflare D1/Queue/Workflow bindings and
 UI contract tests intentionally stub HTTP responses and are separate from those backend tests. The execution transport unit tests check cookie transport, project/idempotency data, expired-session errors, static-hosting misconfiguration and event pagination.
 
 This workspace has no authenticated Cloudflare deployment session. Local interactive preview also failed because the Cloudflare Vite plugin encountered `uv_interface_addresses` in this environment; application code was not changed to bypass it. Browser/end-to-end production verification and production deployment remain pending. The public static UI preview remains unchanged.
+
+## Executable Studio milestone (supersedes the document-only limit above)
+
+Migration 0005 adds revisioned workflow drafts and immutable graph definitions on published versions. Studio now creates owned workflows, saves drafts using revision checks, validates and publishes versions, archives workflows without deleting run history, and opens historical published versions for inspection/launch.
+
+The executable node set is Input, Literal JSON, Pick (safe field-path selection), Merge (ordered array of incoming values), and Output. Server validation rejects duplicate IDs, bad connections, cycles and disconnected paths. The graph executor uses Cloudflare durable steps and runs independent ready branches together; step results and failures use the existing D1 trace records. The document pipeline remains available separately.
+
+Launch requests now select an explicit version and include project ownership in the idempotency request fingerprint. History can be filtered to an owned project; the frontend passes the current project through workflow, launch and history flows. Cancelled executions no longer advertise the failed-run-only retry endpoint. Account analytics now uses the existing backend metrics endpoints.
+
+This milestone does not complete provider calls, external trace ingestion, nested spans, approvals, scheduled workflow triggers or outgoing webhooks. It is not ready for the final AntiGravity handoff. Runtime browser verification and production deployment remain pending for the previously recorded environment reasons.

@@ -62,6 +62,7 @@ const DEDUPE_WINDOW_MS = 10_000;
 export interface LaunchInput {
   workflowId: string;
   projectId?: string;
+  version?: number;
   input: unknown;
   scenario: FailureScenario;
 }
@@ -99,12 +100,19 @@ export async function launchRun(
   const { session, userId = null, requestId, body, idempotencyKey, config } = options;
   const db = env.DB;
 
-  const entry = await findWorkflowByIdOrSlug(db, body.workflowId);
+  const projectId = await resolveRunProject(db, userId, body.projectId);
+  const entry =
+    (await findWorkflowByIdOrSlug(db, body.workflowId, projectId, body.version)) ??
+    (await findWorkflowByIdOrSlug(db, body.workflowId, SANDBOX_PROJECT_ID, body.version));
   if (entry === null) {
     throw notFound("The requested workflow does not exist in this project.");
   }
   const runtime = assertCatalogMatchesRuntime(entry);
-  const projectId = await resolveRunProject(db, userId, body.projectId);
+  if (entry.version.graph_json && body.scenario !== "success")
+    throw badRequest(
+      "UNSUPPORTED_FAULT",
+      "Document fault scenarios cannot be applied to this workflow.",
+    );
 
   let validatedInput: unknown;
   try {
@@ -121,6 +129,7 @@ export async function launchRun(
   const requestHash = await sha256Hex(
     JSON.stringify({
       workflow: entry.workflow.slug,
+      projectId,
       version: entry.version.version,
       scenario: body.scenario,
       input: validatedInput,
@@ -402,7 +411,8 @@ async function reserveSandboxQuotas(
       windowStart: startOfUtcDay(now).toISOString(),
       expiresAt: dayExpiry,
       reason: "GLOBAL_DAILY_QUOTA",
-      message: "The sandbox has reached its global daily execution allowance. Try again after the quota window resets.",
+      message:
+        "The sandbox has reached its global daily execution allowance. Try again after the quota window resets.",
     },
     {
       key: `session:${session.idHash}:day:${day}`,
@@ -531,13 +541,15 @@ export async function listRunsForSession(
   options: {
     status?: RunStatus | undefined;
     workflowId?: string | undefined;
+    projectId?: string | undefined;
     cursor: { createdAt: string; id: string } | null;
     limit: number;
   },
   userId: string | null = null,
 ): Promise<RunListPage> {
+  if (options.projectId) await resolveRunProject(db, userId, options.projectId);
   const rows = await listRuns(db, {
-    projectId: userId === null ? SANDBOX_PROJECT_ID : null,
+    projectId: options.projectId ?? (userId === null ? SANDBOX_PROJECT_ID : null),
     sessionHash,
     userId,
     status: options.status,
@@ -760,7 +772,19 @@ export async function retryRun(
     .bind(original.workflow_id)
     .first<{ slug: string; name: string }>();
   if (workflow === null) throw notFound("The workflow for this run no longer exists.");
-  const entry = await findWorkflowByIdOrSlug(db, workflow.slug);
+  const entry =
+    (await findWorkflowByIdOrSlug(
+      db,
+      original.workflow_id,
+      original.project_id,
+      original.workflow_version,
+    )) ??
+    (await findWorkflowByIdOrSlug(
+      db,
+      original.workflow_id,
+      SANDBOX_PROJECT_ID,
+      original.workflow_version,
+    ));
   if (entry === null) throw notFound("The workflow for this run no longer exists.");
   const runtime = assertCatalogMatchesRuntime(entry);
   if (entry.version.version !== original.workflow_version) {

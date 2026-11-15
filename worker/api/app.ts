@@ -1,3 +1,4 @@
+import { studioRoutes } from "./routes/studio";
 import { Hono } from "hono";
 
 import type { ApiFailure } from "../../shared/contracts/api";
@@ -35,6 +36,7 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
 
   app.route("/api", createAuthRoutes(options.githubFetch));
   app.route("/api", projectRoutes);
+  app.route("/api", studioRoutes);
   app.route("/api", healthRoutes);
   app.route("/api", workflowRoutes);
   app.route("/api", runRoutes);
