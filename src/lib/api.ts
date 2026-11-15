@@ -37,6 +37,7 @@ export class ApiClientError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<T>> {
   const response = await fetch(path, {
     ...init,
+    credentials: "same-origin",
     headers: {
       Accept: "application/json",
       ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -206,7 +207,7 @@ export const api = {
     ).then((body) => body.data),
 
   launch: (
-    input: { workflowId: string; input: unknown; scenario: FailureScenario },
+    input: { workflowId: string; projectId?: string; input: unknown; scenario: FailureScenario },
     idempotencyKey: string,
   ): Promise<{ result: LaunchRunResult; replayed: boolean }> =>
     request<LaunchRunResult>("/api/runs", {
@@ -228,4 +229,19 @@ export const api = {
 
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
+}
+
+/** Retrieve every persisted event page for inspection/export, without truncating at 200. */
+export async function readAllEvents(id: string): Promise<EventListPage> {
+  const items: EventListPage["items"] = [];
+  let cursor = 0;
+  for (;;) {
+    const page = await api.events(id, cursor);
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (page.nextCursor <= cursor) {
+      throw new ApiClientError(502, "INVALID_EVENT_CURSOR", "Event pagination did not advance.");
+    }
+    cursor = page.nextCursor;
+  }
 }

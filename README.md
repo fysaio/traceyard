@@ -256,3 +256,7 @@ npm run deploy
 ## License
 
 MIT. See [LICENSE](./LICENSE).
+
+## Connected frontend
+
+The current frontend uses the real same-origin Worker API for GitHub authentication, owned projects, version-pinned saved inputs and persisted workflow execution. It does not load the separate UI preview's simulation engine. See [the integration guide](docs/FRONTEND_BACKEND_INTEGRATION.md) for supported capabilities, deployment prerequisites and validation limits.
