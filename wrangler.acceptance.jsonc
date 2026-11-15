@@ -1,0 +1,65 @@
+// Local browser acceptance only. Never use this config to deploy.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "traceyard-local-acceptance",
+  "main": "./tests/browser/fixture-worker.ts",
+  "compatibility_date": "2026-11-13",
+  "upload_source_maps": true,
+  "observability": {
+    "enabled": true,
+  },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/__acceptance/*"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "traceyard-acceptance-db",
+      "database_id": "00000000-0000-0000-0000-000000000007",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "queue": "traceyard-acceptance-executions",
+        "binding": "EXECUTION_QUEUE",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "traceyard-acceptance-executions",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 4,
+      },
+    ],
+  },
+  "workflows": [
+    {
+      "name": "traceyard-acceptance-workflow",
+      "binding": "RUN_WORKFLOW",
+      "class_name": "RunExecutionWorkflow",
+      "concurrency": {
+        "limit": 8,
+      },
+      "default_retention": {
+        "success_retention": "1 day",
+        "error_retention": "7 days",
+      },
+    },
+  ],
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "vars": {
+    "APP_VERSION": "0.1.0",
+    "SANDBOX_DAILY_RUN_LIMIT": "100",
+    "SANDBOX_SESSION_HOURLY_LIMIT": "6",
+    "SANDBOX_SESSION_DAILY_LIMIT": "20",
+    "SANDBOX_GLOBAL_CONCURRENCY_LIMIT": "8",
+    "RUN_RETENTION_DAYS": "30",
+    "LOCAL_ACCEPTANCE": "true",
+  },
+}

@@ -1,3 +1,4 @@
+import { callHttp, type HttpConnection } from "../integrations/http";
 import { nowIso } from "../lib/time";
 import { callModel } from "../integrations/gateway";
 import { modelRouteSchema } from "../../shared/contracts/gateway";
@@ -104,7 +105,7 @@ export async function executeGraph(
             node.id,
             {
               retries: { limit: 0, delay: 0, backoff: "constant" },
-              timeout: node.type === "model" ? 120000 : 10000,
+              timeout: node.type === "model" ? 120000 : node.type === "http" ? 30000 : 10000,
             },
             async (ctx) => {
               const started = await startStepAttempt(db, {
@@ -146,6 +147,22 @@ export async function executeGraph(
                     requestId: result.requestId,
                     usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
                   };
+                } else if (node.type === "http") {
+                  const connection = await db
+                    .prepare(
+                      "SELECT connection_json FROM run_http_connections WHERE run_id=? AND node_id=?",
+                    )
+                    .bind(run.id, node.id)
+                    .first<{ connection_json: string }>();
+                  if (!connection) throw new Error("Captured HTTP connection is missing.");
+                  value = await callHttp(
+                    env,
+                    run.project_id,
+                    run.id,
+                    node.id,
+                    JSON.parse(connection.connection_json) as HttpConnection,
+                    incoming[0],
+                  );
                 } else value = evaluateGraphNode(node, input, incoming);
                 const json = JSON.stringify(value);
                 if (new TextEncoder().encode(json).length > 32000)

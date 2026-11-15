@@ -27,4 +27,4 @@ External spans have nonzero W3C-shaped trace/span IDs. Ingestion checks parents 
 
 Migration 0006 adds integration tables, scoped key metadata, captured route snapshots, and per-attempt input/output. It must be reviewed and applied to the intended database before enabling these routes. Existing owned saved configurations remain separate from executable Studio definitions.
 
-No production secrets, OAuth login, provider smoke test, browser QA, remote migration or deployment has been completed here. The old chatgpt.site preview is separate and has not been updated to pretend it is this Worker.
+No production secrets, live OAuth login, provider smoke test, remote migration or deployment has been completed here. The product repair includes a scoped local browser journey, described in PRODUCT_EXPERIENCE_REPAIR.md; this is not complete all-screen/device acceptance. The old chatgpt.site preview is separate and has not been updated to pretend it is this Worker.
