@@ -1,119 +1,30 @@
 # Traceyard
 
-Traceyard is an execution intelligence and reliability platform for workflows, background jobs and AI agents. This repository contains a working Cloudflare-native implementation: a durable execution engine, a persisted execution ledger, a queue-backed dispatch outbox, and a monochrome React interface for exploring and inspecting real runs.
+Traceyard builds and runs durable workflows, records what happened at each step, and helps investigate failures. The React interface talks to the Hono Worker on the same origin. D1 stores account, project, workflow, execution and integration state; Cloudflare Queues dispatches work and Workflows checkpoints execution.
 
-The public sandbox executes one deterministic document-intelligence workflow. It is a real execution path — every run, step, attempt, event, dispatch and output shown in the console is persisted in D1. There are no fabricated metrics, fake progress bars or client-side simulation.
+This branch contains the integrated application. The separate chatgpt.site UI preview is not the backend deployment. No production deployment or remote migration has been performed from this workspace.
 
-> Status: local implementation, migrations applied to the **local** D1 only. Nothing has been deployed and the remote `traceyard-prod-db` has not been migrated.
+## Product flow
 
-## What is implemented
+Sign in with GitHub → choose a project → create or import a workflow → configure steps → publish a version → run it → inspect its output, attempts and events.
 
-- **Durable Workflows execution** — five checkpointed steps with per-step retry policy, timeouts and deterministic failure injection.
-- **Transactional launch** — a run, its steps, dispatch outbox row, event stream entries and audit event are committed in one D1 batch.
-- **At-least-once dispatch** — the queue consumer claims the outbox row and creates a Cloudflare Workflow instance whose ID is the run ID, making duplicate delivery and redelivery idempotent.
-- **Dispatch reconciliation** — a five-minute cron republishes stale outbox rows, reopens stale claims, fails exhausted dispatches, times out stuck queued runs, expires old data and evaluates the sandbox circuit breaker.
-- **Validated state machine** — run and step transitions use conditional SQL updates with expected current states. The schema itself also constrains valid status values.
-- **Cancellation and retry** — queued runs cancel immediately; running runs move to `CANCELLING` and finalize at the next step checkpoint. Retry creates a new run with a unique `retry_of_run_id` and a preserved scenario.
-- **Private anonymous sandbox** — HttpOnly session cookie, only a SHA-256 hash persisted, hashed IP/user-agent fingerprints, bounded input, strict Zod validation, server-side quotas and a circuit breaker.
-- **Durable developer accounts** — optional GitHub sign-in, server-side authorization-code/PKCE exchange, hashed and revocable 30-day sessions, personal workspaces, project-scoped saved definitions and explicit guest-run claiming.
-- **Shared public budget** — anonymous and authenticated launches reserve from the same global daily and concurrency limits; accounts do not increase the public infrastructure budget.
-- **Real analytics** — success rates, percentiles, throughput and failure classes computed from D1 over a configurable window. Small samples are shown as-is.
-- **Tested surfaces** — unit domain tests, integration tests running the actual Worker in Miniflare with D1/Queues/Workflows, and Playwright tests against the real dev server.
+| Screen                   | Working behavior                                                                                                                       |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Workflows / Studio       | Revisioned drafts, graph editing, connections, validation, JSON import/export, immutable publication, historical versions and archival |
+| Executions               | Version-pinned launches, project history, cancellation, failed-run retry, payload/attempt evidence, event pagination and JSON export   |
+| Traces                   | Workflow evidence plus external nested spans, redaction, searchable recent history and operation inspection                            |
+| Gateway                  | Encrypted provider credentials, revisioned model/fallback routes, real request playground and recorded provider usage                  |
+| Approvals                | Durable waiting tasks, owner decisions, expiry, cancellation and resumption                                                            |
+| Laboratory               | Stored experiment definitions, bounded repeat groups, real assertions and side-by-side execution comparison                            |
+| Settings / project tools | Sessions, scoped API keys, schedules, outgoing completion webhooks and delivery results                                                |
 
-## Architecture
+Studio supports Input, Literal JSON, Pick, Merge, Output, Condition, bounded Map, Model and Approval. Condition executes one connected path and skips the other; Merge joins the surviving results. Map selects a field from each array item, up to 20 items. Model uses a project-owned Gateway route captured at launch. Up to four approval steps can wait for an owner decision, for at most an hour each. Independent ready steps run together.
 
-```
-Browser (React + TanStack Query)
-        │  same-origin JSON
-        ▼
-Cloudflare Worker (Hono)
-  ├─ session / CSRF-origin / security headers
-  ├─ POST /api/runs ──────────────► D1 batch:
-  │                                   run + steps + dispatch outbox
-  │                                   + events + audit
-  │                                        │
-  │                                        ▼
-  │                                  EXECUTION_QUEUE ──► consumer claims
-  │                                                        dispatch and
-  │                                                        creates Workflow
-  │                                                        (id = runId)
-  │                                                            │
-  │                                                            ▼
-  │                                                   RunExecutionWorkflow
-  │                                                   (5 durable steps)
-  │                                                            │
-  └─ GET APIs ◄────────────── D1 (system of record) ◄──────────┘
+The compiled document pipeline also remains available. Its extraction is deterministic. Controlled retryable/permanent extraction faults are restricted to that pipeline; they are deliberately selected tests, not provider inference.
 
-Cron (*/5) ──► reconciliation, cleanup, circuit breaker
-```
+## Local setup
 
-D1 is the system of record for all product state. The queue is a delivery mechanism, not a source of truth; anything the queue fails to deliver is recoverable from the outbox by reconciliation.
-
-### Run lifecycle
-
-```
-QUEUED ──dispatch──► RUNNING ──success──► SUCCEEDED
-   │                    │
-   │                    ├──terminal failure──► FAILED
-   │                    └──cancel request────► CANCELLING ──checkpoint──► CANCELLED
-   └──cancel request────────────────────────────────────────────────────► CANCELLED
-```
-
-`FAILED` is a terminal application/infrastructure outcome. A retry is a **new run**, linked by `retry_of_run_id`; it never mutates the original run.
-
-## Reliability semantics
-
-| Concern           | Guarantee in this build                                                                                                           |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Run acceptance    | A run is visible only after its complete bundle is committed in one D1 batch.                                                     |
-| Queue delivery    | At-least-once. Duplicate messages are acknowledged without creating a second Workflow instance.                                   |
-| Workflow creation | `id = runId`, so repeated creates resolve to the same instance.                                                                   |
-| Step execution    | Each step is a durable checkpoint. Attempts are persisted individually.                                                           |
-| State transitions | Conditional `UPDATE ... WHERE status = expected`, with schema-level status checks.                                                |
-| Cancellation      | Cooperative: checked between steps. A step already running is not forcibly interrupted.                                           |
-| Side effects      | No exactly-once claim for external side effects. D1 commits are idempotent; external calls would need their own idempotency keys. |
-| Data retention    | Runs expire after 30 days by default and are deleted with dependent rows; audit events are retained for 90 days.                  |
-
-### Accounts, OAuth and retention
-
-GitHub sign-in is optional. The anonymous sandbox is available without an account. Sign-in requests no GitHub scopes or repository permissions; the authorization-code exchange and profile lookup happen in the Worker. Provider access tokens are used only for that lookup and are not persisted or sent to the browser. OAuth state is single-use, expires after 10 minutes, and is verified with an HttpOnly state cookie and PKCE S256 verifier.
-
-Configure `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` as Cloudflare secrets and set `PUBLIC_APP_ORIGIN` to the canonical HTTPS origin. Register `${PUBLIC_APP_ORIGIN}/api/auth/github/callback` as the GitHub OAuth callback URL. For local development, put these three values in the ignored `.dev.vars` file; use `http://localhost:5173` for the local origin. Without all three values, the sandbox remains usable and the sign-in endpoint reports that GitHub sign-in is unavailable.
-
-Authenticated session identifiers are random bearer values stored only as SHA-256 hashes. The HttpOnly, SameSite=Lax cookie expires after 30 days; users can revoke active sessions, and logout revokes the current session immediately. Personal projects, saved workflow definitions, and account identity have no automatic expiry and remain available across authenticated devices. This version does not yet include a self-service account deletion flow. Runs (including claimed guest runs) expire after 30 days, and audit events expire after 90 days.
-
-Guest runs are never claimed automatically. A signed-in user can explicitly claim eligible, unexpired runs only from the browser carrying the guest session that created them. Saved workflow definitions are stored as project data and are **not executable**; execution remains limited to the built-in compiled example workflow.
-
-## Sandbox limits
-
-The sandbox is deliberately narrow:
-
-- only the compiled `document-intelligence` workflow can execute; a D1 catalog row cannot add executable code;
-- no arbitrary URLs, network calls or user-supplied code;
-- request bodies are capped at 32 KB and validated with a strict schema;
-- document text is capped at 10,000 characters;
-- per-session hourly/daily, per-IP hourly, global daily and active-concurrency quotas are reserved atomically before a run is accepted;
-- the circuit breaker opens after repeated infrastructure failures and returns `503` with `Retry-After`;
-- runs are private to the anonymous browser session that created them.
-
-Default limits (see `wrangler.jsonc`):
-
-| Limit               | Default                       |
-| ------------------- | ----------------------------- |
-| Session daily runs  | 20                            |
-| Session hourly runs | 6                             |
-| IP hourly runs      | `max(12, session hourly × 2)` |
-| Global daily runs   | 100                           |
-| Active concurrency  | 8                             |
-| Retention           | 30 days                       |
-
-## Stack
-
-React 19 · Vite 8 · TypeScript (strict) · Tailwind CSS 4 · shadcn/ui-style components · Lucide · TanStack Query · React Router · Zod · Hono · Cloudflare Workers · D1 · Queues · Workflows · Vitest · Playwright · ESLint · Wrangler.
-
-## Quick start
-
-Requirements: Node.js ≥ 22.12 and npm.
+Requirements: Node.js ≥22.12, npm, and a GitHub OAuth application for your local origin.
 
 ```bash
 npm ci
@@ -121,142 +32,54 @@ npm run db:migrate:local
 npm run dev
 ```
 
-Open <http://localhost:5173>. The public sandbox is usable without sign-in. Use **Launch run** to execute the built-in document workflow, then inspect its steps, attempts, events, input and committed output. GitHub sign-in is enabled only when the local OAuth settings above are configured.
+Open <http://localhost:5173>. Create an ignored `.dev.vars` file with:
 
-Useful local commands:
-
-```bash
-npm run typecheck        # TypeScript project references
-npm run lint             # ESLint
-npm run test             # unit + integration
-npm run test:e2e         # Playwright against the dev server
-npm run build            # typecheck + production build
-npm run bench:api        # read-only latency probe (dev server must be running)
+```text
+PUBLIC_APP_ORIGIN=http://localhost:5173
+GITHUB_CLIENT_ID=<your OAuth app client ID>
+GITHUB_CLIENT_SECRET=<your OAuth app secret>
+INTEGRATION_ENCRYPTION_KEY=<base64 encoding of 32 random bytes>
+OUTBOUND_ALLOWED_HOSTS=hooks.your-domain.example
 ```
 
-The Playwright config starts the dev server and applies local migrations automatically. It uses an installed branded Chrome when available and otherwise falls back to Playwright's managed Chromium (`npx playwright install chromium`).
+Register `http://localhost:5173/api/auth/github/callback` on the GitHub OAuth app. Use a separate production OAuth configuration for the deployed HTTPS origin. The frontend requires real sign-in; missing OAuth configuration never creates a fake user.
 
-### API
+Provider keys are entered in Gateway, encrypted with AES-GCM and project-bound authenticated context, and never returned by credential metadata endpoints. Workers AI also requires your Cloudflare account ID. Keep the encryption master key stable and backed up securely; changing it makes existing encrypted credentials unreadable. Configure outgoing destination hosts explicitly before creating webhooks.
 
-All endpoints are under `/api` and are session-scoped unless noted.
+## SDK and CLI
 
-| Method         | Path                                         | Purpose                                                       |
-| -------------- | -------------------------------------------- | ------------------------------------------------------------- |
-| `GET`          | `/health`                                    | Worker, D1, queue and workflow binding health                 |
-| `GET`          | `/workflows`                                 | Executable workflow catalog                                   |
-| `GET`          | `/workflows/:id`                             | Workflow metadata and step manifest                           |
-| `POST`         | `/runs`                                      | Launch a run (requires `Idempotency-Key` header)              |
-| `GET`          | `/runs`                                      | Paginated run list with status/workflow filters               |
-| `GET`          | `/runs/:id`                                  | Run detail: steps, attempts, dispatch, input/output           |
-| `GET`          | `/runs/:id/events`                           | Cursor-paginated event stream                                 |
-| `POST`         | `/runs/:id/cancel`                           | Request cancellation                                          |
-| `POST`         | `/runs/:id/retry`                            | Create a retry run for a failed execution                     |
-| `GET`          | `/overview`                                  | Dashboard totals, trend, recent runs, quotas                  |
-| `GET`          | `/analytics`                                 | Percentiles, throughput and failure classes                   |
-| `GET`          | `/sandbox`                                   | Current session/deployment sandbox status                     |
-| `GET`          | `/auth/session`                              | Current developer identity, sessions and sign-in availability |
-| `GET`          | `/auth/github/start`                         | Begin GitHub OAuth sign-in (requires OAuth configuration)     |
-| `GET`          | `/auth/github/callback`                      | Validate OAuth state and complete server-side code exchange   |
-| `POST`         | `/auth/logout`                               | Revoke the current authenticated session                      |
-| `POST`         | `/auth/claim`                                | Explicitly claim eligible runs from the active guest session  |
-| `POST`         | `/auth/sessions/:id/revoke`                  | Revoke an account session                                     |
-| `GET`/`POST`   | `/projects`                                  | List or create personal projects (authenticated)              |
-| `GET`/`POST`   | `/projects/:projectId/workflows`             | List or save non-executable project definitions               |
-| `GET`/`DELETE` | `/projects/:projectId/workflows/:workflowId` | Read or delete a saved definition                             |
+Copy [`sdk/client.ts`](sdk/client.ts) directly into a server project. There is no claimed published npm/Python package. The client supports nested spans and W3C traceparent helpers, launch, inspection and cancellation. Telemetry delivery failures do not change the wrapped application's return value or error.
 
-Example launch:
+Create a project API key in Settings → API keys & SDK. Keep it in a server environment, never browser storage. Keys expire after 90 days, are revocable, store only a hash, and grant selected `traces:write`, `runs:read` and `runs:write` scopes. Rate limit: 120 requests/minute/key.
 
 ```bash
-curl -X POST http://localhost:5173/api/runs \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: 6f1c2e5a-run-0001" \
-  -d '{
-    "workflowId": "document-intelligence",
-    "scenario": "success",
-    "input": {
-      "title": "Incident review",
-      "document": "A bounded document with at least 24 characters."
-    }
-  }'
+node scripts/traceyard.mjs run YOUR_WORKFLOW_ID --version 1 --input input.json --idempotency-key order-00001
+node scripts/traceyard.mjs inspect RUN_ID
+node scripts/traceyard.mjs cancel RUN_ID
+node scripts/traceyard.mjs list
 ```
 
-Mutations require a same-origin browser context. Use the console for anonymous sandbox runs.
+Set `TRACEYARD_ORIGIN` and `TRACEYARD_KEY` in the invoking environment. HTTP endpoints live under `/api/v1`; browser-owned configuration APIs live under `/api/projects/:projectId`.
 
-## Verification
+## Reliability and limits
 
-The repository currently has:
+Run acceptance commits a complete D1 bundle, including captured model routes. Queue delivery is at least once and uses the run ID as the Workflow instance ID. Retry creates a new execution and retains the original published graph and captured model route configuration. Cancellation is cooperative; a provider request already in flight may finish before the next checkpoint.
 
-- **54 unit tests** — state transitions, retry arithmetic, cursor encoding, document normalization/extraction/digest, error serialization.
-- **57 integration tests** — the real Worker running in Miniflare with D1, Queues and Workflows: API validation, idempotency, session isolation, GitHub OAuth state/PKCE, logout, guest claiming, project ownership, cross-device persistence, shared global quotas, pagination, cancel/retry, recovery, outbox behavior, reconciliation, cleanup and circuit breaker.
-- **7 Playwright tests** — anonymous first-run experience, real execution and retry inspection, navigation, project/definition creation, account-session revocation, theme persistence, mobile overflow and no-SVG checks.
+Provider calls and webhook delivery can repeat after infrastructure interruption. Traceyard does not claim exactly-once external side effects. Webhooks use a stable delivery ID, HMAC-SHA256 signature and bounded retries; receivers must verify signatures/timestamps and deduplicate deliveries. Schedules are evaluated by the five-minute cron and do not backfill missed intervals.
+
+The existing shared admission budget still applies: 100 runs/day, 8 active executions, 6/hour/session and 20/day/session by default. Experiment groups can therefore partially launch; “Continue launches” resumes remaining trials. Gateway separately limits a project to 60 model requests/hour. Rates entered on model routes produce estimates from reported token counts; they are not billed charges. Missing provider usage/cost stays unavailable.
+
+Runs and external spans retain 30 days by default; audit events retain 90. Trace views show the latest 100 traces and up to 1,000 external spans per trace. Redaction covers known credential field names and common token patterns; callers must avoid sending unnecessary sensitive attributes. Projects are owner-scoped. Team roles, arbitrary user code, arbitrary HTTP/CRM tool adapters, OpenTelemetry OTLP ingestion, and a published package registry are outside this build.
+
+## Validation and deployment
 
 ```bash
 npm test
+npm run lint
+npm run build
 npm run test:e2e
 ```
 
-Local read-only benchmark against `npm run dev` (Miniflare, Node 22, 30 requests per path, concurrency 4). These are **local relative numbers**, not production capacity:
+Unit and integration tests exercise the actual Miniflare D1, Queue and Workflow bindings. GitHub/provider HTTP responses are test doubles where an external service is involved; these are not live credential verification. Browser test files exist, but the current workspace's preview server fails inside the Cloudflare Vite plugin (`uv_interface_addresses`), so browser/visual readiness remains unverified here.
 
-| Endpoint                | p50     | p95     | p99     | Throughput |
-| ----------------------- | ------- | ------- | ------- | ---------- |
-| `/api/health`           | 43.4 ms | 61.7 ms | 68.1 ms | 82.7 req/s |
-| `/api/workflows`        | 44.1 ms | 54.6 ms | 54.9 ms | 87.8 req/s |
-| `/api/overview?days=14` | 88.0 ms | 92.9 ms | 93.0 ms | 44.5 req/s |
-
-## Project layout
-
-```
-worker/
-  api/            Hono app, middleware, routes
-  execution/      Workflow class, step executor, finalization
-  jobs/           scheduled reconciliation and cleanup
-  persistence/    D1 repositories and validated transitions
-  queue/          producer and consumer
-  services/       launch/cancel/retry, analytics, quotas
-shared/
-  contracts/      API response types
-  domain/         status, retry policy, errors, time
-  workflow/       deterministic document workflow
-src/
-  components/     app shell, tables, timeline, dialogs, UI primitives
-  pages/          overview, executions, detail, workflows, analytics, settings
-migrations/       D1 schema and catalog seed
-tests/
-  unit/           pure domain tests
-  integration/    Miniflare Worker tests
-  e2e/            Playwright console tests
-```
-
-## Deploying
-
-The repository is already configured for the existing Cloudflare resources:
-
-- D1 `traceyard-prod-db` (`cae223eb-3992-40dc-b04d-d3d2946a6e1e`)
-- Queue `traceyard-executions`
-- Workflow `traceyard-run-execution`
-
-Deployment requires explicit approval and a remote migration:
-
-```bash
-npm run db:migrate:remote
-npm run deploy
-```
-
-**These commands have not been run against the remote account.** The remote database has no Traceyard tables yet. Create/verify resources before deploying and do not create duplicate D1 or Queue resources.
-
-## Known limitations
-
-- Cancellation is cooperative at step boundaries; a step in progress is allowed to finish.
-- External side effects are not implemented, so exactly-once behavior for them is not demonstrated.
-- The sandbox is single-workflow and anonymous only; there are no accounts, organizations, public galleries or cross-session comparisons.
-- Analytics is computed on request from D1 and is suitable for the sandbox scale, not for unbounded production history.
-- The local benchmark measures Miniflare on one machine and should not be used as a capacity plan.
-- Queue dispatch can be delayed by cron reconciliation if a publish is lost; the outbox is designed to recover, not to eliminate latency.
-
-## License
-
-MIT. See [LICENSE](./LICENSE).
-
-## Connected frontend
-
-The current frontend uses the real same-origin Worker API for GitHub authentication, owned projects, version-pinned saved inputs and persisted workflow execution. It does not load the separate UI preview's simulation engine. See [the integration guide](docs/FRONTEND_BACKEND_INTEGRATION.md) for supported capabilities, deployment prerequisites and validation limits.
+See [implementation status](docs/IMPLEMENTATION_STATUS.md), [integration contracts](docs/FRONTEND_BACKEND_INTEGRATION.md) and [local acceptance checks](docs/LOCAL_ACCEPTANCE.md). Keep the PR unmerged until required browser and configured-provider checks have actually passed. Review migrations and intended Cloudflare resource IDs before deployment; never replace production resources to make setup pass.

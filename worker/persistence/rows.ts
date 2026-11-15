@@ -57,6 +57,8 @@ export interface StepRow {
 }
 
 export interface AttemptRow {
+  input_json: string | null;
+  output_json: string | null;
   id: string;
   run_id: string;
   step_id: string;

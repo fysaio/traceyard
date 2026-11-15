@@ -54,7 +54,7 @@ export class RunExecutor {
   private runtime: WorkflowRuntime | null = null;
 
   constructor(
-    env: Env,
+    private readonly env: Env,
     private readonly runId: string,
     private readonly step: WorkflowStep,
   ) {
@@ -81,7 +81,7 @@ export class RunExecutor {
       .bind(initialRun.workflow_id, initialRun.workflow_version)
       .first<{ graph_json: string | null }>();
     if (version?.graph_json)
-      return executeGraph(this.db, initialRun, version.graph_json, this.step);
+      return executeGraph(this.db, initialRun, version.graph_json, this.step, this.env);
 
     const workflowRow = await this.db
       .prepare(`SELECT slug FROM workflows WHERE id = ?`)

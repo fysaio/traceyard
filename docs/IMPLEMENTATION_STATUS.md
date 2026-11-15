@@ -1,21 +1,23 @@
-# Traceyard implementation status
+# Implementation status
 
-The owner remains responsible for both frontend and backend. AntiGravity receives the integrated app for final local testing, correction and polish only after the remaining work is complete. Keep PR #1 a draft until the readiness criteria pass.
+The integrated application remains on `integration/real-auth-workflows`, PR #1. Frontend and backend implementation remain our responsibility. AntiGravity receives the same code for local verification and final correction, not a separate frontend rebuild.
 
-| Area | Current checkpoint | Remaining work |
-| --- | --- | --- |
-| Auth/account/projects | Real GitHub OAuth, secure sessions, project creation and server ownership | Deployed OAuth/browser verification; session-expiry journeys |
-| Workflow Studio | Canvas editing, step forms, connections, validation, durable drafts, conflict checks, immutable publication | UI/browser verification; expand supported typed nodes alongside executor contracts |
-| Execution | Document pipeline plus bounded executable data DAGs, version-pinned launch, project history, cancellation/failed-run retry | Conditional routing, additional policies, bounded iteration and provider/tool operations |
-| Tracing | Persisted steps/attempts/events, output and export; manual walkthrough | Common trace/span contract, external ingestion/SDK, nested operations, per-attempt payload evidence and redaction |
-| Gateway | Not implemented | Actual provider adapters, credential handling, saved routes, real usage/cost provenance, request playground |
-| Approvals | Not implemented | Durable waiting tasks, authorized decisions, expiry and resumption |
-| Laboratory | Real fixed document failure scenarios | Stored experiment definitions, targeted faults, assertions, repeat groups and comparison |
-| Analytics | Connected account metrics | Project-specific aggregates, richer trace search and comparison |
-| Integrations | Browser same-origin APIs | Scoped/revocable API keys, SDK/CLI, authenticated incoming triggers and outgoing webhook delivery |
-| Presentation | Rounded React design and Studio components implemented | All-screen browser, keyboard, touch, overflow and motion verification; no final visual readiness claim yet |
-| Production | Not deployed from this workspace | Intended Cloudflare account access, reviewed migrations/resources, OAuth/provider secret configuration and end-to-end smoke tests |
+| Area            | Implemented                                                                                                                                                                       | Remaining verification or scope limit                                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Auth / projects | Real GitHub OAuth PKCE, hashed revocable sessions, owned project selection and creation                                                                                           | Actual configured OAuth browser journey                                        |
+| Studio          | Canvas and keyboard editing, node forms, connections, revision checks, JSON import/export, validation, immutable versions, archival                                               | Browser/touch/overflow QA; no arbitrary user code or HTTP/CRM tool adapters    |
+| Execution       | Document engine plus DAG execution, conditional path skipping, bounded array field mapping, independent branches, captured model routes                                           | Actual model step with a configured provider; cancellation remains cooperative |
+| Tracing         | Persisted execution/attempt payloads, events, export, workflow evidence projection, nested external span ingestion, redaction, scoped keys, TypeScript instrumentation            | Live server instrumentation journey; not an OTLP receiver                      |
+| Gateway         | OpenAI/Groq/Workers AI adapters, AES-GCM project credentials, saved primary/fallback routes, playground, actual provider token counts and optional configured-rate cost estimates | No real provider credentials supplied or calls smoke-tested                    |
+| Approvals       | Durable owner tasks, once-only decisions, event wake-up, bounded timeout recovery, expiry, rejection and cancellation                                                             | Complete browser review journey                                                |
+| Laboratory      | Immutable experiment definitions, 1–5 real trials, resumable partial launch, status/output/duration assertions and comparison                                                     | Fault injection targets the compiled document extraction step only             |
+| Integrations    | Scoped expiring keys, HTTP launch/read/cancel, TypeScript client, Node CLI, versioned interval schedules, signed outgoing completion webhooks with delivery evidence/retries      | Actual receiver and cron deployment checks; no published package claimed       |
+| Analytics       | Existing actual account aggregates                                                                                                                                                | Project aggregates and richer search remain future scope                       |
+| UI              | Connected screens, compact primary navigation, rounded controls, loading/error states and responsive component rules                                                              | All-screen visual, keyboard and mobile QA not completed in this environment    |
+| Deployment      | Migration 0006 and environment/setup instructions included                                                                                                                        | No production deployment, remote migration or configured secrets performed     |
 
-## Handoff readiness
+Checkpoint validation: 67 unit tests and 77 Worker integration tests pass (144 total), with TypeScript/production build and ESLint passing. Automated checks are recorded in the PR. They do not stand in for live OAuth/provider or browser verification. The preview environment remains blocked by the Cloudflare Vite plugin's `uv_interface_addresses` error; working application code was not modified to bypass that environment failure. The existing public static preview remains unchanged.
 
-Every visible control must have an implemented server or local inspection action, useful loading/error/empty states and a verified result. Supported flows must survive reloads without fabricated account/run/provider state. Mutations must preserve ownership and immutable execution evidence. Provider credential requirements must be explicit. Run the integration suite, unit checks, build/lint, authenticated browser journeys, responsive layout checks and actual configured-provider smoke tests before merging and moving to AntiGravity.
+## Merge gate
+
+Review migration 0006 and configuration. Run the local acceptance document on a working runtime with real OAuth and at least one provider. Finish browser layout and interaction checks at phone, tablet and desktop sizes. Keep PR #1 a draft until the required checks pass. If a new defect appears, fix it in this branch and rerun the affected checks before merging.

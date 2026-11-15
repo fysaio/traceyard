@@ -1,3 +1,7 @@
+import { nowIso } from "../lib/time";
+import { callModel } from "../integrations/gateway";
+import { modelRouteSchema } from "../../shared/contracts/gateway";
+import { awaitApproval } from "../integrations/approvals";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { WorkflowStep } from "cloudflare:workers";
 import { graphSchema, graphLayers, evaluateGraphNode } from "../../shared/workflow/graph";
@@ -14,6 +18,7 @@ export async function executeGraph(
   run: RunRow,
   graphJson: string,
   step: WorkflowStep,
+  env: Env,
 ) {
   const stopped = () =>
     getRunRow(db, run.id).then(
@@ -25,7 +30,9 @@ export async function executeGraph(
       throw new Error("Persisted input failed its integrity check.");
     if (run.status === "QUEUED") await beginRun(db, run.id, run.correlation_id);
     const input: unknown = JSON.parse(run.input_json),
-      results = new Map<string, unknown>();
+      results = new Map<string, unknown>(),
+      skipped = new Set<string>(),
+      blocked = new Set<string>();
     for (const layer of graphLayers(graph)) {
       if (await stopped()) {
         await finalizeRunCancelled(db, run.id);
@@ -33,15 +40,72 @@ export async function executeGraph(
       }
       const settled = await Promise.allSettled(
         layer.map(async (node) => {
-          const incoming = graph.edges
+          const sources = graph.edges
             .filter(([, b]) => b === node.id)
-            .map(([a]) => results.get(a));
+            .filter(([a]) => !skipped.has(a) && !blocked.has(a + ":" + node.id));
+          if (node.type !== "input" && !sources.length) {
+            await step.do(node.id + "-skip", async () => {
+              await db
+                .prepare(
+                  "UPDATE execution_steps SET status='SKIPPED',completed_at=?,updated_at=? WHERE run_id=? AND step_key=? AND status='PENDING'",
+                )
+                .bind(nowIso(), nowIso(), run.id, node.id)
+                .run();
+            });
+            skipped.add(node.id);
+            return;
+          }
+          const incoming = sources.map(([a]) => results.get(a));
           const rows = await getSteps(db, run.id),
             record = rows.find((s) => s.step_key === node.id);
           if (!record) throw new Error("Step record missing.");
+          let approval: unknown;
+          if (node.type === "approval") {
+            await step.do(node.id + "-approval-start", async () => {
+              await startStepAttempt(db, {
+                runId: run.id,
+                stepId: record.id,
+                stepKey: node.id,
+                attemptNumber: 1,
+                inputJson: JSON.stringify(incoming),
+              });
+            });
+            try {
+              approval = await awaitApproval(
+                db,
+                run,
+                node,
+                incoming.length === 1 ? incoming[0] : incoming,
+                step,
+              );
+            } catch (error) {
+              const current = await getRunRow(db, run.id);
+              if (current && ["CANCELLING", "CANCELLED"].includes(current.status)) throw error;
+              await step.do(node.id + "-approval-failure", async () => {
+                await failStepAttempt(db, {
+                  runId: run.id,
+                  stepId: record.id,
+                  stepKey: node.id,
+                  stepName: node.name,
+                  attemptNumber: 1,
+                  isFinalAttempt: true,
+                  error: {
+                    class: "PERMANENT_APPLICATION",
+                    code: "APPROVAL_STOPPED",
+                    message: error instanceof Error ? error.message : "Approval stopped.",
+                    retryable: false,
+                  },
+                });
+              });
+              throw error;
+            }
+          }
           const output = await step.do(
             node.id,
-            { retries: { limit: 0, delay: 0, backoff: "constant" }, timeout: 10000 },
+            {
+              retries: { limit: 0, delay: 0, backoff: "constant" },
+              timeout: node.type === "model" ? 120000 : 10000,
+            },
             async (ctx) => {
               const started = await startStepAttempt(db, {
                 runId: run.id,
@@ -54,8 +118,36 @@ export async function executeGraph(
               if (started.state !== "started")
                 throw new NonRetryableError("Step cannot start in its current state.");
               try {
-                const value = evaluateGraphNode(node, input, incoming),
-                  json = JSON.stringify(value);
+                let value: unknown;
+                if (node.type === "approval") value = approval;
+                else if (node.type === "model") {
+                  const snapshot = await db
+                    .prepare(
+                      "SELECT route_json,route_id FROM run_model_routes WHERE run_id=? AND node_id=?",
+                    )
+                    .bind(run.id, node.id)
+                    .first<{ route_json: string; route_id: string }>();
+                  if (!snapshot) throw new Error("Captured model route is missing.");
+                  const result = await callModel(
+                    env,
+                    run.project_id,
+                    snapshot.route_id,
+                    (node.config.prompt ?? "") + "\n" + JSON.stringify(incoming),
+                    {
+                      runId: run.id,
+                      stepKey: node.id,
+                      route: modelRouteSchema.parse(JSON.parse(snapshot.route_json)),
+                    },
+                  );
+                  value = {
+                    text: result.text,
+                    provider: result.provider,
+                    model: result.model,
+                    requestId: result.requestId,
+                    usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+                  };
+                } else value = evaluateGraphNode(node, input, incoming);
+                const json = JSON.stringify(value);
                 if (new TextEncoder().encode(json).length > 32000)
                   throw new Error("Step output exceeds 32 KB.");
                 await completeStep(db, {
@@ -93,7 +185,12 @@ export async function executeGraph(
               }
             },
           );
-          results.set(node.id, JSON.parse(output) as unknown);
+          const value: unknown = JSON.parse(output);
+          results.set(node.id, value);
+          if (node.type === "condition")
+            blocked.add(
+              node.id + ":" + (value === true ? node.config.elseTarget : node.config.thenTarget),
+            );
         }),
       );
       const failed = settled.find((r) => r.status === "rejected");
@@ -116,6 +213,11 @@ export async function executeGraph(
     }
     return { runId: run.id, status: "SUCCEEDED" as const };
   } catch (error) {
+    const current = await getRunRow(db, run.id);
+    if (current && ["CANCELLING", "CANCELLED"].includes(current.status)) {
+      await finalizeRunCancelled(db, run.id);
+      return { runId: run.id, status: "CANCELLED" as const };
+    }
     const failure = serializeError(error);
     await finalizeRunFailure(db, run.id, JSON.stringify(failure), failure.class, failure.message);
     return { runId: run.id, status: "FAILED" as const };

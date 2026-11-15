@@ -1,3 +1,4 @@
+import { runIntegrationJobs } from "./integrations";
 import { DomainError, serializeError } from "../../shared/domain/errors";
 import { isoFromNow, nowIso } from "../lib/time";
 import { log, logError } from "../observability/logger";
@@ -52,10 +53,7 @@ export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
   };
 
   summary.reconciledExecutionLeases = await reconcileExecutionLeases(env.DB);
-  const reservations = await reconcileQuotaReservations(
-    env.DB,
-    isoFromNow(-STALE_CLAIM_MS),
-  );
+  const reservations = await reconcileQuotaReservations(env.DB, isoFromNow(-STALE_CLAIM_MS));
   summary.committedQuotaReservations = reservations.committed;
   summary.releasedQuotaReservations = reservations.released;
   summary.reopenedClaims = await reopenStaleClaims(env.DB, isoFromNow(-STALE_CLAIM_MS));
@@ -64,6 +62,7 @@ export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
   summary.failedStaleRuns = await failStaleQueuedRuns(env);
   summary.deletedRuns = await cleanupExpiredData(env.DB);
   summary.circuitOpened = await updateCircuitBreaker(env);
+  await runIntegrationJobs(env);
 
   log("info", "scheduled.reconcile", { ...summary });
   return summary;
@@ -205,10 +204,7 @@ async function cleanupExpiredData(db: D1Database): Promise<number> {
     )
     .bind(now, isoFromNow(-90 * 24 * 60 * 60 * 1000))
     .run();
-  await db
-    .prepare(`DELETE FROM github_oauth_states WHERE expires_at < ?`)
-    .bind(now)
-    .run();
+  await db.prepare(`DELETE FROM github_oauth_states WHERE expires_at < ?`).bind(now).run();
   await db
     .prepare(`DELETE FROM sandbox_sessions WHERE last_seen_at < ?`)
     .bind(isoFromNow(-180 * 24 * 60 * 60 * 1000))

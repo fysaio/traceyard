@@ -1,3 +1,6 @@
+import type { NewRunBundle } from "../persistence/run-creation";
+import { graphSchema } from "../../shared/workflow/graph";
+import { readModelRoute } from "../integrations/gateway";
 import type {
   CancelRunResult,
   LaunchRunResult,
@@ -195,6 +198,16 @@ export async function launchRun(
 
   await assertSandboxAvailable(db, config, session.idHash, requestId);
 
+  const modelRoutes: NonNullable<NewRunBundle["modelRoutes"]> = [];
+  if (entry.version.graph_json)
+    for (const node of graphSchema
+      .parse(JSON.parse(entry.version.graph_json))
+      .nodes.filter((n) => n.type === "model"))
+      modelRoutes.push({
+        nodeId: node.id,
+        routeId: node.config.routeId!,
+        routeJson: JSON.stringify(await readModelRoute(env, projectId, node.config.routeId!)),
+      });
   const runId = randomId("run");
   const dispatchId = randomId("dsp");
   const correlationId = randomId("cor");
@@ -235,6 +248,7 @@ export async function launchRun(
     await reserveSandboxQuotas(db, runId, session, config, requestId, userId);
 
     await insertRunBundle(db, {
+      modelRoutes,
       run: {
         id: runId,
         projectId,
@@ -786,6 +800,15 @@ export async function retryRun(
       original.workflow_version,
     ));
   if (entry === null) throw notFound("The workflow for this run no longer exists.");
+  const snapshots = await db
+    .prepare("SELECT node_id,route_id,route_json FROM run_model_routes WHERE run_id=?")
+    .bind(original.id)
+    .all<{ node_id: string; route_id: string; route_json: string }>();
+  const modelRoutes = snapshots.results.map((row) => ({
+    nodeId: row.node_id,
+    routeId: row.route_id,
+    routeJson: row.route_json,
+  }));
   const runtime = assertCatalogMatchesRuntime(entry);
   if (entry.version.version !== original.workflow_version) {
     throw conflict(
@@ -820,6 +843,7 @@ export async function retryRun(
     await reserveSandboxQuotas(db, newRunId, session, config, requestId, userId);
 
     await insertRunBundle(db, {
+      modelRoutes,
       run: {
         id: newRunId,
         projectId: original.project_id,

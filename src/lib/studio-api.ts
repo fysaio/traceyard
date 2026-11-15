@@ -31,6 +31,7 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<T>
 const path = (projectId: string, id?: string) =>
   `/projects/${encodeURIComponent(projectId)}/studio${id ? "/" + encodeURIComponent(id) : ""}`;
 export const studioApi = {
+  import: (p: string, body: unknown) => call<{ id: string }>(path(p) + "/import", "POST", body),
   list: (p: string) => call<{ items: Omit<StudioWorkflow, "graph" | "versions">[] }>(path(p)),
   create: (p: string, name: string) =>
     call<{ id: string; revision: number }>(path(p), "POST", { name }),

@@ -16,7 +16,7 @@ export const launchRunRequestSchema = z
     workflowId: z.string().trim().min(1).max(80),
     projectId: z.string().trim().min(1).max(80).optional(),
     version: z.number().int().positive().optional(),
-    input: z.unknown(),
+    input: z.unknown().refine((value) => value !== undefined, "Provide an input JSON value."),
     scenario: z.enum(FAILURE_SCENARIOS).default("success"),
   })
   .strict();
@@ -139,6 +139,8 @@ export interface RunSummary {
 }
 
 export interface AttemptView {
+  input?: unknown;
+  output?: unknown;
   number: number;
   status: "RUNNING" | "SUCCEEDED" | "FAILED" | "ABANDONED";
   startedAt: string;
