@@ -21,7 +21,7 @@ export function ExecutionsPage() {
   const [status, setStatus] = useState<RunStatus | "">("");
   const [workflowId, setWorkflowId] = useState("");
 
-  const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+  const workflows = useQuery({ queryKey: ["workflows"], queryFn: () => api.workflows() });
 
   const runs = useInfiniteQuery({
     queryKey: ["runs", status, workflowId],

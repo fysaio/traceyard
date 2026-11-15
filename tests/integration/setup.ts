@@ -18,6 +18,13 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM workflow_schedules"),
+    env.DB.prepare("DELETE FROM outgoing_webhooks"),
+    env.DB.prepare("DELETE FROM experiments"),
+    env.DB.prepare("DELETE FROM approval_tasks"),
+    env.DB.prepare("DELETE FROM model_requests"),
+    env.DB.prepare("DELETE FROM model_routes"),
+    env.DB.prepare("DELETE FROM trace_spans"),
     env.DB.prepare("DELETE FROM saved_workflows"),
     env.DB.prepare("DELETE FROM api_keys"),
     env.DB.prepare("DELETE FROM organization_memberships"),

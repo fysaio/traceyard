@@ -37,6 +37,7 @@ export class ApiClientError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<T>> {
   const response = await fetch(path, {
     ...init,
+    credentials: "same-origin",
     headers: {
       Accept: "application/json",
       ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -78,6 +79,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<
 export interface RunListParams {
   status?: RunStatus | undefined;
   workflowId?: string | undefined;
+  projectId?: string | undefined;
   cursor?: string | undefined;
   limit?: number | undefined;
 }
@@ -170,11 +172,15 @@ export const api = {
   health: (): Promise<HealthPayload> =>
     request<HealthPayload>("/api/health").then((body) => body.data),
 
-  workflows: (): Promise<WorkflowSummary[]> =>
-    request<{ items: WorkflowSummary[] }>("/api/workflows").then((body) => body.data.items),
+  workflows: (projectId?: string): Promise<WorkflowSummary[]> =>
+    request<{ items: WorkflowSummary[] }>(
+      "/api/workflows" + (projectId ? "?projectId=" + encodeURIComponent(projectId) : ""),
+    ).then((body) => body.data.items),
 
-  workflow: (id: string): Promise<WorkflowSummary> =>
-    request<WorkflowSummary>(`/api/workflows/${encodeURIComponent(id)}`).then((body) => body.data),
+  workflow: (id: string, projectId?: string, version?: number): Promise<WorkflowSummary> =>
+    request<WorkflowSummary>(
+      `/api/workflows/${encodeURIComponent(id)}?${new URLSearchParams({ ...(projectId ? { projectId } : {}), ...(version ? { version: String(version) } : {}) })}`,
+    ).then((body) => body.data),
 
   overview: (days: number): Promise<OverviewPayload> =>
     request<OverviewPayload>(`/api/overview?days=${days}`).then((body) => body.data),
@@ -189,6 +195,7 @@ export const api = {
     const search = new URLSearchParams();
     if (params.status !== undefined) search.set("status", params.status);
     if (params.workflowId !== undefined) search.set("workflowId", params.workflowId);
+    if (params.projectId) search.set("projectId", params.projectId);
     if (params.cursor !== undefined) search.set("cursor", params.cursor);
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     const query = search.toString();
@@ -206,7 +213,13 @@ export const api = {
     ).then((body) => body.data),
 
   launch: (
-    input: { workflowId: string; input: unknown; scenario: FailureScenario },
+    input: {
+      workflowId: string;
+      projectId?: string;
+      version?: number;
+      input: unknown;
+      scenario: FailureScenario;
+    },
     idempotencyKey: string,
   ): Promise<{ result: LaunchRunResult; replayed: boolean }> =>
     request<LaunchRunResult>("/api/runs", {
@@ -228,4 +241,19 @@ export const api = {
 
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
+}
+
+/** Retrieve every persisted event page for inspection/export, without truncating at 200. */
+export async function readAllEvents(id: string): Promise<EventListPage> {
+  const items: EventListPage["items"] = [];
+  let cursor = 0;
+  for (;;) {
+    const page = await api.events(id, cursor);
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (page.nextCursor <= cursor) {
+      throw new ApiClientError(502, "INVALID_EVENT_CURSOR", "Event pagination did not advance.");
+    }
+    cursor = page.nextCursor;
+  }
 }

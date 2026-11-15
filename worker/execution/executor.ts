@@ -1,3 +1,4 @@
+import { executeGraph } from "./graph";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { WorkflowStep } from "cloudflare:workers";
 
@@ -53,7 +54,7 @@ export class RunExecutor {
   private runtime: WorkflowRuntime | null = null;
 
   constructor(
-    env: Env,
+    private readonly env: Env,
     private readonly runId: string,
     private readonly step: WorkflowStep,
   ) {
@@ -74,6 +75,13 @@ export class RunExecutor {
       await finalizeRunCancelled(this.db, this.runId);
       return { runId: this.runId, status: "CANCELLED" };
     }
+
+    const version = await this.db
+      .prepare("SELECT graph_json FROM workflow_versions WHERE workflow_id = ? AND version = ?")
+      .bind(initialRun.workflow_id, initialRun.workflow_version)
+      .first<{ graph_json: string | null }>();
+    if (version?.graph_json)
+      return executeGraph(this.db, initialRun, version.graph_json, this.step, this.env);
 
     const workflowRow = await this.db
       .prepare(`SELECT slug FROM workflows WHERE id = ?`)
