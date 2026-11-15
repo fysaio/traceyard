@@ -9,6 +9,7 @@ export interface NewStepDefinition {
 }
 
 export interface NewRunBundle {
+  modelRoutes?: { nodeId: string; routeId: string; routeJson: string }[];
   run: {
     id: string;
     projectId: string;
@@ -97,6 +98,14 @@ export async function insertRunBundle(db: D1Database, bundle: NewRunBundle): Pro
       ),
   ];
 
+  for (const route of bundle.modelRoutes ?? [])
+    statements.push(
+      db
+        .prepare(
+          "INSERT INTO run_model_routes (run_id,node_id,route_id,route_json) VALUES (?,?,?,?)",
+        )
+        .bind(bundle.run.id, route.nodeId, route.routeId, route.routeJson),
+    );
   for (const step of bundle.steps) {
     statements.push(
       db

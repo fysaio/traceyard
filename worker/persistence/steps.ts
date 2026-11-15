@@ -55,8 +55,8 @@ export async function startStepAttempt(
   await db
     .prepare(
       `INSERT INTO step_attempts (
-         id, run_id, step_id, attempt_number, status, started_at
-       ) VALUES (?, ?, ?, ?, 'RUNNING', ?)
+         id, run_id, step_id, attempt_number, status, started_at, input_json
+       ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
        ON CONFLICT (step_id, attempt_number) DO NOTHING`,
     )
     .bind(
@@ -65,6 +65,7 @@ export async function startStepAttempt(
       options.stepId,
       options.attemptNumber,
       now,
+      options.inputJson,
     )
     .run();
 
@@ -107,10 +108,10 @@ export async function completeStep(
     db
       .prepare(
         `UPDATE step_attempts
-            SET status = 'SUCCEEDED', completed_at = ?
+            SET status = 'SUCCEEDED', completed_at = ?, output_json = ?
           WHERE step_id = ? AND attempt_number = ? AND status = 'RUNNING'`,
       )
-      .bind(now, options.stepId, options.attemptNumber),
+      .bind(now, options.outputJson, options.stepId, options.attemptNumber),
     db
       .prepare(
         `INSERT INTO execution_events (

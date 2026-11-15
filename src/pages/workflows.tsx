@@ -24,7 +24,7 @@ export function WorkflowsPage() {
   const [definitionJson, setDefinitionJson] = useState('{\n  "nodes": [],\n  "edges": []\n}');
   const [definitionError, setDefinitionError] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const workflows = useQuery({ queryKey: ["workflows"], queryFn: api.workflows });
+  const workflows = useQuery({ queryKey: ["workflows"], queryFn: () => api.workflows() });
   const session = useQuery({ queryKey: ["auth-session"], queryFn: api.authSession });
   const authenticated = session.data?.user != null;
   const projects = useQuery({

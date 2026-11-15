@@ -122,6 +122,8 @@ export function toRunSummary(row: RunWithWorkflowRow, counts: StepCounts): RunSu
 export function toAttemptView(row: AttemptRow): AttemptView {
   return {
     number: row.attempt_number,
+    input: parseJson(row.input_json),
+    output: parseJson(row.output_json),
     status: row.status,
     startedAt: row.started_at,
     completedAt: row.completed_at,

@@ -1,3 +1,6 @@
+import type { NewRunBundle } from "../persistence/run-creation";
+import { graphSchema } from "../../shared/workflow/graph";
+import { readModelRoute } from "../integrations/gateway";
 import type {
   CancelRunResult,
   LaunchRunResult,
@@ -62,6 +65,7 @@ const DEDUPE_WINDOW_MS = 10_000;
 export interface LaunchInput {
   workflowId: string;
   projectId?: string;
+  version?: number;
   input: unknown;
   scenario: FailureScenario;
 }
@@ -99,12 +103,19 @@ export async function launchRun(
   const { session, userId = null, requestId, body, idempotencyKey, config } = options;
   const db = env.DB;
 
-  const entry = await findWorkflowByIdOrSlug(db, body.workflowId);
+  const projectId = await resolveRunProject(db, userId, body.projectId);
+  const entry =
+    (await findWorkflowByIdOrSlug(db, body.workflowId, projectId, body.version)) ??
+    (await findWorkflowByIdOrSlug(db, body.workflowId, SANDBOX_PROJECT_ID, body.version));
   if (entry === null) {
     throw notFound("The requested workflow does not exist in this project.");
   }
   const runtime = assertCatalogMatchesRuntime(entry);
-  const projectId = await resolveRunProject(db, userId, body.projectId);
+  if (entry.version.graph_json && body.scenario !== "success")
+    throw badRequest(
+      "UNSUPPORTED_FAULT",
+      "Document fault scenarios cannot be applied to this workflow.",
+    );
 
   let validatedInput: unknown;
   try {
@@ -121,6 +132,7 @@ export async function launchRun(
   const requestHash = await sha256Hex(
     JSON.stringify({
       workflow: entry.workflow.slug,
+      projectId,
       version: entry.version.version,
       scenario: body.scenario,
       input: validatedInput,
@@ -186,6 +198,16 @@ export async function launchRun(
 
   await assertSandboxAvailable(db, config, session.idHash, requestId);
 
+  const modelRoutes: NonNullable<NewRunBundle["modelRoutes"]> = [];
+  if (entry.version.graph_json)
+    for (const node of graphSchema
+      .parse(JSON.parse(entry.version.graph_json))
+      .nodes.filter((n) => n.type === "model"))
+      modelRoutes.push({
+        nodeId: node.id,
+        routeId: node.config.routeId!,
+        routeJson: JSON.stringify(await readModelRoute(env, projectId, node.config.routeId!)),
+      });
   const runId = randomId("run");
   const dispatchId = randomId("dsp");
   const correlationId = randomId("cor");
@@ -226,6 +248,7 @@ export async function launchRun(
     await reserveSandboxQuotas(db, runId, session, config, requestId, userId);
 
     await insertRunBundle(db, {
+      modelRoutes,
       run: {
         id: runId,
         projectId,
@@ -402,7 +425,8 @@ async function reserveSandboxQuotas(
       windowStart: startOfUtcDay(now).toISOString(),
       expiresAt: dayExpiry,
       reason: "GLOBAL_DAILY_QUOTA",
-      message: "The sandbox has reached its global daily execution allowance. Try again after the quota window resets.",
+      message:
+        "The sandbox has reached its global daily execution allowance. Try again after the quota window resets.",
     },
     {
       key: `session:${session.idHash}:day:${day}`,
@@ -531,13 +555,15 @@ export async function listRunsForSession(
   options: {
     status?: RunStatus | undefined;
     workflowId?: string | undefined;
+    projectId?: string | undefined;
     cursor: { createdAt: string; id: string } | null;
     limit: number;
   },
   userId: string | null = null,
 ): Promise<RunListPage> {
+  if (options.projectId) await resolveRunProject(db, userId, options.projectId);
   const rows = await listRuns(db, {
-    projectId: userId === null ? SANDBOX_PROJECT_ID : null,
+    projectId: options.projectId ?? (userId === null ? SANDBOX_PROJECT_ID : null),
     sessionHash,
     userId,
     status: options.status,
@@ -760,8 +786,29 @@ export async function retryRun(
     .bind(original.workflow_id)
     .first<{ slug: string; name: string }>();
   if (workflow === null) throw notFound("The workflow for this run no longer exists.");
-  const entry = await findWorkflowByIdOrSlug(db, workflow.slug);
+  const entry =
+    (await findWorkflowByIdOrSlug(
+      db,
+      original.workflow_id,
+      original.project_id,
+      original.workflow_version,
+    )) ??
+    (await findWorkflowByIdOrSlug(
+      db,
+      original.workflow_id,
+      SANDBOX_PROJECT_ID,
+      original.workflow_version,
+    ));
   if (entry === null) throw notFound("The workflow for this run no longer exists.");
+  const snapshots = await db
+    .prepare("SELECT node_id,route_id,route_json FROM run_model_routes WHERE run_id=?")
+    .bind(original.id)
+    .all<{ node_id: string; route_id: string; route_json: string }>();
+  const modelRoutes = snapshots.results.map((row) => ({
+    nodeId: row.node_id,
+    routeId: row.route_id,
+    routeJson: row.route_json,
+  }));
   const runtime = assertCatalogMatchesRuntime(entry);
   if (entry.version.version !== original.workflow_version) {
     throw conflict(
@@ -796,6 +843,7 @@ export async function retryRun(
     await reserveSandboxQuotas(db, newRunId, session, config, requestId, userId);
 
     await insertRunBundle(db, {
+      modelRoutes,
       run: {
         id: newRunId,
         projectId: original.project_id,
