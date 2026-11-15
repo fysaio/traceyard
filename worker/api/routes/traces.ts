@@ -175,3 +175,16 @@ traceRoutes.get("/projects/:projectId/traces/:traceId", async (c) => {
     meta: { requestId: getRequestContext(c).requestId },
   });
 });
+
+traceRoutes.get("/projects/:projectId/instrumented-workflows", async (c) => {
+  const { projectId } = await ownedProject(c);
+  const rows = await c.env.DB.prepare(
+    `WITH named AS (SELECT *,CASE WHEN json_type(attributes_json,'$.service')='text' THEN json_extract(attributes_json,'$.service') ELSE 'Application' END AS service FROM trace_spans WHERE project_id=? AND kind='workflow'), ranked AS (SELECT *,COUNT(*) OVER(PARTITION BY name,service) AS execution_count,ROW_NUMBER() OVER(PARTITION BY name,service ORDER BY started_at DESC,span_id DESC) AS position FROM named) SELECT name,service,trace_id,started_at,execution_count FROM ranked WHERE position=1 ORDER BY started_at DESC LIMIT 100`,
+  )
+    .bind(projectId)
+    .all();
+  return c.json({
+    data: { items: rows.results },
+    meta: { requestId: getRequestContext(c).requestId },
+  });
+});

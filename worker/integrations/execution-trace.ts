@@ -4,7 +4,7 @@ import type { RunRow, StepRow, AttemptRow } from "../persistence/rows";
 // An evidence projection: timestamps and values come exclusively from persisted execution records.
 // Reading a trace never executes a workflow or invents timing events.
 export async function executionTrace(db: D1Database, run: RunRow) {
-  const [steps, attempts, models] = await Promise.all([
+  const [steps, attempts, models, http] = await Promise.all([
     db
       .prepare("SELECT * FROM execution_steps WHERE run_id=? ORDER BY ordinal")
       .bind(run.id)
@@ -13,21 +13,28 @@ export async function executionTrace(db: D1Database, run: RunRow) {
       .prepare("SELECT * FROM step_attempts WHERE run_id=? ORDER BY started_at,attempt_number")
       .bind(run.id)
       .all<AttemptRow>(),
-    db
-      .prepare("SELECT * FROM model_requests WHERE run_id=? ORDER BY created_at")
-      .bind(run.id)
-      .all<{
-        id: string;
-        step_key: string;
-        status: string;
-        provider: string | null;
-        model: string | null;
-        created_at: string;
-        duration_ms: number;
-        attempts_json: string;
-        input_tokens: number | null;
-        output_tokens: number | null;
-      }>(),
+    db.prepare("SELECT * FROM model_requests WHERE run_id=? ORDER BY created_at").bind(run.id).all<{
+      id: string;
+      step_key: string;
+      status: string;
+      provider: string | null;
+      model: string | null;
+      created_at: string;
+      duration_ms: number;
+      attempts_json: string;
+      input_tokens: number | null;
+      output_tokens: number | null;
+    }>(),
+    db.prepare("SELECT * FROM http_requests WHERE run_id=? ORDER BY created_at").bind(run.id).all<{
+      id: string;
+      node_id: string;
+      connection_id: string;
+      status: string;
+      created_at: string;
+      duration_ms: number;
+      http_status: number | null;
+      error: string | null;
+    }>(),
   ]);
   const traceId = (await sha256Hex(run.id)).slice(0, 32),
     root = (await sha256Hex("root:" + run.id)).slice(0, 16);
@@ -84,6 +91,28 @@ export async function executionTrace(db: D1Database, run: RunRow) {
         input_json: json(a.input_json ?? null),
         output_json: json(a.output_json ?? null),
         error_json: json(a.error_json),
+      });
+    for (const h of http.results.filter((h) => h.node_id === s.step_key))
+      items.push({
+        trace_id: traceId,
+        span_id: (await sha256Hex(h.id)).slice(0, 16),
+        parent_span_id: id,
+        name: "HTTP request",
+        kind: "http",
+        status: h.status,
+        started_at: h.created_at,
+        ended_at:
+          h.status === "RUNNING"
+            ? null
+            : new Date(Date.parse(h.created_at) + h.duration_ms).toISOString(),
+        attributes_json: JSON.stringify({
+          requestId: h.id,
+          connectionId: h.connection_id,
+          httpStatus: h.http_status,
+        }),
+        input_json: null,
+        output_json: null,
+        error_json: h.error ? JSON.stringify(h.error) : null,
       });
     for (const m of models.results.filter((m) => m.step_key === s.step_key))
       items.push({

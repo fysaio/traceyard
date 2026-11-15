@@ -11,11 +11,7 @@ import {
   readOAuthState,
   readOAuthVerifier,
 } from "../../lib/cookie";
-import {
-  randomToken,
-  sha256Base64Url,
-  sha256Hex,
-} from "../../lib/crypto";
+import { randomToken, sha256Base64Url, sha256Hex } from "../../lib/crypto";
 import { isoFromNow, nowIso } from "../../lib/time";
 import {
   claimGuestRuns,
@@ -25,11 +21,20 @@ import {
   revokeAuthSession,
   revokeUserSession,
 } from "../../persistence/identity";
-import { getDefaultProjectId } from "../../persistence/projects";
+import { getDefaultProjectId, getOwnedProject } from "../../persistence/projects";
 import { logError } from "../../observability/logger";
-import { ApiError, badRequest, forbidden, serviceUnavailable, unauthorized } from "../errors";
+import {
+  ApiError,
+  badRequest,
+  forbidden,
+  serviceUnavailable,
+  unauthorized,
+  parseWith,
+  notFound,
+} from "../errors";
 import {
   getRequestContext,
+  readJsonBody,
   type AppEnv,
   type AuthenticatedPrincipal,
 } from "../middleware";
@@ -42,13 +47,13 @@ const PROFILE_SCHEMA = z
     avatar_url: z
       .string()
       .url()
-        .refine((value) => {
-          try {
-            return new URL(value).protocol === "https:";
-          } catch {
-            return false;
-          }
-        })
+      .refine((value) => {
+        try {
+          return new URL(value).protocol === "https:";
+        } catch {
+          return false;
+        }
+      })
       .nullable()
       .optional(),
   })
@@ -107,16 +112,12 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     authorize.searchParams.set("code_challenge", await sha256Base64Url(verifier));
     authorize.searchParams.set("code_challenge_method", "S256");
 
-    c.header(
-      "Set-Cookie",
-      oauthCookie(OAUTH_STATE_COOKIE_NAME, state, config.secure),
-      { append: true },
-    );
-    c.header(
-      "Set-Cookie",
-      oauthCookie(OAUTH_VERIFIER_COOKIE_NAME, verifier, config.secure),
-      { append: true },
-    );
+    c.header("Set-Cookie", oauthCookie(OAUTH_STATE_COOKIE_NAME, state, config.secure), {
+      append: true,
+    });
+    c.header("Set-Cookie", oauthCookie(OAUTH_VERIFIER_COOKIE_NAME, verifier, config.secure), {
+      append: true,
+    });
     return c.redirect(authorize.toString(), 302);
   });
 
@@ -143,7 +144,10 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       code.length < 1 ||
       code.length > 512
     ) {
-      throw badRequest("INVALID_OAUTH_CALLBACK", "The GitHub sign-in response could not be verified.");
+      throw badRequest(
+        "INVALID_OAUTH_CALLBACK",
+        "The GitHub sign-in response could not be verified.",
+      );
     }
 
     const config = getGitHubOAuthConfig(c.env);
@@ -155,7 +159,10 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       .bind(nowIso(), await sha256Hex(state), nowIso())
       .first<{ state_hash: string }>();
     if (consumed === null) {
-      throw badRequest("INVALID_OAUTH_CALLBACK", "The GitHub sign-in state is expired or has already been used.");
+      throw badRequest(
+        "INVALID_OAUTH_CALLBACK",
+        "The GitHub sign-in state is expired or has already been used.",
+      );
     }
 
     let tokenResponse: Response;
@@ -229,7 +236,10 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       );
     }
     if (!profileResponse.ok) {
-      throw badRequest("GITHUB_PROFILE_UNAVAILABLE", "GitHub could not verify the sign-in identity.");
+      throw badRequest(
+        "GITHUB_PROFILE_UNAVAILABLE",
+        "GitHub could not verify the sign-in identity.",
+      );
     }
 
     const parsedProfile = PROFILE_SCHEMA.safeParse(await readResponseJson(profileResponse));
@@ -269,6 +279,18 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     return c.json({ data: { ok: true }, meta: { requestId: getRequestContext(c).requestId } });
   });
 
+  routes.get("/auth/guest-work", async (c) => {
+    requireAuth(c.get("auth"));
+    const row = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM runs WHERE owner_user_id IS NULL AND owner_session_hash=? AND project_id='prj_sandbox' AND expires_at>?",
+    )
+      .bind(c.get("session").idHash, nowIso())
+      .first<{ count: number }>();
+    return c.json({
+      data: { executions: row?.count ?? 0 },
+      meta: { requestId: getRequestContext(c).requestId },
+    });
+  });
   routes.post("/auth/claim", async (c) => {
     const auth = requireAuth(c.get("auth"));
     const guestSession = c.get("session");
@@ -279,7 +301,16 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       );
     }
 
-    const projectId = await getDefaultProjectId(c.env.DB, auth.user.id);
+    const body = c.req.header("content-type")?.includes("application/json")
+      ? parseWith(
+          z.object({ projectId: z.string().min(1).max(80) }).strict(),
+          await readJsonBody(c),
+          "Choose a project for your sandbox work.",
+        )
+      : null;
+    if (body && !(await getOwnedProject(c.env.DB, auth.user.id, body.projectId)))
+      throw notFound("Project not found.");
+    const projectId = body?.projectId ?? (await getDefaultProjectId(c.env.DB, auth.user.id));
     if (projectId === null) {
       throw new Error("The authenticated account has no personal workspace.");
     }
@@ -337,7 +368,8 @@ function getGitHubOAuthConfig(env: Env): GitHubOAuthConfig {
       "GitHub sign-in is not configured for this deployment.",
     );
   }
-  const localHttp = origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname);
+  const localHttp =
+    origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname);
   if (
     (!localHttp && origin.protocol !== "https:") ||
     origin.pathname !== "/" ||

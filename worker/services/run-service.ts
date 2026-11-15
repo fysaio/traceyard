@@ -1,3 +1,4 @@
+import { readHttpConnection } from "../integrations/http";
 import type { NewRunBundle } from "../persistence/run-creation";
 import { graphSchema } from "../../shared/workflow/graph";
 import { readModelRoute } from "../integrations/gateway";
@@ -208,6 +209,15 @@ export async function launchRun(
         routeId: node.config.routeId!,
         routeJson: JSON.stringify(await readModelRoute(env, projectId, node.config.routeId!)),
       });
+  const httpConnections: NonNullable<NewRunBundle["httpConnections"]> = [];
+  if (entry.version.graph_json)
+    for (const node of graphSchema
+      .parse(JSON.parse(entry.version.graph_json))
+      .nodes.filter((n) => n.type === "http"))
+      httpConnections.push({
+        nodeId: node.id,
+        json: JSON.stringify(await readHttpConnection(env, projectId, node.config.connectionId!)),
+      });
   const runId = randomId("run");
   const dispatchId = randomId("dsp");
   const correlationId = randomId("cor");
@@ -249,6 +259,7 @@ export async function launchRun(
 
     await insertRunBundle(db, {
       modelRoutes,
+      httpConnections,
       run: {
         id: runId,
         projectId,
@@ -809,6 +820,14 @@ export async function retryRun(
     routeId: row.route_id,
     routeJson: row.route_json,
   }));
+  const httpSnapshots = await db
+    .prepare("SELECT node_id,connection_json FROM run_http_connections WHERE run_id=?")
+    .bind(original.id)
+    .all<{ node_id: string; connection_json: string }>();
+  const httpConnections = httpSnapshots.results.map((r) => ({
+    nodeId: r.node_id,
+    json: r.connection_json,
+  }));
   const runtime = assertCatalogMatchesRuntime(entry);
   if (entry.version.version !== original.workflow_version) {
     throw conflict(
@@ -844,6 +863,7 @@ export async function retryRun(
 
     await insertRunBundle(db, {
       modelRoutes,
+      httpConnections,
       run: {
         id: newRunId,
         projectId: original.project_id,

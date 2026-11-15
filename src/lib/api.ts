@@ -130,10 +130,11 @@ export const api = {
   logout: (): Promise<void> =>
     request<unknown>("/api/auth/logout", { method: "POST" }).then(() => undefined),
 
-  claim: (): Promise<{ claimedRuns: number }> =>
-    request<{ claimedRuns: number }>("/api/auth/claim", { method: "POST" }).then(
-      (body) => body.data,
-    ),
+  claim: (projectId?: string): Promise<{ claimedRuns: number }> =>
+    request<{ claimedRuns: number }>("/api/auth/claim", {
+      method: "POST",
+      ...(projectId ? { body: JSON.stringify({ projectId }) } : {}),
+    }).then((body) => body.data),
 
   revokeSession: (id: string): Promise<void> =>
     request<unknown>(`/api/auth/sessions/${encodeURIComponent(id)}/revoke`, {

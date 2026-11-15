@@ -18,6 +18,8 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM http_requests"),
+    env.DB.prepare("DELETE FROM http_connections"),
     env.DB.prepare("DELETE FROM workflow_schedules"),
     env.DB.prepare("DELETE FROM outgoing_webhooks"),
     env.DB.prepare("DELETE FROM experiments"),
