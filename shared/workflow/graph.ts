@@ -15,12 +15,16 @@ export const graphNodeSchema = z
       "approval",
       "map",
       "condition",
+      "parse",
+      "http",
     ]),
     config: z
       .object({
         value: z.unknown().optional(),
         path: z.string().max(200).optional(),
         routeId: z.string().max(80).optional(),
+        connectionId: z.string().max(80).optional(),
+        requiredFields: z.array(z.string().min(1).max(100)).max(20).optional(),
         prompt: z.string().max(6000).optional(),
         expiresMinutes: z.number().int().min(1).max(60).optional(),
         limit: z.number().int().min(1).max(20).optional(),
@@ -73,7 +77,10 @@ export function graphErrors(graph: WorkflowGraph): string[] {
       errors.push("The output cannot have outgoing connections.");
     if (n.type !== "output" && !outgoing.length)
       errors.push(`Connect ${n.name} to the output path.`);
-    if (["pick", "output", "map", "condition"].includes(n.type) && incoming.length !== 1)
+    if (
+      ["pick", "output", "map", "condition", "parse", "http"].includes(n.type) &&
+      incoming.length !== 1
+    )
       errors.push(`${n.name} needs exactly one incoming connection.`);
   }
   for (const node of graph.nodes) {
@@ -93,6 +100,8 @@ export function graphErrors(graph: WorkflowGraph): string[] {
           `Connect ${node.name} to two different steps and choose its true and false paths.`,
         );
     }
+    if (node.type === "http" && !node.config.connectionId)
+      errors.push(`Choose an HTTP connection for ${node.name}.`);
     if (node.type === "model" && !node.config.routeId)
       errors.push(`Choose a model route for ${node.name}.`);
     if (node.type === "map" && !node.config.limit)
@@ -120,6 +129,19 @@ export function evaluateGraphNode(node: GraphNode, input: unknown, sources: unkn
   if (node.type === "literal") return node.config.value ?? null;
   if (node.type === "output") return sources[0] ?? null;
   if (node.type === "merge") return sources;
+  if (node.type === "parse") {
+    if (typeof sources[0] !== "string") throw new Error("JSON parsing requires a text input.");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(sources[0]);
+    } catch {
+      throw new Error("The input is not valid JSON.");
+    }
+    for (const field of node.config.requiredFields ?? [])
+      if (!parsed || typeof parsed !== "object" || !Object.hasOwn(parsed, field))
+        throw new Error("Required JSON field is missing: " + field);
+    return parsed;
+  }
   if (node.type === "condition") {
     const value = evaluateGraphNode({ ...node, type: "pick" }, null, sources);
     return JSON.stringify(value) === JSON.stringify(node.config.equals);
@@ -131,7 +153,7 @@ export function evaluateGraphNode(node: GraphNode, input: unknown, sources: unkn
       throw new Error("Map input exceeds its configured iteration limit.");
     return items.map((item) => evaluateGraphNode({ ...node, type: "pick" }, null, [item]));
   }
-  if (node.type === "model" || node.type === "approval")
+  if (node.type === "model" || node.type === "approval" || node.type === "http")
     throw new Error("This step requires the execution service.");
   let value = sources[0];
   for (const key of (node.config.path ?? "").split(".").filter(Boolean)) {

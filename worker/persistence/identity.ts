@@ -57,7 +57,9 @@ export async function getOrCreateGitHubIdentity(
   if (existing !== null) {
     await db.batch([
       db
-        .prepare(`UPDATE users SET login = ?, display_name = ?, avatar_url = ?, updated_at = ? WHERE id = ?`)
+        .prepare(
+          `UPDATE users SET login = ?, display_name = ?, avatar_url = ?, updated_at = ? WHERE id = ?`,
+        )
         .bind(profile.login, profile.name, profile.avatarUrl, nowIso(), existing.user_id),
       db
         .prepare(
@@ -83,7 +85,7 @@ export async function getOrCreateGitHubIdentity(
       db
         .prepare(
           `INSERT INTO projects (id, slug, name, kind, created_at, owner_user_id)
-           VALUES (?, ?, 'Personal workspace', 'standard', ?, ?)`,
+           VALUES (?, ?, 'Main project', 'standard', ?, ?)`,
         )
         .bind(workspaceId, `workspace-${userId}`, now, userId),
       db
@@ -103,7 +105,9 @@ export async function getOrCreateGitHubIdentity(
     const winner = await findGitHubIdentity(db, String(profile.id));
     if (winner === null) throw error;
     await db
-      .prepare(`UPDATE users SET login = ?, display_name = ?, avatar_url = ?, updated_at = ? WHERE id = ?`)
+      .prepare(
+        `UPDATE users SET login = ?, display_name = ?, avatar_url = ?, updated_at = ? WHERE id = ?`,
+      )
       .bind(profile.login, profile.name, profile.avatarUrl, nowIso(), winner.user_id)
       .run();
     return toDeveloperIdentity(winner.user_id, profile);
@@ -121,7 +125,9 @@ export async function createUserSession(
   const now = nowIso();
   const expiresAt = isoFromNow(USER_SESSION_LIFETIME_MS);
   const ipHash = await fingerprint(request.headers.get("cf-connecting-ip") ?? "local-development");
-  const userAgentHash = await fingerprint((request.headers.get("user-agent") ?? "unknown").slice(0, 256));
+  const userAgentHash = await fingerprint(
+    (request.headers.get("user-agent") ?? "unknown").slice(0, 256),
+  );
 
   await db
     .prepare(

@@ -1,3 +1,8 @@
+import {
+  WORKFLOW_ICONS,
+  WORKFLOW_TEMPLATES,
+  templateById,
+} from "../../../shared/workflow/templates";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -14,6 +19,12 @@ import { badRequest, conflict, notFound, parseWith, unauthorized } from "../erro
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 
 export const studioRoutes = new Hono<AppEnv>();
+studioRoutes.get("/workflow-templates", (c) =>
+  c.json({
+    data: { items: WORKFLOW_TEMPLATES },
+    meta: { requestId: getRequestContext(c).requestId },
+  }),
+);
 async function owned(db: D1Database, userId: string | undefined, projectId: string) {
   if (!userId) throw unauthorized("AUTHENTICATION_REQUIRED", "Sign in to edit workflows.");
   if (!(await getOwnedProject(db, userId, projectId))) throw notFound("Project not found.");
@@ -27,7 +38,11 @@ async function workflow(db: D1Database, projectId: string, id: string) {
   return w;
 }
 const createSchema = z
-  .object({ name: z.string().trim().min(1).max(100), description: z.string().max(500).default("") })
+  .object({
+    name: z.string().trim().min(1).max(100),
+    description: z.string().max(500).default(""),
+    icon: z.enum(WORKFLOW_ICONS).default("diagram-project"),
+  })
   .strict();
 const updateSchema = createSchema.extend({
   revision: z.number().int().positive(),
@@ -52,16 +67,45 @@ studioRoutes.get("/projects/:projectId/studio", async (c) => {
 studioRoutes.post("/projects/:projectId/studio", async (c) => {
   const projectId = c.req.param("projectId");
   await owned(c.env.DB, c.get("auth")?.user.id, projectId);
-  const body = parseWith(createSchema, await readJsonBody(c), "Enter a workflow name.");
+  const body = parseWith(
+    createSchema.extend({ templateId: z.string().optional() }),
+    await readJsonBody(c),
+    "Enter a workflow name.",
+  );
+  const template = body.templateId ? templateById(body.templateId) : null;
+  if (body.templateId && !template)
+    throw badRequest("UNKNOWN_TEMPLATE", "Choose a template from the library.");
   const id = randomId("wf"),
     now = nowIso();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "INSERT INTO workflows (id,project_id,slug,name,description,current_version,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)",
-    ).bind(id, projectId, id, body.name, body.description, now, now),
+      "INSERT INTO workflows (id,project_id,slug,name,description,current_version,created_at,updated_at,icon) VALUES (?,?,?,?,?,0,?,?,?)",
+    ).bind(
+      id,
+      projectId,
+      id,
+      body.name,
+      body.description || template?.description || "",
+      now,
+      now,
+      template?.icon ?? body.icon,
+    ),
     c.env.DB.prepare(
       "INSERT INTO workflow_drafts (workflow_id,graph_json,revision,updated_at) VALUES (?,?,1,?)",
-    ).bind(id, JSON.stringify(INITIAL_GRAPH), now),
+    ).bind(
+      id,
+      JSON.stringify(
+        template
+          ? {
+              ...template.graph,
+              nodes: template.graph.nodes.map((n) =>
+                n.type === "input" ? { ...n, config: { value: template.input } } : n,
+              ),
+            }
+          : INITIAL_GRAPH,
+      ),
+      now,
+    ),
   ]);
   return c.json(
     { data: { id, revision: 1 }, meta: { requestId: getRequestContext(c).requestId } },
@@ -83,8 +127,8 @@ studioRoutes.post("/projects/:projectId/studio/import", async (c) => {
     now = nowIso();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "INSERT INTO workflows (id,project_id,slug,name,description,current_version,created_at,updated_at) VALUES (?,?,?,?,?,0,?,?)",
-    ).bind(id, projectId, id, b.name, b.description, now, now),
+      "INSERT INTO workflows (id,project_id,slug,name,description,current_version,created_at,updated_at,icon) VALUES (?,?,?,?,?,0,?,?,?)",
+    ).bind(id, projectId, id, b.name, b.description, now, now, b.icon),
     c.env.DB.prepare(
       "INSERT INTO workflow_drafts (workflow_id,graph_json,revision,updated_at) VALUES (?,?,1,?)",
     ).bind(id, json, now),
@@ -133,8 +177,8 @@ studioRoutes.put("/projects/:projectId/studio/:id", async (c) => {
       "UPDATE workflow_drafts SET graph_json = ?, revision = revision+1, updated_at = ? WHERE workflow_id = ? AND revision = ?",
     ).bind(json, now, id, b.revision),
     c.env.DB.prepare(
-      "UPDATE workflows SET name = ?, description = ?, updated_at = ? WHERE id = ? AND changes() = 1",
-    ).bind(b.name, b.description, now, id),
+      "UPDATE workflows SET name = ?, description = ?, updated_at = ?,icon=? WHERE id = ? AND changes() = 1",
+    ).bind(b.name, b.description, now, b.icon, id),
   ]);
   if (rows[0]?.meta.changes !== 1)
     throw conflict("DRAFT_CONFLICT", "This draft changed elsewhere. Reload before saving.");
@@ -166,7 +210,7 @@ studioRoutes.post("/projects/:projectId/studio/:id/publish", async (c) => {
       name: n.name,
       ordinal: i + 1,
       description: n.type,
-      timeoutMs: n.type === "model" ? 120000 : 10000,
+      timeoutMs: n.type === "model" ? 120000 : n.type === "http" ? 30000 : 10000,
       retry: { maxAttempts: 1, baseDelayMs: 0, backoff: "fixed", maxDelayMs: 0 },
     }));
   const version = w.current_version + 1,

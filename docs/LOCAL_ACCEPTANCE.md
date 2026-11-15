@@ -28,7 +28,20 @@ Use this branch as the implementation. Do not rebuild the frontend in a separate
 
 Use every reachable screen at 390, 768, 1009 and 1440 CSS pixels. Check navigation, controls inside cards, list/grid difference, form bounds, long IDs/code, Gateway routes, provider errors, approval payloads and comparison columns. Use keyboard focus/activation, a touch device, native pinch/scroll, Studio drag/keyboard movement and zoom controls. Respect reduced-motion preferences. Verify browser Back/Forward and reload on detail URLs.
 
-Run the browser tests on a working runtime. Existing UI contract tests intentionally stub some responses and do not replace these authenticated journeys. The current ChatGPT workspace cannot complete interactive preview because the Cloudflare Vite plugin fails with `uv_interface_addresses`; this remains a verification gap, not a passed test.
+Run the browser tests on a working runtime. Existing UI contract tests intentionally stub some responses and do not replace these authenticated journeys. The optional Cloudflare inspector is disabled in Vite (`inspectorPort: false`), resolving the prior host-interface discovery failure. Local browser verification is now possible; see [recorded scope](PRODUCT_EXPERIENCE_REPAIR.md).
+
+## Isolated local acceptance account
+
+For UI/backend checks without live OAuth credentials:
+
+```bash
+npm ci
+npm run dev:acceptance
+```
+
+Open `/__acceptance/account` on the printed local origin and choose **Open local test account**. This uses a separate local D1 database and a test-only Worker entrypoint. It creates a real local user/session, then uses the production UI and APIs. It does not test GitHub sign-in. `npm run dev` still uses the normal production entrypoint/config and local database. Never deploy `wrangler.acceptance.jsonc`; it intentionally contains a placeholder database ID. No acceptance route is mounted by the production Worker.
+
+Check the project switcher lists each created project; rename one; reload and verify selection; confirm workflows stay in their project. Open Templates → Parallel processing → Use template → Publish → Run v1. Submit customer/order JSON and inspect the actual merged result. A Model template must request a real route before publication; an HTTP template must request a configured allowed destination. In Connect application, confirm a key alone never marks it connected; use the HTTP example from a separate server process and check the first trace and observed workflow appear.
 
 ## Before production
 

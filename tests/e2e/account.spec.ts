@@ -49,7 +49,26 @@ test("list and grid selection keep action controls within their cards", async ({
       }),
     ),
   );
-  await page.route("**/api/projects/*/studio", (r) => r.fulfill(json({ items: [] })));
+  await page.route("**/api/projects/*/studio", (r) =>
+    r.fulfill(
+      json({
+        items: [
+          {
+            id: "wf_document_intelligence",
+            name: "Document intelligence",
+            description: "Validate, extract and persist document results.",
+            icon: "file-lines",
+            revision: 1,
+            current_version: 1,
+          },
+        ],
+      }),
+    ),
+  );
+  await page.route("**/api/auth/guest-work", (r) => r.fulfill(json({ executions: 0 })));
+  await page.route("**/api/projects/*/instrumented-workflows", (r) =>
+    r.fulfill(json({ items: [] })),
+  );
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toBeVisible();
   for (const width of [390, 768, 1009, 1440]) {

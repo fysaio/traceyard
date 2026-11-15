@@ -62,4 +62,23 @@ describe("executable graphs", () => {
     ).toThrow();
     expect(() => evaluateGraphNode({ ...node, config: { path: "missing" } }, null, [{}])).toThrow();
   });
+  it("parses actual JSON and rejects malformed input or missing required fields", () => {
+    const node = {
+      id: "parse",
+      name: "Parse",
+      type: "parse" as const,
+      config: { requiredFields: ["title"] },
+      x: 0,
+      y: 0,
+    };
+    expect(evaluateGraphNode(node, null, ['{"title":"Invoice","total":42}'])).toEqual({
+      title: "Invoice",
+      total: 42,
+    });
+    expect(() => evaluateGraphNode(node, null, ['{"total":42}'])).toThrow(
+      "Required JSON field is missing: title",
+    );
+    expect(() => evaluateGraphNode(node, null, ["broken"])).toThrow("not valid JSON");
+    expect(() => evaluateGraphNode(node, null, [{}])).toThrow("text input");
+  });
 });
