@@ -5,6 +5,7 @@ import type { DiscoveredOperation } from "../../agent/discovery.mjs";
 import { sha256Hex } from "../lib/crypto";
 import { getOwnedProject } from "../persistence/projects";
 import { notFound } from "../api/errors";
+import { syncRepositoryChecks } from "./check-sync";
 export async function operationKey(file: string, name: string) {
   return "op_" + (await sha256Hex(file + "\0" + name)).slice(0, 32);
 }
@@ -42,6 +43,7 @@ export async function projectCatalog(
 ): Promise<Catalog> {
   const project = await getOwnedProject(env.DB, userId, projectId);
   if (!project) throw notFound("Project not found.");
+  await syncRepositoryChecks(env, projectId);
   const [repository, runs, jobs, config, cases, managed] = await Promise.all([
     env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
       .bind(projectId)

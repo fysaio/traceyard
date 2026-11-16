@@ -86,6 +86,8 @@ Local discovery skips symlinks, environment files, generated/vendor/dependency d
 
 ### When a project check fails
 
+Project and check-detail reads recover missed GitHub completion events using the installation's Actions access. Stale running checks are verified at most once per minute, with repository, commit and run-attempt identity checks; a concurrent runner report wins over the fallback. A successful GitHub job without a completed test report remains unverified rather than being called tested. If GitHub cannot be reached and no progress has arrived for 15 minutes, the UI says **Update overdue** and links to GitHub instead of showing an endless running indicator.
+
 Build/test checks and recorded application runs are separate evidence. A failed check may have no application traces if test imports failed or the tests mocked every request. The failed-application-runs filter does not filter build or test checks.
 
 The runner reports bounded diagnostic categories (such as missing Supabase test configuration, a missing module, or an npm lockfile mismatch) and failed test-file counts. It retains full command output in the local terminal or GitHub logs; it does not upload arbitrary logs, assertion snapshots, or their possible secrets into project reports. Unrecognized failures point to those logs.
