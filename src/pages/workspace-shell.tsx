@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type AuthSession, type ProjectSummary } from "../lib/api";
 import { studioApi } from "../lib/studio-api";
 import { WorkspaceContext, readPreference, savePreference } from "../lib/workspace";
+import { ConnectRepository } from "./project-overview";
 import { Modal, Icon, ErrorMessage } from "../components/product-ui";
 export function WorkspaceShell({
   session,
@@ -24,7 +25,9 @@ export function WorkspaceShell({
       if (id) savePreference("project:" + session.user!.id, id);
       return id;
     }),
-    [menu, setMenu] = useState<"projects" | "create" | "account" | "search" | null>(null),
+    [menu, setMenu] = useState<"projects" | "create" | "account" | "search" | "connect" | null>(
+      null,
+    ),
     [name, setName] = useState("");
   const projects = q.data ?? [],
     project =
@@ -226,18 +229,18 @@ export function WorkspaceShell({
               <Link className="btn" to="/settings/projects" onClick={() => setMenu(null)}>
                 Workspace settings
               </Link>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  create.reset();
-                  setMenu("create");
-                }}
-              >
-                <Icon name="plus" />
-                Create project
+              <button className="btn primary" onClick={() => setMenu("connect")}>
+                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
               </button>
             </div>
           </Modal>
+        )}
+        {menu === "connect" && (
+          <ConnectRepository
+            mode="github"
+            close={() => setMenu(null)}
+            connected={() => setMenu(null)}
+          />
         )}
         {menu === "create" && (
           <Modal title="Create project" close={() => setMenu(null)}>

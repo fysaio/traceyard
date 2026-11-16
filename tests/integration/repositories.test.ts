@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:workers";
-import { createExecutionContext } from "cloudflare:test";
+import { createExecutionContext, introspectWorkflowInstance } from "cloudflare:test";
 import { createApp } from "../../worker/api/app";
 import { createSession, apiFetchWithGitHub, ORIGIN, readSuccess } from "./helpers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import { base64UrlEncode } from "../../worker/lib/crypto";
+import { prepareRepositoryChecks } from "../../worker/repositories/checks";
 import { scanRepository } from "../../worker/repositories/scan";
 async function account(id = 810) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
@@ -399,7 +400,7 @@ describe("repository connection and execution evidence", () => {
       .bind(a.projectId, new Date().toISOString())
       .run();
     const source = "app.post('/interpret',async c=>model.generate(c));";
-    const fetcher: typeof fetch = async (input) => {
+    const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
       if (url.endsWith("/access_tokens"))
         return Response.json({ token: "test-installation-token" });
@@ -414,6 +415,10 @@ describe("repository connection and execution evidence", () => {
             },
           ],
         });
+      if (url.includes("/git/ref/heads/")) return new Response(null, { status: 404 });
+      if (url.includes("/pulls?")) return Response.json([]);
+      if (url.includes("/contents/.github/workflows/traceyard.yml") && init?.method !== "PUT")
+        return new Response(null, { status: 404 });
       if (url.endsWith("/git/refs")) return Response.json({ ref: "refs/heads/setup" });
       if (url.includes("/contents/.github/workflows/traceyard.yml"))
         return Response.json({ commit: { sha: "d".repeat(40) } });
@@ -461,12 +466,24 @@ describe("repository connection and execution evidence", () => {
     expect(listed.items[0]?.id).toBe(99);
     expect(
       (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
-    ).toBe(201);
+    ).toBe(200);
     expect(
       (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
     ).toBe(200);
+    // Runtime dispatch requires actual installation evidence, rather than merely an open PR.
+    expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
+      409,
+    );
+    await env.DB.prepare(
+      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
+    )
+      .bind(a.projectId)
+      .run();
     expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
       202,
+    );
+    expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
+      409,
     );
     async function webhook(body: unknown) {
       const text = JSON.stringify(body),
@@ -521,5 +538,226 @@ describe("repository connection and execution evidence", () => {
     expect(
       await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
     ).toEqual({ suspended: 1 });
+  });
+  it("creates one project per selected repository, starts background setup, and resumes partial PR setup without duplicate runs", async () => {
+    const a = await account(),
+      other = await account(811);
+    await env.DB.prepare(
+      "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(7,'810','repository-810',?)",
+    )
+      .bind(new Date().toISOString())
+      .run();
+    const pair = await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const tasks: { params: { projectId: string; checks?: boolean } }[] = [];
+    const configured = {
+      ...env,
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_SLUG: "traceyard-test",
+      GITHUB_APP_PRIVATE_KEY:
+        "-----BEGIN PRIVATE KEY-----\n" +
+        btoa(
+          String.fromCharCode(
+            ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+          ),
+        ) +
+        "\n-----END PRIVATE KEY-----",
+      GITHUB_APP_WEBHOOK_SECRET: "test-only",
+      TRACEYARD_RUNNER_REF: "c".repeat(40),
+      REPOSITORY_DISCOVERY: {
+        create: async (task: { params: { projectId: string; checks?: boolean } }) => {
+          tasks.push(task);
+          return {};
+        },
+      } as unknown as NonNullable<Env["REPOSITORY_DISCOVERY"]>,
+    };
+    let branch = false,
+      file: string | null = null,
+      pr = false,
+      failUpload = true;
+    let branches = 0,
+      prs = 0,
+      dispatches = 0;
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/access_tokens")) return Response.json({ token: "fixture-token" });
+      if (url.endsWith("/repositories/99"))
+        return Response.json({
+          id: 99,
+          full_name: "repository-810/somni",
+          default_branch: "main",
+          owner: { id: 810, type: "User" },
+        });
+      if (url.includes("/git/ref/heads/"))
+        return branch ? Response.json({ ref: "existing" }) : new Response(null, { status: 404 });
+      if (url.endsWith("/git/refs")) {
+        branch = true;
+        branches++;
+        return Response.json({});
+      }
+      if (url.includes("/commits/main")) return Response.json({ sha: "a".repeat(40) });
+      if (url.includes("/contents/.github/workflows/traceyard.yml")) {
+        if (init?.method === "PUT") {
+          if (failUpload) return new Response(null, { status: 500 });
+          file = JSON.parse(String(init.body)).content;
+          return Response.json({});
+        }
+        return file ? Response.json({ content: file }) : new Response(null, { status: 404 });
+      }
+      if (url.includes("/pulls?"))
+        return Response.json(
+          pr ? [{ html_url: "https://github.com/repository-810/somni/pull/8" }] : [],
+        );
+      if (url.endsWith("/pulls")) {
+        pr = true;
+        prs++;
+        return Response.json({ html_url: "https://github.com/repository-810/somni/pull/8" });
+      }
+      if (url.includes("/dispatches")) {
+        dispatches++;
+        return new Response(null, { status: 204 });
+      }
+      if (url.includes("/git/trees/"))
+        return Response.json({
+          truncated: false,
+          tree: [{ path: "server.ts", type: "blob", size: 50, sha: "b".repeat(40) }],
+        });
+      if (url.includes("/git/blobs/"))
+        return Response.json({
+          encoding: "base64",
+          content: btoa("app.post('/interpret',async()=>model.generate());"),
+        });
+      throw Error("Unexpected fixture request: " + url);
+    };
+    const app = createApp({ githubFetch: fetcher });
+    const invoke = (path: string, method = "POST", body?: unknown, cookie = a.cookie) =>
+      app.fetch(
+        new Request(ORIGIN + path, {
+          method,
+          headers: { cookie, origin: ORIGIN, "content-type": "application/json" },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        }),
+        configured,
+        createExecutionContext(),
+      );
+    const input = { repositoryId: 99, installationId: 7 };
+    expect((await invoke("/api/repositories/connect", "POST", input, other.cookie)).status).toBe(
+      404,
+    );
+    const first = await readSuccess<{ project: { id: string; name: string } }>(
+      await invoke("/api/repositories/connect", "POST", input),
+    );
+    const id = first.project.id;
+    expect(id).not.toBe(a.projectId);
+    expect(first.project.name).toBe("repository-810/somni");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.params).toMatchObject({ projectId: id, checks: true });
+    const again = await readSuccess<{ project: { id: string }; existing: boolean }>(
+      await invoke("/api/repositories/connect", "POST", input),
+    );
+    expect(again).toMatchObject({ project: { id }, existing: true });
+    expect(tasks).toHaveLength(1);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM projects WHERE owner_user_id=(SELECT owner_user_id FROM projects WHERE id=?)",
+        )
+          .bind(id)
+          .first<{ count: number }>()
+      )?.count,
+    ).toBe(2);
+    // A failed external setup does not discard successful source discovery.
+    await expect(prepareRepositoryChecks(configured, id, fetcher)).rejects.toThrow(
+      "GitHub returned 500",
+    );
+    await scanRepository(
+      configured,
+      {
+        project_id: id,
+        installation_id: 7,
+        full_name: "repository-810/somni",
+        default_branch: "main",
+      },
+      fetcher,
+    );
+    expect(
+      await env.DB.prepare(
+        "SELECT status,check_setup_state FROM project_repositories WHERE project_id=?",
+      )
+        .bind(id)
+        .first(),
+    ).toEqual({ status: "DISCOVERED", check_setup_state: "FAILED" });
+    failUpload = false;
+    expect(await prepareRepositoryChecks(configured, id, fetcher)).toMatchObject({
+      state: "AWAITING_MERGE",
+    });
+    expect(await prepareRepositoryChecks(configured, id, fetcher)).toMatchObject({
+      state: "AWAITING_MERGE",
+    });
+    expect(branches).toBe(1);
+    expect(prs).toBe(1);
+    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
+    await env.DB.prepare(
+      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
+    )
+      .bind(id)
+      .run();
+    expect((await invoke(`/api/projects/${id}/repository/analyze`)).status).toBe(202);
+    expect(tasks).toHaveLength(2);
+    expect(tasks[1]?.params.checks).toBe(true);
+    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(202);
+    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
+    expect(dispatches).toBe(1);
+    // Even after the short click cooldown, a queued job holds the lease.
+    await env.DB.prepare("UPDATE project_repositories SET last_dispatch_at=? WHERE project_id=?")
+      .bind(new Date(Date.now() - 2 * 60000).toISOString(), id)
+      .run();
+    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
+    expect(dispatches).toBe(1);
+  });
+  it("finishes independent background setup stages and retains both failures without configured services", async () => {
+    const a = await account();
+    const scanId = "scan-background-" + crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(7,'810','repository-810',?)",
+    )
+      .bind(new Date().toISOString())
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO project_repositories(project_id,repository_id,installation_id,full_name,default_branch,scan_id,status,updated_at) VALUES(?,99,7,'repository-810/somni','main',?,'DISCOVERING',?)",
+    )
+      .bind(a.projectId, scanId, new Date().toISOString())
+      .run();
+    await using instance = await introspectWorkflowInstance(env.REPOSITORY_DISCOVERY!, scanId);
+    await instance.modify(async (modifier) => {
+      await modifier.disableRetryDelays();
+    });
+    await env.REPOSITORY_DISCOVERY!.create({
+      id: scanId,
+      params: { projectId: a.projectId, scanId, checks: true },
+    });
+    await instance.waitForStatus("complete");
+    const state = await env.DB.prepare(
+      "SELECT status,last_error,check_setup_state,check_setup_error FROM project_repositories WHERE project_id=?",
+    )
+      .bind(a.projectId)
+      .first<{
+        status: string;
+        last_error: string;
+        check_setup_state: string;
+        check_setup_error: string;
+      }>();
+    expect(state?.status).toBe("FAILED");
+    expect(state?.last_error).toContain("GitHub App configuration");
+    expect(state?.check_setup_state).toBe("FAILED");
+    expect(state?.check_setup_error).toContain("runner commit");
   });
 });
