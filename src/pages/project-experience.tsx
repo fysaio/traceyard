@@ -477,7 +477,7 @@ export function ProjectPage() {
                 checked={onlyFailed}
                 onChange={(e) => setOnlyFailed(e.target.checked)}
               />
-              With failed runs
+              Failed application runs
             </label>
           </div>
         )}
@@ -504,9 +504,11 @@ export function ProjectPage() {
               ) : undefined
             }
           >
-            {search || onlyFailed
-              ? "Try a different name or clear the filter."
-              : "Supported source entry points and recorded application operations will appear here. Running tests only records the paths those tests exercise."}
+            {onlyFailed
+              ? "No operations match a failed application run. Build and test failures appear in the project check above. Clear filters to see discovered operations."
+              : search
+                ? "Try a different name or clear the filter."
+                : "Supported source entry points and recorded application operations will appear here. Running tests only records the paths those tests exercise."}
           </Empty>
         ) : (
           <div className="flow-operations">
@@ -594,10 +596,14 @@ function RunList({
   projectId,
   runs,
   title = "Recent runs",
+  emptyTitle = "No application activity recorded yet",
+  emptyDescription = "Source discovery lists possible operations. A recorded run appears when a test or your application actually exercises a supported operation.",
 }: {
   projectId: string;
   runs: ApplicationRun[];
   title?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }) {
   const [selected, setSelected] = useState<string[]>([]),
     [failed, setFailed] = useState(false),
@@ -642,10 +648,8 @@ function RunList({
         </div>
       </div>
       {!rows.length ? (
-        <Empty icon="wave-square" title={failed ? "No failed runs" : "Waiting for a recorded run"}>
-          {failed
-            ? "There are no failed runs in this history."
-            : "Run project tests, or send activity from your application. Source discovery alone does not create executions."}
+        <Empty icon="wave-square" title={failed ? "No failed application runs" : emptyTitle}>
+          {failed ? "There are no failed runs in this history." : emptyDescription}
         </Empty>
       ) : (
         <div className="flow-run-list">
@@ -1552,6 +1556,18 @@ export function ProjectCheckPage() {
         projectId={projectId}
         runs={catalog.data?.runs.filter((r) => r.checkId === checkId) ?? []}
         title="Runs recorded during this check"
+        emptyTitle={
+          d.job.status === "RUNNING"
+            ? "No application activity recorded so far"
+            : "No application activity was recorded"
+        }
+        emptyDescription={
+          d.job.status === "FAILED"
+            ? "This project check failed. Review the failed stage above, correct it, then run Check project again. A failed check and a failed application run are different results; tests that stop before requests or mock those requests may record no application activity."
+            : d.job.status === "RUNNING"
+              ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
+              : "No supported runtime activity was received from this check. Mocked or in-process tests may pass without producing traces. Run a saved HTTP request test to record a real request through your application."
+        }
       />
     </div>
   );

@@ -84,6 +84,16 @@ Local discovery skips symlinks, environment files, generated/vendor/dependency d
 
 `run` executes the target application's package scripts. It is not a deployment or a persistent production agent. It can only observe behavior that the existing test suite actually exercises. A project with no test script is shown as skipped, never passed. Test failures produce a nonzero exit code and retained failed phase evidence.
 
+### When a project check fails
+
+Build/test checks and recorded application runs are separate evidence. A failed check may have no application traces if test imports failed or the tests mocked every request. The failed-application-runs filter does not filter build or test checks.
+
+The runner reports bounded diagnostic categories (such as missing Supabase test configuration, a missing module, or an npm lockfile mismatch) and failed test-file counts. It retains full command output in the local terminal or GitHub logs; it does not upload arbitrary logs, assertion snapshots, or their possible secrets into project reports. Unrecognized failures point to those logs.
+
+GitHub runners do not receive developers' local environment files. Mocked tests should fully replace live clients and use scoped dummy provider configuration; they should not require production API keys. Live tests need separately configured test services and credentials.
+
+To use an updated runner in an existing connected repository, review a PR changing the pinned Traceyard commit in `.github/workflows/traceyard.yml`. Updating the server's `TRACEYARD_RUNNER_REF` affects new setup PRs; it does not silently rewrite already installed workflows.
+
 ## What is automatically discovered or recorded
 
 Source discovery uses a TypeScript/JavaScript parser, not text matches inside comments/strings. It recognises conventional Express/Hono/Fastify-style HTTP router declarations, Next.js API route exports, Deno.serve, and selected queue/cron declarations. It resolves direct named local handlers and lists their direct calls. It does not resolve every import, dynamic branch, distributed boundary or application-level business workflow. Operation source location is evidence, not proof that the path ran.
