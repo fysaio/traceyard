@@ -14,11 +14,13 @@ export function Modal({
   children,
   close,
   menu = false,
+  actions,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   menu?: boolean;
+  actions?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null),
     id = useId();
@@ -56,9 +58,12 @@ export function Modal({
     >
       <div className="dialog-heading">
         <h2 id={id}>{title}</h2>
-        <button type="button" className="btn icon-only" aria-label="Close dialog" onClick={close}>
-          <Icon name="xmark" />
-        </button>
+        <div className="dialog-heading-actions">
+          {actions}
+          <button type="button" className="btn icon-only" aria-label="Close dialog" onClick={close}>
+            <Icon name="xmark" />
+          </button>
+        </div>
       </div>
       {children}
     </dialog>

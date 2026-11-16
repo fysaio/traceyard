@@ -288,6 +288,17 @@ export class RunExecutor {
         if (start.step === null) throw new NonRetryableError("Completed step row disappeared.");
         return JSON.stringify(parseStepOutput(start.step));
       }
+      if (start.state === "busy") {
+        // A non-fenced claim was refused: another attempt generation owns the
+        // step. This is retryable so the Workflow can re-enter with a newer
+        // attempt rather than performing the work twice.
+        throw new DomainError({
+          errorClass: "TRANSIENT_DEPENDENCY",
+          code: "STEP_CLAIM_CONFLICT",
+          message: `Step "${stepKey}" is already owned by an active attempt.`,
+          retryable: true,
+        });
+      }
       if (start.state === "terminal" || start.step === null) {
         throw new NonRetryableError(`Step "${stepKey}" cannot begin a new attempt.`);
       }

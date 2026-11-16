@@ -13,6 +13,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton, SkeletonRows } from "../components/ui/skeleton";
 import { api, ApiClientError } from "../lib/api";
+import { overviewPollInterval } from "../lib/polling";
 import { formatDuration, formatNumber, formatPercent } from "../lib/utils";
 
 export function OverviewPage() {
@@ -22,11 +23,10 @@ export function OverviewPage() {
   const overview = useQuery({
     queryKey: ["overview", days],
     queryFn: () => api.overview(days),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data === undefined) return false;
-      return data.totals.queued + data.totals.running + data.totals.cancelling > 0 ? 4_000 : false;
-    },
+    refetchInterval: (query) => overviewPollInterval(query.state.data?.totals),
+    // React Query pauses interval refetches while the tab is hidden and
+    // resumes them when it becomes visible again.
+    refetchIntervalInBackground: false,
   });
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: () => api.workflows() });
   const session = useQuery({ queryKey: ["auth-session"], queryFn: api.authSession });
@@ -75,12 +75,6 @@ export function OverviewPage() {
             what happened and retry a failed run with its history intact.
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-2">
-            <Link
-              to="/workflows"
-              className="inline-flex h-9 items-center gap-2 rounded-md bg-ink px-4 text-xs font-medium text-canvas no-underline transition-opacity hover:opacity-80"
-            >
-              Explore sandbox <Icon name="arrow-up-right" className="text-[10px]" />
-            </Link>
             {session.data?.user == null && session.data?.githubSignInAvailable !== false ? (
               <a
                 href="/api/auth/github/start"

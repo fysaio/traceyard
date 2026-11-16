@@ -117,6 +117,42 @@ export function authSessionMiddleware(): MiddlewareHandler<AppEnv> {
   };
 }
 
+/**
+ * Content-Security-Policy.
+ *
+ * Production allows only same-origin scripts and styles. Inline styles remain
+ * permitted because the UI sets style attributes (for example the theme
+ * transition), and inline scripts are not.
+ *
+ * Vite's development server needs inline bootstrap scripts and a WebSocket for
+ * HMR, so those allowances are scoped to localhost/127.0.0.1 only. A deployed
+ * Worker never sees those hostnames.
+ */
+function contentSecurityPolicy(origin: URL): string {
+  const isLocal =
+    origin.hostname === "localhost" ||
+    origin.hostname === "127.0.0.1" ||
+    origin.hostname === "[::1]";
+
+  const scriptSrc = isLocal ? "'self' 'unsafe-inline' 'unsafe-eval'" : "'self'";
+  const connectSrc = isLocal ? "'self' ws: wss: http://localhost:* http://127.0.0.1:*" : "'self'";
+
+  return [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    `connect-src ${connectSrc}`,
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "manifest-src 'self'",
+    "worker-src 'self'",
+  ].join("; ");
+}
+
 export function securityHeadersMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     await next();
@@ -125,6 +161,13 @@ export function securityHeadersMiddleware(): MiddlewareHandler<AppEnv> {
     c.header("Referrer-Policy", "no-referrer");
     c.header("Cross-Origin-Resource-Policy", "same-origin");
     c.header("Cache-Control", "no-store");
+    c.header("Content-Security-Policy", contentSecurityPolicy(new URL(c.req.url)));
+    // The inspector exposes a copy-to-clipboard control, so clipboard-write is
+    // granted to the app itself; every other powerful feature is disabled.
+    c.header(
+      "Permissions-Policy",
+      "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), clipboard-write=(self)",
+    );
   };
 }
 

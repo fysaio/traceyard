@@ -62,6 +62,11 @@
 .dialog-heading h2 {
   font-size: 22px;
 }
+.dialog-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .dialog-actions {
   display: flex;
   align-items: center;
@@ -69,6 +74,43 @@
   gap: 12px;
   flex-wrap: wrap;
   margin-top: 28px;
+}
+.product-menu .dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: nowrap;
+  margin-top: 24px;
+}
+.product-menu .dialog-actions > .btn {
+  flex: 1;
+  text-align: center;
+  justify-content: center;
+}
+.modal-connect-card {
+  padding: 24px 16px;
+  text-align: center;
+  background: var(--soft);
+  border-radius: 16px;
+  margin-top: 16px;
+  border: 1px dashed var(--line);
+}
+.modal-connect-icon {
+  font-size: 28px;
+  margin-bottom: 10px;
+  color: var(--ink);
+}
+.modal-connect-title {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 6px;
+  color: var(--ink);
+}
+.project-switch.connect-prompt {
+  background: var(--soft);
+  color: var(--ink);
+  font-weight: 500;
 }
 .project-menu-list {
   display: grid;
@@ -585,26 +627,6 @@
   box-shadow: var(--control-shadow);
 }
 
-.sandbox-claim {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  justify-content: space-between;
-  padding: 24px 28px;
-  margin-bottom: 32px;
-  background: var(--soft);
-  border-radius: 24px;
-}
-.sandbox-claim p {
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 14px;
-}
-@media (max-width: 600px) {
-  .sandbox-claim {
-    flex-wrap: wrap;
-  }
-}
 
 /* A repository, its discovered operations and its runs form one workspace. */
 .eyebrow {

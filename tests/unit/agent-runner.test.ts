@@ -106,7 +106,11 @@ it.each(["SUCCEEDED", "FAILED", "SKIPPED"])(
     } finally {
       server.closeAllConnections();
       await new Promise<void>((done) => server.close(() => done()));
-      await rm(root, { recursive: true, force: true });
+      try {
+        await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch {
+        /* Windows file lock on temporary fixture directory */
+      }
     }
   },
   60000,
