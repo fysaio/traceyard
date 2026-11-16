@@ -3,8 +3,14 @@ export function runnerWorkflow(origin: string, branch: string, runnerRef: string
   return `name: Traceyard
 on:
   workflow_dispatch:
+    inputs:
+      run_request:
+        description: Saved check request
+        required: false
+        type: string
   push:
     branches: [${JSON.stringify(branch)}]
+    paths: [".github/workflows/traceyard.yml"]
 permissions:
   contents: read
   id-token: write
@@ -14,14 +20,11 @@ concurrency:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '22'
       - name: Fetch Traceyard runner
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -29,11 +32,19 @@ jobs:
           ref: ${runnerRef}
           path: .traceyard-runner
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            .traceyard-runner/package-lock.json
       - name: Install runner dependencies
-        run: npm ci --prefix .traceyard-runner --ignore-scripts
+        run: npm ci --prefix .traceyard-runner --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Discover, build and test
         env:
           TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
+          TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
         run: node .traceyard-runner/agent/cli.mjs run .
 `;
 }

@@ -1,4 +1,12 @@
-import { ProjectOverview, RepositorySetup } from "./pages/project-overview";
+import {
+  ProjectsPage,
+  ProjectPage,
+  OperationPage,
+  ApplicationRunPage,
+  ProjectCheckPage,
+  RunComparePage,
+} from "./pages/project-experience";
+import { RepositorySetup } from "./pages/project-overview";
 import { ProjectLink as Link } from "./components/project-link";
 import { WorkflowDetail } from "./pages/workflow-detail";
 import { WorkspaceShell } from "./pages/workspace-shell";
@@ -139,8 +147,8 @@ function Welcome({ session }: { session: AuthSession }) {
         <div className="entry-mark">
           <Icon name="diagram-project" />
         </div>
-        <h1>Understand every execution.</h1>
-        <p>Build reliable workflows, investigate failures and see exactly what your systems do.</p>
+        <h1>Know what your application does.</h1>
+        <p>Connect your code. Explore its operations and investigate real runs.</p>
         <div className="entry-actions">
           {session.githubSignInAvailable ? (
             <a className="btn primary" href="/api/auth/github/start">
@@ -170,7 +178,25 @@ function Workspace({ session }: { session: AuthSession }) {
     <WorkspaceShell session={session}>
       {(projectId) => (
         <Routes>
-          <Route path="/" element={<ProjectOverview key={projectId} projectId={projectId} />} />
+          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route path="/projects" element={<ProjectsPage />} />
+          <Route path="/projects/:selectedProject" element={<ProjectPage key={projectId} />} />
+          <Route
+            path="/projects/:selectedProject/operations/:operationKey"
+            element={<OperationPage key={projectId} />}
+          />
+          <Route
+            path="/projects/:selectedProject/runs/:traceId"
+            element={<ApplicationRunPage key={projectId} />}
+          />
+          <Route
+            path="/projects/:selectedProject/checks/:checkId"
+            element={<ProjectCheckPage key={projectId} />}
+          />
+          <Route
+            path="/projects/:selectedProject/compare"
+            element={<RunComparePage key={projectId} />}
+          />
           <Route path="/repository-setup" element={<RepositorySetup />} />
           <Route
             path="/builder"
@@ -178,15 +204,9 @@ function Workspace({ session }: { session: AuthSession }) {
           />
           <Route path="/workflows" element={<Navigate to="/" replace />} />
           <Route path="/workflow/:id" element={<WorkflowDetail projectId={projectId} />} />
-          <Route
-            path="/executions"
-            element={<ProjectOverview key={projectId} projectId={projectId} />}
-          />
+          <Route path="/executions" element={<Navigate to={"/projects/" + projectId} replace />} />
           <Route path="/executions/:id" element={<Execution />} />
-          <Route
-            path="/analytics"
-            element={<ProjectOverview key={projectId} projectId={projectId} />}
-          />
+          <Route path="/analytics" element={<Navigate to={"/projects/" + projectId} replace />} />
           <Route
             path="/laboratory"
             element={<Experiments key={projectId} projectId={projectId} />}

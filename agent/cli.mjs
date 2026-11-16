@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readdir, readFile, lstat, appendFile } from "node:fs/promises";
+import { readdir, readFile, lstat, appendFile, mkdtemp, rm, realpath } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve, join, relative, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -78,14 +79,20 @@ function execute(program, args, options) {
     });
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
+      if (process.platform !== "win32")
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {
+          /* Group already stopped. */
+        }
       if (code === 0) resolveRun();
       else reject(new Error(`Command failed (${signal ?? code}).`));
     });
   });
 }
 export async function main(args = process.argv.slice(2)) {
-  const [command = "help", directory = "."] = args,
-    root = resolve(directory);
+  const [command = "help", directory = "."] = args;
+  let root = resolve(directory);
   if (command === "help" || !["scan", "connect", "run"].includes(command)) {
     console.log(
       "Traceyard: scan [directory] (offline), connect [directory] (upload source index), run [directory] (install/build/test with recording).",
@@ -179,10 +186,39 @@ export async function main(args = process.argv.slice(2)) {
   };
   if (!isActions) await send("repository/register", { name: basename(root) });
   let completed = false;
+  const manifestResponse = await fetch(
+    origin +
+      "/api/v1/repository/configuration" +
+      (process.env.TRACEYARD_RUN_REQUEST
+        ? "?request=" + encodeURIComponent(process.env.TRACEYARD_RUN_REQUEST)
+        : args.includes("--case")
+          ? "?case=" +
+            encodeURIComponent(args[args.indexOf("--case") + 1] ?? "") +
+            "&run=" +
+            encodeURIComponent(id)
+          : ""),
+    {
+      headers: { Authorization: "Bearer " + (await credential()) },
+      signal: AbortSignal.timeout(15000),
+    },
+  );
+  if (!manifestResponse.ok)
+    throw Error(
+      "Project test settings could not be loaded. Check the server version and selected case.",
+    );
+  const manifest = (await manifestResponse.json()).data;
+  const workspaceRoot = await realpath(root);
+  root = await realpath(resolve(root, manifest.config.directory));
+  if (relative(workspaceRoot, root).startsWith("..") || !(await lstat(root)).isDirectory())
+    throw Error("The configured application directory is not inside this project.");
   try {
     console.log("Traceyard: discovering source entry points…");
     await report("discovery", "RUNNING", "Reading source files.");
     const discovered = await scanDirectory(root);
+    for (const op of discovered.operations)
+      op.file = relative(workspaceRoot, join(root, op.file)).split("\\").join("/");
+    discovered.operations = discovered.operations.filter((op) => op.file.length <= 240);
+
     // Keep reports within the API body limit without quietly dropping the coverage warning.
     while (Buffer.byteLength(JSON.stringify(discovered)) > 26000 && discovered.operations.length) {
       discovered.operations.pop();
@@ -209,6 +245,19 @@ export async function main(args = process.argv.slice(2)) {
         "complete",
         "SKIPPED",
         "This runner supports npm projects. Configure a supported runtime to execute tests.",
+      );
+      completed = true;
+      return;
+    }
+    if (
+      !manifest.cases.length &&
+      !pkg.scripts?.build &&
+      (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
+    ) {
+      await report(
+        "complete",
+        "SKIPPED",
+        "No build or tests configured. Source discovery is available; no application commands were run.",
       );
       completed = true;
       return;
@@ -242,7 +291,10 @@ export async function main(args = process.argv.slice(2)) {
       });
       await report("build", "SUCCEEDED", "Build completed.");
     } else await report("build", "SKIPPED", "No build script configured.");
-    if (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test)) {
+    if (
+      !manifest.cases.length &&
+      (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
+    ) {
       await report("test", "SKIPPED", "No tests configured.");
       await report("complete", "SKIPPED", "Discovery completed; no tests configured.");
       completed = true;
@@ -258,6 +310,7 @@ export async function main(args = process.argv.slice(2)) {
     const testEnv = {
       ...env,
       CI: "true",
+      TRACEYARD_RUN_ID: id,
       NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
       OTEL_SERVICE_NAME: basename(root),
       OTEL_RESOURCE_ATTRIBUTES: `traceyard.run.id=${id}`,
@@ -273,14 +326,80 @@ export async function main(args = process.argv.slice(2)) {
       OTEL_NODE_RESOURCE_DETECTORS: "env,process",
       OTEL_EXPORTER_OTLP_TIMEOUT: "3000",
     };
-    await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
-      cwd: root,
-      env: testEnv,
-    });
+    let testResults = [];
+    if (manifest.cases.length) {
+      if (!pkg.scripts?.[manifest.config.startScript])
+        throw Error("The configured startup script is missing from package.json.");
+      const temporary = await mkdtemp(join(tmpdir(), "traceyard-check-"));
+      const resultFile = join(temporary, "results.json");
+      // Feed test data through stdin, never command-line arguments or log output.
+      try {
+        await new Promise((done, reject) => {
+          const child = spawn(
+            process.execPath,
+            [fileURLToPath(new URL("./http-check.mjs", import.meta.url))],
+            {
+              cwd: root,
+              env: {
+                ...testEnv,
+                NODE_OPTIONS: "",
+                TRACEYARD_PRELOAD: testEnv.NODE_OPTIONS,
+                TRACEYARD_RESULTS_FILE: resultFile,
+              },
+              stdio: ["pipe", "inherit", "inherit"],
+              detached: process.platform !== "win32",
+              shell: false,
+            },
+          );
+          child.stdin.end(JSON.stringify(manifest));
+          const timer = setTimeout(() => {
+            try {
+              if (process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
+              else child.kill("SIGKILL");
+            } catch {
+              /* Child group is already stopped. */
+            }
+            reject(Error("Request checks exceeded 180 seconds."));
+          }, 180000);
+          child.on("error", (error) => {
+            clearTimeout(timer);
+            reject(error);
+          });
+          child.on("exit", (code) => {
+            clearTimeout(timer);
+            try {
+              if (process.platform !== "win32") process.kill(-child.pid, "SIGTERM");
+            } catch {
+              /* Child group is already stopped. */
+            }
+            if (code === 0 || code === 1) done();
+            else reject(Error("The request test runner stopped unexpectedly."));
+          });
+        });
+        testResults = JSON.parse(await readFile(resultFile, "utf8"));
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
+      }
+      if (!testResults.length)
+        throw Error("The application could not start; inspect the runner logs.");
+      if (testResults.some((r) => r.status !== "SUCCEEDED")) {
+        await report("test", "FAILED", "A saved request test failed.", { testResults });
+        await report("complete", "FAILED", "Request checks failed.");
+        completed = true;
+        process.exitCode = 1;
+        return;
+      }
+    } else {
+      await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
+        cwd: root,
+        env: testEnv,
+      });
+    }
     await report(
       "test",
       "SUCCEEDED",
-      "The configured test command passed. This is not proof of full workflow coverage.",
+      "Configured checks passed. Only the selected tests were exercised.",
+      { testResults },
     );
     await report("complete", "SUCCEEDED", "Configured checks passed.");
     completed = true;
