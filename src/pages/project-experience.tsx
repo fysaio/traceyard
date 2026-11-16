@@ -199,7 +199,7 @@ export function ProjectsPage() {
         actions={
           <button className="btn primary" onClick={() => setConnect(true)}>
             <Icon name="plus" />
-            Connect repository
+            Connect repo
           </button>
         }
       />
@@ -236,7 +236,7 @@ export function ProjectsPage() {
                 "Clear search"
               ) : (
                 <>
-                  <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
+                  <i className="fa-brands fa-github" aria-hidden="true" /> Connect repo
                 </>
               )}
             </button>

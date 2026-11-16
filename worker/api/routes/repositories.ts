@@ -189,6 +189,10 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     return c.json(
       data(c, {
         configured: githubConfigured(c.env),
+        installationCount: installations.results.length,
+        manageUrl: installations.results[0]
+          ? `https://github.com/settings/installations/${installations.results[0].id}`
+          : null,
         installUrl: c.env.GITHUB_APP_SLUG
           ? "https://github.com/apps/" +
             encodeURIComponent(c.env.GITHUB_APP_SLUG) +

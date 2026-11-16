@@ -72,6 +72,8 @@ describe("repository connection and execution evidence", () => {
     expect((await call(b, "/api/projects/" + a.projectId + "/repository")).status).toBe(404);
     expect(await readSuccess(await call(a, "/api/repositories"))).toMatchObject({
       configured: false,
+      installationCount: 0,
+      manageUrl: null,
       items: [],
     });
     expect((await call(a, "/api/github/webhook", "POST", { action: "created" })).status).toBe(403);
@@ -598,6 +600,8 @@ describe("repository connection and execution evidence", () => {
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
       if (url.endsWith("/access_tokens")) return Response.json({ token: "fixture-token" });
+      if (url.includes("/installation/repositories"))
+        return Response.json({ repositories: [{ id: 99, full_name: "repository-810/somni" }] });
       if (url.endsWith("/repositories/99"))
         return Response.json({
           id: 99,
@@ -649,14 +653,33 @@ describe("repository connection and execution evidence", () => {
     const app = createApp({ githubFetch: fetcher });
     const invoke = (path: string, method = "POST", body?: unknown, cookie = a.cookie) =>
       app.fetch(
-        new Request(ORIGIN + path, {
+        // Match a dev tunnel: the browser uses PUBLIC_APP_ORIGIN while the
+        // forwarded Worker request reaches the local HTTP listener.
+        new Request("http://localhost:5173" + path, {
           method,
-          headers: { cookie, origin: ORIGIN, "content-type": "application/json" },
+          headers: {
+            cookie,
+            origin: ORIGIN,
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/json",
+          },
           ...(body ? { body: JSON.stringify(body) } : {}),
         }),
         configured,
         createExecutionContext(),
       );
+    expect(await readSuccess(await invoke("/api/repositories", "GET"))).toMatchObject({
+      installationCount: 1,
+      manageUrl: "https://github.com/settings/installations/7",
+      items: [{ id: 99, name: "repository-810/somni", installationId: 7 }],
+    });
+    expect(
+      await readSuccess(await invoke("/api/repositories", "GET", undefined, other.cookie)),
+    ).toMatchObject({
+      installationCount: 0,
+      manageUrl: null,
+      items: [],
+    });
     const input = { repositoryId: 99, installationId: 7 };
     expect((await invoke("/api/repositories/connect", "POST", input, other.cookie)).status).toBe(
       404,

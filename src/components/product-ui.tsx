@@ -15,12 +15,14 @@ export function Modal({
   close,
   menu = false,
   actions,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
   menu?: boolean;
   actions?: ReactNode;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null),
     id = useId();
@@ -37,7 +39,7 @@ export function Modal({
   return (
     <dialog
       ref={ref}
-      className={"product-dialog " + (menu ? "product-menu" : "")}
+      className={"product-dialog " + (menu ? "product-menu " : "") + className}
       aria-labelledby={id}
       onCancel={(e) => {
         e.preventDefault();
