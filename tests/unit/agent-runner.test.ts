@@ -113,6 +113,14 @@ it.each(["SUCCEEDED", "FAILED", "SKIPPED"])(
       const spans = exports.flatMap((r) => convertOtlp(r.body));
       expect(spanBatchSchema.safeParse({ spans: spans.slice(0, 50) }).success).toBe(true);
       expect(spans.some((s) => s.kind === "workflow")).toBe(true);
+      expect(
+        spans.some(
+          (s) =>
+            (s.attributes as Record<string, unknown>)["http.method"] === "GET" ||
+            (s.attributes as Record<string, unknown>)["http.request.method"] === "GET",
+        ),
+        result.output,
+      ).toBe(true);
       expect(spans[0]?.attributes.service).toContain("traceyard-agent-");
       expect((spans[0]?.attributes as Record<string, unknown>)["traceyard.run.id"]).toMatch(
         /^local-/,

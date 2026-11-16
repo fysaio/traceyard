@@ -328,12 +328,13 @@ export async function main(args = process.argv.slice(2)) {
       "Running the existing test script with supported Node.js tracing.",
     );
     const preload = fileURLToPath(new URL("./register.cjs", import.meta.url));
+    const esmPreload = new URL("./esm-register.mjs", import.meta.url).href;
     const key = await credential();
     const testEnv = {
       ...env,
       CI: "true",
       TRACEYARD_RUN_ID: id,
-      NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
+      NODE_OPTIONS: `--require ${JSON.stringify(preload)} --import ${JSON.stringify(esmPreload)}`,
       OTEL_SERVICE_NAME: basename(root),
       OTEL_RESOURCE_ATTRIBUTES: `traceyard.run.id=${id}`,
       OTEL_TRACES_EXPORTER: "otlp",
