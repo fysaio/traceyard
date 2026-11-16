@@ -9,7 +9,8 @@ export function checkDisplayStatus(job: RepositoryJob, now = Date.now()) {
     .at(-1);
   const confirmed =
     lastSync?.status === "CONFIRMED_RUNNING" && now - Date.parse(lastSync.at) < 90000;
-  return job.status === "RUNNING" && now - Date.parse(job.updated_at) >= CHECK_STALE_MS
+  return ["RUNNING", "QUEUED"].includes(job.status) &&
+    now - Date.parse(job.updated_at) >= CHECK_STALE_MS
     ? confirmed
       ? "RUNNING"
       : "STALE"

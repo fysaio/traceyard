@@ -9,7 +9,7 @@ import { graphSchema, graphLayers, evaluateGraphNode } from "../../shared/workfl
 import { DomainError, serializeError } from "../../shared/domain/errors";
 import { sha256Hex } from "../lib/crypto";
 import { getRunRow, getSteps } from "../persistence/runs";
-import { startStepAttempt, completeStep, failStepAttempt } from "../persistence/steps";
+import { startStepAttempt, completeStep, failStepAttempt, getStep } from "../persistence/steps";
 import { commitWorkflowOutput } from "../persistence/outputs";
 import { beginRun, finalizeRunCancelled, finalizeRunFailure, finalizeRunSuccess } from "./finalize";
 import type { RunRow } from "../persistence/rows";
@@ -108,13 +108,26 @@ export async function executeGraph(
               timeout: node.type === "model" ? 120000 : node.type === "http" ? 30000 : 10000,
             },
             async (ctx) => {
-              const started = await startStepAttempt(db, {
-                runId: run.id,
-                stepId: record.id,
-                stepKey: node.id,
-                attemptNumber: ctx.attempt,
-                inputJson: JSON.stringify(node.type === "input" ? input : incoming),
-              });
+              // Approval claimed its attempt before waiting. Completion reuses
+              // that fence; trying to claim attempt 1 twice always returns busy.
+              const waiting = node.type === "approval" ? await getStep(db, run.id, node.id) : null;
+              const started = waiting
+                ? {
+                    state:
+                      waiting.status === "SUCCEEDED"
+                        ? "already_succeeded"
+                        : waiting.status === "RUNNING" && waiting.attempt_count === 1
+                          ? "started"
+                          : "terminal",
+                    step: waiting,
+                  }
+                : await startStepAttempt(db, {
+                    runId: run.id,
+                    stepId: record.id,
+                    stepKey: node.id,
+                    attemptNumber: ctx.attempt,
+                    inputJson: JSON.stringify(node.type === "input" ? input : incoming),
+                  });
               if (started.state === "already_succeeded") return started.step?.output_json ?? "null";
               if (started.state !== "started")
                 throw new NonRetryableError("Step cannot start in its current state.");

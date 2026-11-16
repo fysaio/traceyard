@@ -133,20 +133,34 @@ export async function main(args = process.argv.slice(2)) {
     throw Error("Use an HTTPS server origin, or localhost for local development.");
   const origin = url.origin,
     isActions = process.env.GITHUB_ACTIONS === "true";
-  const id = isActions
-    ? `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`
-    : "local-" + randomUUID();
-  let sha = null;
+  const managedId = process.env.TRACEYARD_MANAGED_RUN_ID;
+  if (
+    managedId &&
+    (!/^managed_[a-f0-9]{32}$/.test(managedId) ||
+      !/^[a-f0-9]{40}$/.test(process.env.TRACEYARD_COMMIT_SHA ?? ""))
+  )
+    throw Error("The managed runner snapshot is invalid.");
+  const id =
+    managedId ??
+    (isActions
+      ? `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`
+      : "local-" + randomUUID());
+  let sha = managedId ? process.env.TRACEYARD_COMMIT_SHA : null;
   try {
-    sha = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    if (!managedId)
+      sha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
   } catch {
     /* An uncommitted local directory is supported. */
   }
   async function credential() {
+    if (managedId) {
+      if (!process.env.TRACEYARD_RUN_TOKEN) throw Error("The managed check credential is missing.");
+      return process.env.TRACEYARD_RUN_TOKEN;
+    }
     if (!isActions) {
       if (!process.env.TRACEYARD_KEY) throw Error("Set TRACEYARD_KEY in the server environment.");
       return process.env.TRACEYARD_KEY;
@@ -196,7 +210,7 @@ export async function main(args = process.argv.slice(2)) {
         }
     });
   };
-  if (!isActions) await send("repository/register", { name: basename(root) });
+  if (!isActions && !managedId) await send("repository/register", { name: basename(root) });
   let completed = false;
   const manifestResponse = await fetch(
     origin +
@@ -276,31 +290,38 @@ export async function main(args = process.argv.slice(2)) {
     }
     const env = { ...process.env };
     delete env.TRACEYARD_KEY;
+    delete env.TRACEYARD_RUN_TOKEN;
     delete env.NODE_OPTIONS;
     await report("install", "RUNNING", "Installing project dependencies.");
-    let locked = true;
+    let installRoot = root;
     try {
-      await lstat(join(root, "package-lock.json"));
+      await lstat(join(installRoot, "package-lock.json"));
     } catch {
-      locked = false;
-    }
-    if (!locked) {
-      await report(
-        "complete",
-        "SKIPPED",
-        "A package-lock.json is required for reproducible npm installs.",
-      );
-      completed = true;
-      return;
+      // npm workspaces install from their shared lockfile, while application
+      // commands still run in the selected directory.
+      try {
+        const lock = JSON.parse(await readFile(join(workspaceRoot, "package-lock.json"), "utf8"));
+        const workspace = relative(workspaceRoot, root).split("\\").join("/");
+        if (!workspace || !lock.packages?.[workspace]) throw Error("Not an npm workspace");
+        installRoot = workspaceRoot;
+      } catch {
+        await report(
+          "complete",
+          "SKIPPED",
+          "A package-lock.json is required in this application or its npm workspace root.",
+        );
+        completed = true;
+        return;
+      }
     }
     await execute(
       process.platform === "win32" ? "npm.cmd" : "npm",
       ["ci"],
-      { cwd: root, env },
+      { cwd: installRoot, env },
       "install",
     );
     await report("install", "SUCCEEDED", "Dependencies installed.");
-    if (pkg.scripts?.build) {
+    if (pkg.scripts?.build && !manifest.cases.length) {
       await report("build", "RUNNING", "Running the existing build script.");
       await execute(
         process.platform === "win32" ? "npm.cmd" : "npm",
@@ -312,7 +333,14 @@ export async function main(args = process.argv.slice(2)) {
         "build",
       );
       await report("build", "SUCCEEDED", "Build completed.");
-    } else await report("build", "SKIPPED", "No build script configured.");
+    } else
+      await report(
+        "build",
+        "SKIPPED",
+        manifest.cases.length
+          ? "Starting the selected application directly for its request test."
+          : "No build script configured.",
+      );
     if (
       !manifest.cases.length &&
       (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))

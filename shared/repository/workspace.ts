@@ -95,6 +95,7 @@ export interface Catalog {
   config: RunnerConfig;
   warnings: string[];
   filesScanned: number;
+  executionAvailable?: boolean;
 }
 export interface TestResult {
   caseId: string;

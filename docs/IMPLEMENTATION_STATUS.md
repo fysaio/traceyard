@@ -2,7 +2,7 @@
 
 The connected Projects → Project → Operation → Run implementation, saved request tests and visual verification boundary are detailed in [project experience](PROJECT_EXPERIENCE.md).
 
-The current repository-first increment is described in [repository setup and limits](REPOSITORY_SETUP.md). It adds GitHub App installation ownership, bounded background source discovery, a reviewable GitHub Actions installation PR, OIDC-authenticated runner reports, automatic repository-to-project connection, parallel background source discovery/test setup, bounded on-demand checks, a local scan/connect/run CLI, Node automatic recording and a unified Project activity screen. Live GitHub installation and hosted execution are still unverified pending deployment configuration. Arbitrary workflow discovery, arbitrary-operation replay and visual application-code edits are not claimed.
+The repository flow now uses independent source discovery and Traceyard-owned managed checks, described in [repository setup and limits](REPOSITORY_SETUP.md). Customer setup/upgrade PR generation is removed. Managed container execution needs Cloudflare deployment acceptance; source discovery remains useful when runtime setup or checks fail. Legacy Actions ingestion remains available for existing installations. Arbitrary workflow discovery, arbitrary-operation replay and visual application-code edits are not claimed.
 
 PR #1 was merged into main at `a9f9d4bb281413c1cd30ab4c7e664c4131340814`. It contained the integrated backend and a reduced interface. Backend test success did not establish fidelity to the jointly designed frontend. PR #2 merged the product repair into main at `dad5a9f5e7ad5421ade307a59b0c5b9ab1d67182`; see [repair evidence](PRODUCT_EXPERIENCE_REPAIR.md).
 
