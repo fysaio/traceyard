@@ -653,13 +653,13 @@ describe("repository connection and execution evidence", () => {
     const app = createApp({ githubFetch: fetcher });
     const invoke = (path: string, method = "POST", body?: unknown, cookie = a.cookie) =>
       app.fetch(
-        // Match a dev tunnel: the browser uses PUBLIC_APP_ORIGIN while the
-        // forwarded Worker request reaches the local HTTP listener.
-        new Request("http://localhost:5173" + path, {
+        // Dev Tunnels rewrites Origin to its local HTTP target; Vite uses the
+        // forwarded HTTPS protocol when constructing the Worker request URL.
+        new Request("https://localhost:5173" + path, {
           method,
           headers: {
             cookie,
-            origin: ORIGIN,
+            origin: "http://localhost:5173",
             "sec-fetch-site": "same-origin",
             "content-type": "application/json",
           },
