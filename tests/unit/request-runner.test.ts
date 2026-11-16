@@ -116,7 +116,7 @@ it.each([true, false])(
         spans.some(
           (s) =>
             s.traceId === result?.traceId &&
-            s.attributes["traceyard.operation.key"] === "op_actual",
+            (s.attributes as Record<string, unknown>)["traceyard.operation.key"] === "op_actual",
         ),
       ).toBe(true);
       expect(
