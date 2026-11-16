@@ -36,16 +36,21 @@ export default tseslint.config(
       ],
     },
   },
+  {files:["agent/**/*.cjs"],rules:{"@typescript-eslint/no-require-imports":"off"}},
   {
-    files: ["scripts/**/*.mjs", "*.config.js"],
+    files: ["scripts/**/*.mjs", "agent/**/*.mjs", "agent/**/*.cjs", "*.config.js"],
     languageOptions: {
       globals: {
         console: "readonly",
+        require: "readonly",
         process: "readonly",
         Buffer: "readonly",
         fetch: "readonly",
         AbortSignal: "readonly",
         performance: "readonly",
+        URL: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
       },
     },
   },

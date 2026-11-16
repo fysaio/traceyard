@@ -37,6 +37,11 @@
   },
   "workflows": [
     {
+      "name": "traceyard-repository-discovery",
+      "binding": "REPOSITORY_DISCOVERY",
+      "class_name": "RepositoryDiscoveryWorkflow",
+    },
+    {
       "name": "traceyard-run-execution",
       "binding": "RUN_WORKFLOW",
       "class_name": "RunExecutionWorkflow",

@@ -1,3 +1,4 @@
+import { ProjectOverview, RepositorySetup } from "./pages/project-overview";
 import { ProjectLink as Link } from "./components/project-link";
 import { WorkflowDetail } from "./pages/workflow-detail";
 import { WorkspaceShell } from "./pages/workspace-shell";
@@ -169,15 +170,23 @@ function Workspace({ session }: { session: AuthSession }) {
     <WorkspaceShell session={session}>
       {(projectId) => (
         <Routes>
-          <Route path="/" element={<WorkflowLibrary key={projectId} projectId={projectId} />} />
+          <Route path="/" element={<ProjectOverview key={projectId} projectId={projectId} />} />
+          <Route path="/repository-setup" element={<RepositorySetup />} />
+          <Route
+            path="/builder"
+            element={<WorkflowLibrary key={projectId} projectId={projectId} />}
+          />
           <Route path="/workflows" element={<Navigate to="/" replace />} />
           <Route path="/workflow/:id" element={<WorkflowDetail projectId={projectId} />} />
           <Route
             path="/executions"
-            element={<Executions key={projectId} projectId={projectId} />}
+            element={<ProjectOverview key={projectId} projectId={projectId} />}
           />
           <Route path="/executions/:id" element={<Execution />} />
-          <Route path="/analytics" element={<Analytics />} />
+          <Route
+            path="/analytics"
+            element={<ProjectOverview key={projectId} projectId={projectId} />}
+          />
           <Route
             path="/laboratory"
             element={<Experiments key={projectId} projectId={projectId} />}
@@ -576,8 +585,8 @@ function Execution({ guest = false }: { guest?: boolean }) {
   };
   return (
     <>
-      <Link className="back" to={guest ? "/sandbox/executions" : "/executions"}>
-        ← Executions
+      <Link className="back" to={guest ? "/sandbox/executions" : "/"}>
+        {guest ? "← Executions" : "← Project"}
       </Link>
       <Heading
         title={r.workflow.name}

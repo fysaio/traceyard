@@ -2,6 +2,7 @@
 import worker from "../../worker/index";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { authSessionCookie } from "../../worker/lib/cookie";
+export { RepositoryDiscoveryWorkflow } from "../../worker/repositories/workflow";
 export { RunExecutionWorkflow } from "../../worker/execution/workflow";
 declare global {
   interface Env {

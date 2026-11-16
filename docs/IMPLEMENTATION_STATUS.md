@@ -1,5 +1,7 @@
 # Implementation status
 
+The current repository-first increment is described in [repository setup and limits](REPOSITORY_SETUP.md). It adds GitHub App installation ownership, bounded background source discovery, a reviewable GitHub Actions installation PR, OIDC-authenticated runner reports, a local scan/connect/run CLI, Node automatic recording and a unified Project activity screen. Live GitHub installation and hosted execution are still unverified pending deployment configuration. Arbitrary workflow discovery, per-operation replay and visual application-code edits are not claimed.
+
 PR #1 was merged into main at `a9f9d4bb281413c1cd30ab4c7e664c4131340814`. It contained the integrated backend and a reduced interface. Backend test success did not establish fidelity to the jointly designed frontend. The product repair is on `fix/restore-product-ui`; see [repair evidence](PRODUCT_EXPERIENCE_REPAIR.md).
 
 | Area                     | Current implementation                                                                                                                                                    | Remaining verification or scope                                                                   |
