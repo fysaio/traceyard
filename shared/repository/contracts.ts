@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { testResultSchema } from "./workspace";
 const path = z
   .string()
   .min(1)
@@ -28,6 +29,7 @@ export const reportSchema = z
     operations: z.array(operationSchema).max(100).optional(),
     filesScanned: z.number().int().min(0).max(10000).optional(),
     warnings: z.array(z.string().max(300)).max(20).optional(),
+    testResults: z.array(testResultSchema).max(30).optional(),
   })
   .strict();
 export type RepositoryReport = z.infer<typeof reportSchema>;

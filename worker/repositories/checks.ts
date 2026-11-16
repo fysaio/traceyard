@@ -30,6 +30,7 @@ export async function dispatchRepositoryChecks(
   env: Env,
   projectId: string,
   fetcher: typeof fetch = fetch,
+  requestId?: string,
 ) {
   const repo = await connectedRepository(env, projectId);
   if (!repo.runner_enabled)
@@ -64,7 +65,10 @@ export async function dispatchRepositoryChecks(
       `/repos/${repo.full_name}/actions/workflows/traceyard.yml/dispatches`,
       {
         method: "POST",
-        body: JSON.stringify({ ref: repo.default_branch }),
+        body: JSON.stringify({
+          ref: repo.default_branch,
+          ...(requestId ? { inputs: { run_request: requestId } } : {}),
+        }),
       },
       fetcher,
     );
@@ -227,4 +231,99 @@ export async function startInitialChecks(
       return { state: "QUEUED", url: result.url };
     throw error;
   }
+}
+
+// Explicit owner action: propose a runner upgrade as a PR, never change the default branch.
+export async function upgradeRepositoryChecks(
+  env: Env,
+  projectId: string,
+  fetcher: typeof fetch = fetch,
+) {
+  const repo = await connectedRepository(env, projectId),
+    origin = new URL(env.PUBLIC_APP_ORIGIN ?? "http://localhost");
+  if (origin.protocol !== "https:" || !/^[a-f0-9]{40}$/.test(env.TRACEYARD_RUNNER_REF ?? ""))
+    throw badRequest(
+      "RUNNER_CONFIGURATION_REQUIRED",
+      "Configure the public HTTPS origin and reviewed runner commit first.",
+    );
+  const path = `/repos/${repo.full_name}`,
+    branch = `traceyard/runner-${projectId}-${env.TRACEYARD_RUNNER_REF!.slice(0, 8)}`;
+  if (
+    !(await optional(
+      githubRequest(env, repo.installation_id, `${path}/git/ref/heads/${branch}`, {}, fetcher),
+    ))
+  ) {
+    const commit = await githubRequest<{ sha: string }>(
+      env,
+      repo.installation_id,
+      `${path}/commits/${encodeURIComponent(repo.default_branch)}`,
+      {},
+      fetcher,
+    );
+    await githubRequest(
+      env,
+      repo.installation_id,
+      `${path}/git/refs`,
+      { method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: commit.sha }) },
+      fetcher,
+    );
+  }
+  const file = `${path}/contents/.github/workflows/traceyard.yml`,
+    existing = await optional(
+      githubRequest<{ content: string; sha: string }>(
+        env,
+        repo.installation_id,
+        file + "?ref=" + encodeURIComponent(branch),
+        {},
+        fetcher,
+      ),
+    );
+  const content = btoa(
+    String.fromCharCode(
+      ...new TextEncoder().encode(
+        runnerWorkflow(origin.origin, repo.default_branch, env.TRACEYARD_RUNNER_REF!),
+      ),
+    ),
+  );
+  if (existing?.content.replace(/\s/g, "") !== content)
+    await githubRequest(
+      env,
+      repo.installation_id,
+      file,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          message: "Update Traceyard runner for saved request tests",
+          branch,
+          content,
+          ...(existing ? { sha: existing.sha } : {}),
+        }),
+      },
+      fetcher,
+    );
+  const prs = await githubRequest<{ html_url: string }[]>(
+    env,
+    repo.installation_id,
+    `${path}/pulls?state=open&head=${encodeURIComponent(repo.full_name.split("/")[0] + ":" + branch)}`,
+    {},
+    fetcher,
+  );
+  const pr =
+    prs[0] ??
+    (await githubRequest<{ html_url: string }>(
+      env,
+      repo.installation_id,
+      `${path}/pulls`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          title: "Update Traceyard project test runner",
+          head: branch,
+          base: repo.default_branch,
+          body: "Updates the immutable runner and adds saved request-test dispatch. Tests run only against a local application inside the GitHub runner. Review the workflow diff and npm scripts before merging. No application secrets or provider credentials are added. The default branch is unchanged until you merge this PR.",
+        }),
+      },
+      fetcher,
+    ));
+  return { url: pr.html_url };
 }

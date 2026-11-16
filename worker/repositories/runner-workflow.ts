@@ -3,6 +3,11 @@ export function runnerWorkflow(origin: string, branch: string, runnerRef: string
   return `name: Traceyard
 on:
   workflow_dispatch:
+    inputs:
+      run_request:
+        description: Saved check request
+        required: false
+        type: string
   push:
     branches: [${JSON.stringify(branch)}]
     paths: [".github/workflows/traceyard.yml"]
@@ -39,6 +44,7 @@ jobs:
       - name: Discover, build and test
         env:
           TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
+          TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
         run: node .traceyard-runner/agent/cli.mjs run .
 `;
 }
