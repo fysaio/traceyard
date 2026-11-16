@@ -94,8 +94,10 @@ export async function githubRequest<T>(
     throw badRequest(
       "GITHUB_REQUEST_FAILED",
       `GitHub returned ${response.status}. Check the installation permissions and repository access.`,
+      { githubStatus: response.status },
     );
-  return (response.status === 204 ? null : await response.json()) as T;
+  const body = await response.text();
+  return (body.trim() ? JSON.parse(body) : null) as T;
 }
 export async function installationOwned(db: D1Database, userId: string, id: number) {
   // Initial support is deliberately personal installations. Org/team delegation needs a membership model.

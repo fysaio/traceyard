@@ -69,6 +69,10 @@ describe("repository discovery and runtime evidence", () => {
     const content = runnerWorkflow("https://traceyard.example", "main", "a".repeat(40));
     expect(content).toContain("id-token: write");
     expect(content).toContain("ubuntu-latest");
+    expect(content).toContain('paths: [".github/workflows/traceyard.yml"]');
+    expect(content).toContain("timeout-minutes: 10");
+    expect(content).toContain("cancel-in-progress: true");
+    expect(content).toContain("cache: npm");
     expect(content).toContain("persist-credentials: false");
     expect(content).toContain("a".repeat(40));
     expect(content).not.toContain("TRACEYARD_KEY");

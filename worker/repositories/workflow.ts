@@ -1,19 +1,20 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { scanRepository } from "./scan";
+import { startInitialChecks } from "./checks";
 declare global {
   interface Env {
-    REPOSITORY_DISCOVERY?: Workflow<{ projectId: string; scanId: string }>;
+    REPOSITORY_DISCOVERY?: Workflow<{ projectId: string; scanId: string; checks?: boolean }>;
   }
 }
 export class RepositoryDiscoveryWorkflow extends WorkflowEntrypoint<
   Env,
-  { projectId: string; scanId: string }
+  { projectId: string; scanId: string; checks?: boolean }
 > {
   override async run(
-    event: WorkflowEvent<{ projectId: string; scanId: string }>,
+    event: WorkflowEvent<{ projectId: string; scanId: string; checks?: boolean }>,
     step: WorkflowStep,
   ) {
-    return step.do(
+    const source = step.do(
       "discover-source",
       { timeout: "10 minutes", retries: { limit: 2, delay: "5 seconds" } },
       async () => {
@@ -31,5 +32,20 @@ export class RepositoryDiscoveryWorkflow extends WorkflowEntrypoint<
         await scanRepository(this.env, { ...repo, scan_id: event.payload.scanId });
       },
     );
+    const checks = event.payload.checks
+      ? step.do(
+          "prepare-project-checks",
+          { timeout: "3 minutes", retries: { limit: 0, delay: "1 second" } },
+          async () => {
+            try {
+              return await startInitialChecks(this.env, event.payload.projectId);
+            } catch {
+              return { state: "FAILED" };
+            } // Setup errors are persisted separately; source discovery continues.
+          },
+        )
+      : Promise.resolve(null);
+    const results = await Promise.allSettled([source, checks]);
+    return results.map((result) => ({ status: result.status }));
   }
 }

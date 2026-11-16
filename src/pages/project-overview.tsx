@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ProjectLink as Link } from "../components/project-link";
 import { Modal, Icon, ErrorMessage } from "../components/product-ui";
 import { integrationRequest, integrations } from "../lib/integrations-api";
-import { useWorkspace } from "../lib/workspace";
+import type { ProjectSummary } from "../lib/api";
+import { useWorkspace, savePreference } from "../lib/workspace";
 import type { RepositoryRecord, RepositoryJob } from "../../shared/repository/contracts";
 import type { DiscoveredOperation } from "../../agent/discovery.mjs";
 type Activity = {
@@ -67,22 +68,35 @@ export function ProjectOverview({ projectId }: { projectId: string }) {
     ? (JSON.parse(r.scan_json) as {
         operations: DiscoveredOperation[];
         filesScanned: number;
+        totalFiles?: number;
         warnings: string[];
       })
     : null;
   const refresh = () => cache.invalidateQueries({ queryKey: ["repository", projectId] });
   const action = useMutation({
-    mutationFn: (kind: "scan" | "setup" | "run") =>
+    mutationFn: (kind: "scan" | "setup" | "run" | "analyze") =>
       integrationRequest<{ url?: string }>(projectId, "repository/" + kind, "POST"),
-    onSuccess: (result) => {
+    onSuccess: (result, kind) => {
       setNotice(
         result.url
           ? "Request sent. Follow the GitHub link below for progress."
-          : "Discovery started.",
+          : kind === "scan"
+            ? "Source discovery started."
+            : "Source discovery and project checks are starting.",
       );
       void refresh();
     },
   });
+  const checksBusy =
+    repo.data?.jobs.some(
+      (j) => j.status === "RUNNING" && repo.dataUpdatedAt - Date.parse(j.updated_at) < 15 * 60000,
+    ) ||
+    (r?.check_setup_state === "QUEUED" &&
+      repo.dataUpdatedAt - Date.parse(r.check_setup_updated_at ?? "") < 10 * 60000);
+  const setupBusy =
+    r?.check_setup_state === "PREPARING" &&
+    repo.dataUpdatedAt - Date.parse(r.check_setup_updated_at ?? "") < 5 * 60000;
+  const setupStalled = r?.check_setup_state === "PREPARING" && !setupBusy;
   return (
     <>
       <div className="page-head">
@@ -96,25 +110,28 @@ export function ProjectOverview({ projectId }: { projectId: string }) {
         <div className="actions">
           {r?.repository_id ? (
             <>
-              <button
-                className="btn"
-                disabled={action.isPending || r.status === "DISCOVERING"}
-                onClick={() => action.mutate("scan")}
-              >
-                <Icon name="rotate" />
-                Scan changes
-              </button>
-              <button
-                className="btn primary"
-                disabled={action.isPending}
-                onClick={() => action.mutate(r.runner_enabled ? "run" : "setup")}
-              >
-                {r.runner_enabled
-                  ? "Run project tests"
-                  : r.setup_pr_url
-                    ? "Open installation PR"
-                    : "Set up project tests"}
-              </button>
+              {r.setup_pr_url && !r.runner_enabled ? (
+                <a className="btn primary" href={r.setup_pr_url} target="_blank" rel="noreferrer">
+                  Review setup PR <Icon name="arrow-up-right-from-square" />
+                </a>
+              ) : (
+                <button
+                  className="btn primary"
+                  disabled={
+                    action.isPending || r.status === "DISCOVERING" || !!checksBusy || setupBusy
+                  }
+                  onClick={() => action.mutate(r.runner_enabled ? "analyze" : "setup")}
+                >
+                  <Icon name={checksBusy ? "circle-notch" : "play"} />
+                  {checksBusy
+                    ? "Checks in progress"
+                    : r.runner_enabled
+                      ? "Check project"
+                      : setupBusy
+                        ? "Preparing checks…"
+                        : "Set up project checks"}
+                </button>
+              )}
             </>
           ) : (
             <button className="btn" onClick={() => setConnect("github")}>
@@ -143,7 +160,7 @@ export function ProjectOverview({ projectId }: { projectId: string }) {
             <p>
               {hasRecording
                 ? "Connect its source to discover supported entry points and set up project checks. Your recorded runs are already available below."
-                : "Select a repository. Traceyard finds supported entry points, then guides you through running your project’s checks."}
+                : "Select a repository. Traceyard creates your project, discovers supported operations and prepares its first test run."}
             </p>
             <div className="actions section">
               <button className="btn primary" onClick={() => setConnect("github")}>
@@ -156,26 +173,100 @@ export function ProjectOverview({ projectId }: { projectId: string }) {
           </div>
         </section>
       )}
-      {r?.status === "DISCOVERING" && (
-        <section className="project-progress" role="status">
-          <Icon name="circle-notch" />
-          <div>
-            <h2>Reading your repository</h2>
-            <p>
-              Finding supported routes and jobs. Results appear here as soon as discovery completes.
-            </p>
+      {r?.repository_id && (
+        <section className="project-preparation section" aria-label="Project setup progress">
+          <div className="preparation-step" role="status">
+            <Icon
+              name={
+                r.status === "DISCOVERING"
+                  ? "circle-notch"
+                  : r.status === "FAILED"
+                    ? "circle-xmark"
+                    : "circle-check"
+              }
+            />
+            <div>
+              <h2>
+                {r.status === "DISCOVERING"
+                  ? "Finding operations"
+                  : r.status === "FAILED"
+                    ? "Source scan needs attention"
+                    : "Source discovered"}
+              </h2>
+              <p>
+                {r.status === "DISCOVERING"
+                  ? scan
+                    ? `${scan.filesScanned} of ${scan.totalFiles ?? scan.filesScanned} source files read. Operations appear below as they are found.`
+                    : "Reading supported routes and jobs. You can leave this page and return."
+                  : "Source shows possible operations. Tests provide evidence of what actually runs."}
+              </p>
+            </div>
+            {r.status !== "DISCOVERING" && (
+              <button
+                className="btn"
+                disabled={action.isPending}
+                onClick={() => action.mutate("scan")}
+              >
+                Refresh source
+              </button>
+            )}
           </div>
+          <div className="preparation-step" role="status">
+            <Icon
+              name={
+                r.check_setup_error
+                  ? "circle-xmark"
+                  : checksBusy || setupBusy
+                    ? "circle-notch"
+                    : r.runner_enabled
+                      ? "circle-check"
+                      : "code-pull-request"
+              }
+            />
+            <div>
+              <h2>
+                {r.check_setup_error || setupStalled
+                  ? "Checks need attention"
+                  : checksBusy
+                    ? "Running project checks"
+                    : r.runner_enabled
+                      ? "Project checks connected"
+                      : r.setup_pr_url
+                        ? "Approve the first test run"
+                        : setupBusy
+                          ? "Preparing project checks"
+                          : "Run your first checks"}
+              </h2>
+              <p>
+                {(setupStalled
+                  ? "Setup took too long. Retry to resume the existing setup."
+                  : r.check_setup_error) ??
+                  (r.runner_enabled
+                    ? checksBusy
+                      ? "GitHub is preparing or running your existing build and tests. Progress appears below."
+                      : "Check project refreshes source and runs existing tests together."
+                    : r.setup_pr_url
+                      ? "Merge the setup PR once. GitHub will scan, build and run your existing tests automatically."
+                      : setupBusy || r.status === "DISCOVERING"
+                        ? "Traceyard prepares a setup PR while source discovery continues."
+                        : "Set up project checks to prepare the installation PR.")}
+              </p>
+            </div>
+            {(r.check_setup_error || setupStalled) && (
+              <button
+                className="btn"
+                disabled={action.isPending}
+                onClick={() => action.mutate(r.runner_enabled ? "run" : "setup")}
+              >
+                Retry checks
+              </button>
+            )}
+          </div>
+          <p className="hint">
+            One short-lived GitHub job · 10-minute limit · Later checks run on request. GitHub
+            Actions usage belongs to the repository owner.
+          </p>
         </section>
-      )}
-      {r?.setup_pr_url && !r.runner_enabled && (
-        <p className="hint section">
-          Merge the{" "}
-          <a className="text-link" target="_blank" rel="noreferrer" href={r.setup_pr_url}>
-            installation pull request
-          </a>{" "}
-          to start the first GitHub check. Code discovery works before runtime recording is
-          installed.
-        </p>
       )}
       {r?.last_error && (
         <p className="request-error" role="alert">
@@ -210,7 +301,7 @@ export function ProjectOverview({ projectId }: { projectId: string }) {
               </button>
             ))}
           </div>
-          {!scan.operations.length && (
+          {!scan.operations.length && r?.status !== "DISCOVERING" && (
             <p className="connected-panel">
               No supported entry points found. This scanner recognises conventional
               Express/Hono/Fastify routes, Next.js API handlers, Deno.serve and selected job
@@ -593,18 +684,23 @@ export function ProjectActivity({
     </section>
   );
 }
-function ConnectRepository({
+export function ConnectRepository({
   projectId,
+  attachToProject = false,
   mode,
   close,
   connected,
 }: {
-  projectId: string;
+  projectId?: string;
+  attachToProject?: boolean;
   mode: "github" | "local";
   close: () => void;
   connected: () => void;
 }) {
   const [local, setLocal] = useState(mode === "local");
+  const { session } = useWorkspace(),
+    cache = useQueryClient(),
+    navigate = useNavigate();
   const q = useQuery({
     queryKey: ["github-repositories"],
     queryFn: async () => {
@@ -623,12 +719,40 @@ function ConnectRepository({
     enabled: !local,
   });
   const connect = useMutation({
-    mutationFn: (r: { id: number; installationId: number }) =>
-      integrationRequest(projectId, "repository", "POST", {
-        repositoryId: r.id,
-        installationId: r.installationId,
-      }),
-    onSuccess: connected,
+    mutationFn: async (r: { id: number; installationId: number }) => {
+      if (attachToProject && projectId) {
+        await integrationRequest(projectId, "repository", "POST", {
+          repositoryId: r.id,
+          installationId: r.installationId,
+        });
+        const project = cache
+          .getQueryData<ProjectSummary[]>(["projects", session.user!.id])
+          ?.find((p) => p.id === projectId);
+        if (!project) throw Error("Project is no longer available.");
+        return project;
+      }
+      const response = await fetch("/api/repositories/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: r.id, installationId: r.installationId }),
+      });
+      const body = (await response.json()) as {
+        data?: { project: ProjectSummary };
+        error?: { message: string };
+      };
+      if (!response.ok || !body.data)
+        throw Error(body.error?.message ?? "Repository could not be connected.");
+      return body.data.project;
+    },
+    onSuccess: (project) => {
+      cache.setQueryData<ProjectSummary[]>(["projects", session.user!.id], (old) => [
+        ...(old ?? []).filter((p) => p.id !== project.id),
+        project,
+      ]);
+      savePreference("project:" + session.user!.id, project.id);
+      navigate("/projects/" + encodeURIComponent(project.id));
+      connected();
+    },
   });
   const [copied, setCopied] = useState(false);
   const env = "TRACEYARD_ORIGIN=" + window.location.origin + "\nTRACEYARD_KEY=<your project key>\n";
@@ -661,24 +785,22 @@ function ConnectRepository({
             With Node.js 22.12+, run this from your application folder using your Traceyard
             checkout:
           </p>
-          <pre className="code">node /path/to/traceyard/agent/cli.mjs connect .</pre>
-          <p className="hint">
-            The command reads .env.traceyard, scans supported source files and uploads an index.
-            Source contents and environment files are excluded.
-          </p>
-          <p className="section">
-            To run its existing npm build and tests with supported Node.js recording:
-          </p>
           <pre className="code">node /path/to/traceyard/agent/cli.mjs run .</pre>
           <p className="hint">
-            Run executes the project’s npm install/build/test scripts. A package-lock.json is
-            required. Hosted backends such as Supabase Edge Functions need their own runtime
-            integration.
+            One command connects this directory, scans its source, installs locked dependencies and
+            runs existing npm build/tests with supported Node recording. Results appear in this
+            project as it works. Each command stops after 180 seconds; no server is kept running
+            afterward. A package-lock.json is required. Remote Deno/Supabase execution needs its own
+            runtime integration.
           </p>
         </>
       ) : (
         <>
-          <p>Choose a repository already installed on your personal GitHub account.</p>
+          <p>
+            Choose a repository to create or open its project. Source discovery starts in the
+            background. Traceyard also prepares a setup PR; merging it runs the first checks on
+            GitHub. Later checks run on request.
+          </p>
           <ErrorMessage error={q.error || connect.error} />
           {q.isPending ? (
             <p role="status">Loading repositories…</p>
@@ -694,6 +816,7 @@ function ConnectRepository({
                   >
                     <i className="fa-brands fa-github" aria-hidden="true" />
                     <strong>{r.name}</strong>
+                    <span>{connect.isPending ? "Connecting…" : "Connect"}</span>
                     <Icon name="arrow-right" />
                   </button>
                 ))}

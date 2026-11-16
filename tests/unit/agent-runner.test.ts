@@ -18,6 +18,15 @@ it.each(["SUCCEEDED", "FAILED", "SKIPPED"])(
       contentType?: string;
     }[] = [];
     const server = createServer(async (req, res) => {
+      if (req.method === "GET") {
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            data: { config: { directory: ".", startScript: "", port: 3000 }, cases: [] },
+          }),
+        );
+        return;
+      }
       let raw = "";
       for await (const chunk of req) raw += chunk;
       received.push({

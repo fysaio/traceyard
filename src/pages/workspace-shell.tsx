@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type AuthSession, type ProjectSummary } from "../lib/api";
 import { studioApi } from "../lib/studio-api";
 import { WorkspaceContext, readPreference, savePreference } from "../lib/workspace";
+import { ConnectRepository } from "./project-overview";
 import { Modal, Icon, ErrorMessage } from "../components/product-ui";
 export function WorkspaceShell({
   session,
@@ -24,10 +25,14 @@ export function WorkspaceShell({
       if (id) savePreference("project:" + session.user!.id, id);
       return id;
     }),
-    [menu, setMenu] = useState<"projects" | "create" | "account" | "search" | null>(null),
+    [menu, setMenu] = useState<"projects" | "create" | "account" | "search" | "connect" | null>(
+      null,
+    ),
     [name, setName] = useState("");
   const projects = q.data ?? [],
+    pathProject = location.pathname.match(/^\/projects\/([^/]+)/)?.[1],
     project =
+      (pathProject ? projects.find((p) => p.id === pathProject) : undefined) ??
       projects.find((p) => p.id === new URLSearchParams(location.search).get("project")) ??
       projects.find((p) => p.id === selection) ??
       projects[0],
@@ -38,7 +43,7 @@ export function WorkspaceShell({
     setSelection(id);
     setMenu(null);
     // Keep connection setup in context; detail IDs belong to the old project.
-    const destination = location.pathname === "/connect" ? "/connect" : "/";
+    const destination = location.pathname === "/connect" ? "/connect" : "/projects/" + id;
     navigate(destination + "?project=" + encodeURIComponent(id));
   }
   const create = useMutation({
@@ -52,7 +57,7 @@ export function WorkspaceShell({
       setSelection(p.id);
       setMenu(null);
       setName("");
-      navigate("/");
+      navigate("/projects/" + p.id);
     },
   });
   const guestWork = useQuery({
@@ -110,18 +115,18 @@ export function WorkspaceShell({
           </Link>
           <nav aria-label="Main navigation">
             {[
-              ["/", "Project", "layer-group"],
+              ["/projects", "Projects", "layer-group"],
               ["/builder", "Build", "diagram-project"],
             ].map(([path, label, icon]) => (
               <NavLink
                 key={path}
                 to={path! + (projectId ? "?project=" + projectId : "")}
-                end={path === "/"}
+                end={false}
                 className={({ isActive }) =>
                   isActive ||
                   (path === "/builder" &&
                     /^\/(?:studio|workflow|template)(?:\/|$)/.test(location.pathname)) ||
-                  (path === "/" &&
+                  (path === "/projects" &&
                     /^\/(?:executions|traces|analytics)(?:\/|$)/.test(location.pathname))
                     ? "active"
                     : ""
@@ -176,7 +181,15 @@ export function WorkspaceShell({
                 Try again
               </button>
             </section>
-          ) : !project ? (
+          ) : pathProject && !projects.some((p) => p.id === pathProject) ? (
+            <section className="flow-empty">
+              <h1>Project not found</h1>
+              <p>This project is unavailable in your account.</p>
+              <Link className="btn" to="/projects">
+                All projects
+              </Link>
+            </section>
+          ) : !project && !["/", "/projects"].includes(location.pathname) ? (
             <section className="first-project">
               <Icon name="folder-open" />
               <h1>Create your first project.</h1>
@@ -223,21 +236,24 @@ export function WorkspaceShell({
               {!projects.length && <p>No projects yet.</p>}
             </div>
             <div className="dialog-actions">
+              <Link className="btn" to="/projects" onClick={() => setMenu(null)}>
+                All projects
+              </Link>
               <Link className="btn" to="/settings/projects" onClick={() => setMenu(null)}>
                 Workspace settings
               </Link>
-              <button
-                className="btn primary"
-                onClick={() => {
-                  create.reset();
-                  setMenu("create");
-                }}
-              >
-                <Icon name="plus" />
-                Create project
+              <button className="btn primary" onClick={() => setMenu("connect")}>
+                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
               </button>
             </div>
           </Modal>
+        )}
+        {menu === "connect" && (
+          <ConnectRepository
+            mode="github"
+            close={() => setMenu(null)}
+            connected={() => setMenu(null)}
+          />
         )}
         {menu === "create" && (
           <Modal title="Create project" close={() => setMenu(null)}>

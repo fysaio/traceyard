@@ -929,3 +929,63 @@
   background: var(--soft);
   box-shadow: inset 0 0 0 2px var(--fg);
 }
+
+.project-preparation {
+  display: grid;
+  gap: 24px;
+  padding: clamp(20px, 3vw, 32px);
+  background: var(--surface);
+  border-radius: 28px;
+  box-shadow: 0 8px 30px #00000004;
+}
+.preparation-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+.preparation-step > i {
+  margin-top: 5px;
+}
+.preparation-step h2 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+.preparation-step p {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.project-preparation .hint {
+  line-height: 1.6;
+}
+.preparation-step .fa-circle-notch {
+  animation: preparation-spin 1s linear infinite;
+}
+@keyframes preparation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 600px) {
+  .preparation-step {
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .preparation-step > .btn {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .repository-choice {
+    gap: 10px;
+  }
+  .repository-choice > span {
+    font-size: 0.8rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preparation-step .fa-circle-notch {
+    animation: none;
+  }
+}

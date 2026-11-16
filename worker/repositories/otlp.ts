@@ -46,6 +46,8 @@ const allowed = new Set([
   "code.line.number",
   "error.type",
   "traceyard.run.id",
+  "traceyard.operation.key",
+  "traceyard.test.case",
 ]);
 export function convertOtlp(input: unknown) {
   const b = parseWith(batch, input, "Send OTLP HTTP JSON trace data.");
