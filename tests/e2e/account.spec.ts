@@ -69,8 +69,8 @@ test("list and grid selection keep action controls within their cards", async ({
   await page.route("**/api/projects/*/instrumented-workflows", (r) =>
     r.fulfill(json({ items: [] })),
   );
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toBeVisible();
+  await page.goto("/builder");
+  await expect(page.getByRole("heading", { name: "Workflow builder", exact: true })).toBeVisible();
   for (const width of [390, 768, 1009, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     for (const layout of ["List view", "Grid view"]) {

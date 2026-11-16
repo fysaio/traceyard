@@ -1,4 +1,3 @@
-import { integrationRequest } from "../lib/integrations-api";
 import { ProjectLink as Link } from "../components/project-link";
 import { useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -21,24 +20,6 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
     [search, setSearch] = useState(""),
     [menu, setMenu] = useState<"create" | StudioWorkflow["id"] | null>(null),
     [launch, setLaunch] = useState<WorkflowSummary | null>(null);
-  const observed = useQuery({
-    queryKey: ["instrumented-workflows", projectId],
-    queryFn: () =>
-      integrationRequest<{
-        items: {
-          name: string;
-          service: string;
-          trace_id: string;
-          started_at: string;
-          execution_count: number;
-        }[];
-      }>(projectId, "instrumented-workflows"),
-    refetchInterval: 5000,
-  });
-  const external =
-    observed.data?.items.filter((w) =>
-      (w.name + w.service).toLowerCase().includes(search.toLowerCase()),
-    ) ?? [];
   const q = useQuery({
       queryKey: ["studio-list", projectId],
       queryFn: () => studioApi.list(projectId),
@@ -124,8 +105,8 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
     <>
       <div className="page-head">
         <div>
-          <h1>Workflows</h1>
-          <p>Build something new or continue where you left off.</p>
+          <h1>Workflow builder</h1>
+          <p>Create workflows that Traceyard executes.</p>
         </div>
         <button className="btn primary" onClick={() => setMenu("create")}>
           <Icon name="plus" />
@@ -174,9 +155,7 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
           </div>
         </div>
       </div>
-      <ErrorMessage
-        error={create.error || importFile.error || action.error || run.error || observed.error}
-      />
+      <ErrorMessage error={create.error || importFile.error || action.error || run.error} />
       {tab === "templates" ? (
         <>
           <div className={"template-grid " + (layout === "list" ? "template-list" : "")}>
@@ -212,7 +191,7 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
               </section>
             ))}
         </>
-      ) : q.isPending || observed.isPending ? (
+      ) : q.isPending ? (
         <p className="loading-state" role="status">
           Loading workflows…
         </p>
@@ -223,7 +202,7 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
             Reload workflows
           </button>
         </>
-      ) : rows.length || external.length ? (
+      ) : rows.length ? (
         <div className={"saved-workflows " + layout}>
           {rows.map((w) => (
             <article className="saved-workflow" key={w.id}>
@@ -273,29 +252,6 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
               </div>
             </article>
           ))}
-          {external.map((w) => (
-            <article className="saved-workflow" key={w.name + ":" + w.service}>
-              <Link className="workflow-main" to={"/traces?trace=" + w.trace_id}>
-                <span className="workflow-icon">
-                  <Icon name="plug" />
-                </span>
-                <div>
-                  <h2>{w.name}</h2>
-                  <p>{w.service}</p>
-                  <div className="quiet-meta">
-                    <span>Instrumented in application</span>
-                    <span>{w.execution_count} executions</span>
-                    <span>Last seen {new Date(w.started_at).toLocaleString()}</span>
-                  </div>
-                </div>
-              </Link>
-              <div className="workflow-actions">
-                <Link className="btn" to={"/traces?trace=" + w.trace_id}>
-                  Inspect trace <Icon name="arrow-up-right-from-square" />
-                </Link>
-              </div>
-            </article>
-          ))}
         </div>
       ) : (
         <section className="library-empty">
@@ -314,18 +270,9 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
           </div>
         </section>
       )}
-      <section className="connect-strip">
-        <div>
-          <Icon name="plug" />
-          <div>
-            <h3>Already have an application?</h3>
-            <p>Connect it to see its execution traces here.</p>
-          </div>
-        </div>
-        <Link className="btn" to="/connect">
-          Connect application <Icon name="arrow-right" />
-        </Link>
-      </section>
+      <Link className="text-link section" to="/">
+        Inspect your application’s operations and runs <Icon name="arrow-right" />
+      </Link>
       <input
         ref={file}
         type="file"

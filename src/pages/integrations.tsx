@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { ProjectActivity } from "./project-overview";
 import { ProjectLink as Link } from "../components/project-link";
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -8,7 +8,6 @@ import {
   integrationRequest as request,
   integrations,
   type RouteRecord,
-  type SpanRecord,
   type ExperimentConfig,
 } from "../lib/integrations-api";
 import { modelRouteSchema, type ModelRouteConfig } from "../../shared/contracts/gateway";
@@ -570,117 +569,12 @@ export function Approvals({ projectId: p }: { projectId: string }) {
   );
 }
 export function Traces({ projectId: p }: { projectId: string }) {
-  const [searchParams] = useSearchParams();
-  const [id, setId] = useState(searchParams.get("trace") ?? ""),
-    [selected, setSelected] = useState(""),
-    [search, setSearch] = useState("");
-  const q = useQuery({
-      queryKey: ["traces", p],
-      queryFn: () => integrations.traces(p),
-      refetchInterval: 5000,
-    }),
-    detail = useQuery({
-      queryKey: ["spans", p, id],
-      queryFn: () => integrations.spans(p, id),
-      enabled: !!id,
-      refetchInterval: 3000,
-    });
-  const rows = detail.data?.items ?? [],
-    active = rows.find((s) => s.span_id === selected);
-  function depth(s: SpanRecord) {
-    let n = 0,
-      parent = s.parent_span_id;
-    const seen = new Set([s.span_id]);
-    while (parent && n < 12 && !seen.has(parent)) {
-      seen.add(parent);
-      n++;
-      parent = rows.find((v) => v.span_id === parent)?.parent_span_id ?? null;
-    }
-    return n;
-  }
   return (
     <>
-      <Title title="Traces">
-        Inspect workflow execution and nested operations sent from your systems.
+      <Title title="Application runs">
+        Recorded executions from this project, with their steps and failures.
       </Title>
-      <Link className="btn" to="/developer">
-        Set up instrumentation
-      </Link>
-      <Wait loading={q.isPending} error={q.error} />
-      <label className="section">
-        Find a trace
-        <input
-          placeholder="Name or trace ID"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </label>
-      <div className="compact-stack section">
-        {q.data?.items
-          .filter((t) => (t.name + t.trace_id).toLowerCase().includes(search.toLowerCase()))
-          .map((t) => (
-            <button
-              className={"connected-panel trace-choice " + (id === t.trace_id ? "selected" : "")}
-              key={t.trace_id}
-              onClick={() => {
-                setId(t.trace_id);
-                setSelected("");
-              }}
-            >
-              <strong>{t.name}</strong>
-              <span className="hint">
-                {new Date(t.started_at).toLocaleString()} · {t.span_count} spans
-              </span>
-              <Badge status={t.failed ? "FAILED" : t.running ? "RUNNING" : "SUCCEEDED"} />
-            </button>
-          ))}
-        {q.data?.items.length === 0 && (
-          <p>No traces yet. Run a workflow or connect your server to start recording.</p>
-        )}
-      </div>
-      {id && (
-        <section className="connected-panel section">
-          <Wait loading={detail.isPending} error={detail.error} />
-          <h2>Operations</h2>
-          <div className="integration-columns">
-            <div className="compact-stack">
-              {rows.map((s) => (
-                <button
-                  className={"span-choice " + (s.span_id === selected ? "selected" : "")}
-                  key={s.span_id}
-                  onClick={() => setSelected(s.span_id)}
-                  style={{ paddingInlineStart: 16 + depth(s) * 16 }}
-                >
-                  <strong>{s.name}</strong>
-                  <Badge status={s.status} />
-                  <span className="hint">
-                    {s.ended_at
-                      ? Date.parse(s.ended_at) - Date.parse(s.started_at) + "ms"
-                      : "In progress"}
-                  </span>
-                </button>
-              ))}
-            </div>
-            {active && (
-              <aside className="span-inspector">
-                <h2>{active.name}</h2>
-                <p className="hint">
-                  {active.kind} · {active.span_id}
-                </p>
-                {(["attributes_json", "input_json", "output_json", "error_json"] as const).map(
-                  (field) =>
-                    active[field] && (
-                      <section className="section" key={field}>
-                        <h3>{field.replace("_json", "")}</h3>
-                        <Data value={JSON.parse(active[field]!)} />
-                      </section>
-                    ),
-                )}
-              </aside>
-            )}
-          </div>
-        </section>
-      )}
+      <ProjectActivity projectId={p} />
     </>
   );
 }

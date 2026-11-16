@@ -110,15 +110,22 @@ export function WorkspaceShell({
           </Link>
           <nav aria-label="Main navigation">
             {[
-              ["/", "Workflows", "layer-group"],
-              ["/executions", "Executions", "clock-rotate-left"],
-              ["/gateway", "Gateway", "shuffle"],
-              ["/laboratory", "Laboratory", "flask"],
+              ["/", "Project", "layer-group"],
+              ["/builder", "Build", "diagram-project"],
             ].map(([path, label, icon]) => (
               <NavLink
                 key={path}
                 to={path! + (projectId ? "?project=" + projectId : "")}
                 end={path === "/"}
+                className={({ isActive }) =>
+                  isActive ||
+                  (path === "/builder" &&
+                    /^\/(?:studio|workflow|template)(?:\/|$)/.test(location.pathname)) ||
+                  (path === "/" &&
+                    /^\/(?:executions|traces|analytics)(?:\/|$)/.test(location.pathname))
+                    ? "active"
+                    : ""
+                }
               >
                 <Icon name={icon!} />
                 <span>{label}</span>
@@ -275,6 +282,8 @@ export function WorkspaceShell({
                 ["/settings/appearance", "Appearance", "circle-half-stroke"],
                 ["/connect", "Connect application", "plug"],
                 ["/settings/developer", "API keys & SDK", "code"],
+                ["/gateway", "Model Gateway", "shuffle"],
+                ["/laboratory", "Workflow experiments", "flask"],
               ].map(([path, label, icon]) => (
                 <Link className="menu-action" to={path!} key={path} onClick={() => setMenu(null)}>
                   <Icon name={icon!} />
@@ -308,8 +317,8 @@ function Search({ projectId, close }: { projectId: string; close: () => void }) 
   const pages = [
     ["Projects", "/settings/projects"],
     ["Connect application", "/connect"],
-    ["Executions", "/executions"],
-    ["Traces", "/traces"],
+    ["Application runs", "/"],
+    ["Workflow builder", "/builder"],
     ["Gateway", "/gateway"],
     ["Laboratory", "/laboratory"],
     ["Approvals", "/approvals"],

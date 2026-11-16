@@ -37,8 +37,8 @@ export function WorkflowDetail({ projectId }: { projectId: string }) {
   const w = q.data;
   return (
     <>
-      <Link className="back" to="/">
-        <Icon name="arrow-left" /> Workflows
+      <Link className="back" to="/builder">
+        <Icon name="arrow-left" /> Build
       </Link>
       <div className="page-head">
         <div>
