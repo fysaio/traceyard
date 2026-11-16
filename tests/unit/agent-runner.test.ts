@@ -64,7 +64,7 @@ it.each(["SUCCEEDED", "FAILED", "SKIPPED"])(
       await writeFile(join(root, "server.ts"), "app.post('/interpret',async()=>generateReply());");
       await writeFile(
         join(root, "test.mjs"),
-        `import {test} from 'node:test';import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${expectedStatus === "FAILED" ? "throw new Error('Expected fixture failure');" : ""}});`,
+        `import {test} from 'node:test';import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${expectedStatus === "FAILED" ? "throw new Error('supabaseUrl is required. private@example.test');" : ""}});`,
       );
       const result = await new Promise<{ code: number | null; output: string }>((done, reject) => {
         const child = spawn(process.execPath, [resolve("agent/cli.mjs"), "run", root], {
@@ -85,9 +85,23 @@ it.each(["SUCCEEDED", "FAILED", "SKIPPED"])(
       expect(result.code, result.output).toBe(expectedStatus === "FAILED" ? 1 : 0);
       const reports = received
         .filter((r) => r.path === "/api/v1/repository-runs")
-        .map((r) => r.body as { phase: string; status: string; operations?: { name: string }[] });
+        .map(
+          (r) =>
+            r.body as {
+              phase: string;
+              status: string;
+              message: string;
+              operations?: { name: string }[];
+            },
+        );
       expect(reports.find((r) => r.operations)?.operations?.[0]?.name).toBe("POST /interpret");
       expect(reports.at(-1)).toMatchObject({ phase: "complete", status: expectedStatus });
+      if (expectedStatus === "FAILED") {
+        expect(reports.find((r) => r.phase === "test" && r.status === "FAILED")?.message).toContain(
+          "Supabase test configuration is missing",
+        );
+        expect(JSON.stringify(reports)).not.toContain("private@example.test");
+      }
       const exports = received.filter((r) => r.path === "/api/v1/otlp/v1/traces");
       if (expectedStatus === "SKIPPED") {
         expect(exports).toHaveLength(0);

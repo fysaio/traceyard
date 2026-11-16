@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { discoverFile } from "./discovery.mjs";
+import { summarizeCommandFailure } from "./failure-summary.mjs";
 
 export async function scanDirectory(root) {
   const operations = [],
@@ -56,14 +57,23 @@ export async function scanDirectory(root) {
   if (operations.length > 100) warnings.push("Dashboard discovery is limited to 100 operations.");
   return { operations: operations.slice(0, 100), filesScanned, warnings: warnings.slice(0, 20) };
 }
-function execute(program, args, options) {
+function execute(program, args, options, phase) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(program, args, {
       ...options,
-      stdio: "inherit",
+      stdio: ["inherit", "pipe", "pipe"],
       shell: process.platform === "win32",
       detached: process.platform !== "win32",
     });
+    let output = "";
+    const capture = (stream, destination) => {
+      stream.on("data", (chunk) => {
+        destination.write(chunk);
+        output = (output + chunk.toString()).slice(-131072);
+      });
+    };
+    capture(child.stdout, process.stdout);
+    capture(child.stderr, process.stderr);
     const timer = setTimeout(() => {
       try {
         if (process.platform === "win32") child.kill("SIGKILL");
@@ -71,22 +81,24 @@ function execute(program, args, options) {
       } catch {
         /* Already exited. */
       }
-      reject(new Error("Command exceeded the 180 second limit."));
+      reject(new Error(summarizeCommandFailure(output, phase, "180 second time limit")));
     }, 180000);
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
     });
-    child.on("exit", (code, signal) => {
-      clearTimeout(timer);
+    child.on("exit", () => {
       if (process.platform !== "win32")
         try {
           process.kill(-child.pid, "SIGTERM");
         } catch {
           /* Group already stopped. */
         }
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
       if (code === 0) resolveRun();
-      else reject(new Error(`Command failed (${signal ?? code}).`));
+      else reject(new Error(summarizeCommandFailure(output, phase, signal ?? code)));
     });
   });
 }
@@ -281,14 +293,24 @@ export async function main(args = process.argv.slice(2)) {
       completed = true;
       return;
     }
-    await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["ci"], { cwd: root, env });
+    await execute(
+      process.platform === "win32" ? "npm.cmd" : "npm",
+      ["ci"],
+      { cwd: root, env },
+      "install",
+    );
     await report("install", "SUCCEEDED", "Dependencies installed.");
     if (pkg.scripts?.build) {
       await report("build", "RUNNING", "Running the existing build script.");
-      await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"], {
-        cwd: root,
-        env,
-      });
+      await execute(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        ["run", "build"],
+        {
+          cwd: root,
+          env,
+        },
+        "build",
+      );
       await report("build", "SUCCEEDED", "Build completed.");
     } else await report("build", "SKIPPED", "No build script configured.");
     if (
@@ -390,10 +412,15 @@ export async function main(args = process.argv.slice(2)) {
         return;
       }
     } else {
-      await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
-        cwd: root,
-        env: testEnv,
-      });
+      await execute(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        ["test"],
+        {
+          cwd: root,
+          env: testEnv,
+        },
+        "test",
+      );
     }
     await report(
       "test",
