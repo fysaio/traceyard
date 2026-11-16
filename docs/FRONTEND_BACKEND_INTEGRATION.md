@@ -1,6 +1,6 @@
 # Frontend / backend contracts
 
-The React app and API run on one origin. Cookie-authenticated writes preserve origin checks. Project routes verify authenticated ownership; `/api/v1` routes require an independently scoped project API key. Missing configuration produces a setup/error state, never a generated account or fabricated result.
+The React app and API run on one origin. Cookie-authenticated writes preserve origin checks. Project routes verify authenticated ownership; `/api/v1` routes require a scoped project API key, except repository runner reports and OTLP ingestion, which also accept a verified GitHub Actions OIDC identity restricted to the connected project. Missing configuration produces a setup/error state, never a generated account or fabricated result.
 
 | Surface                   | Contract                                                                                                         |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -10,6 +10,9 @@ The React app and API run on one origin. Cookie-authenticated writes preserve or
 | Executable catalog        | `/api/workflows` and `/:id` with project/version selection                                                       |
 | Runs                      | `/api/runs`, `/:id`, `/:id/cancel`, `/:id/retry`, `/:id/events`                                                  |
 | External automation       | `/api/v1/runs`, `/:id`, `/:id/cancel`, `/api/v1/traces`                                                          |
+| Unified activity          | `/api/projects/:projectId/activity`; optional `checkRun` filters recorded application spans by runner identity |
+| Repositories              | `/api/repositories`, `/api/projects/:projectId/repository` and its `/scan`, `/setup`, `/run` actions |
+| Repository runner         | `/api/v1/repository/register`, `/api/v1/repository-runs`, `/api/v1/otlp/v1/traces`; signed `/api/github/webhook` |
 | API keys                  | `/api/projects/:projectId/keys`, `/:id/revoke`                                                                   |
 | Traces                    | `/api/projects/:projectId/traces` and `/:traceId`; workflow evidence addressed as `execution:RUN_ID`             |
 | Providers / routes        | Project `gateway`, `gateway/credentials/:provider`, `gateway/routes`, `gateway/routes/:id`, `gateway/playground` |
@@ -26,5 +29,7 @@ Approval decisions update D1 conditionally before sending a Workflow wake-up. Re
 External spans have nonzero W3C-shaped trace/span IDs. Ingestion checks parents for cycles, redacts known credential patterns and treats completed records as immutable. The SDK explicitly propagates parent context; it does not automatically capture function arguments/returns. Workflow traces project actual persisted run, step, attempt and model-request records into the same inspection shape; reads never invoke an action or manufacture timing.
 
 Migration 0006 adds integration tables, scoped key metadata, captured route snapshots, and per-attempt input/output. It must be reviewed and applied to the intended database before enabling these routes. Existing owned saved configurations remain separate from executable Studio definitions.
+
+Migrations 0008/0009 add repository installation, discovery and check state. The `REPOSITORY_DISCOVERY` Workflow binding runs bounded source scans. See [repository setup](REPOSITORY_SETUP.md) for installation permissions, runner identity checks, support boundaries and deployment instructions.
 
 No production secrets, live OAuth login, provider smoke test, remote migration or deployment has been completed here. The product repair includes a scoped local browser journey, described in PRODUCT_EXPERIENCE_REPAIR.md; this is not complete all-screen/device acceptance. The old chatgpt.site preview is separate and has not been updated to pretend it is this Worker.
