@@ -9,6 +9,7 @@ import {
 import { createSession, ORIGIN, readSuccess } from "./helpers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
+import { runScheduledJobs } from "../../worker/jobs/scheduled";
 import { scanRepository } from "../../worker/repositories/scan";
 import { runManagedCheck, type ManagedExecution } from "../../worker/repositories/managed-runner";
 
@@ -455,6 +456,20 @@ describe("Traceyard-managed repository checks", () => {
       await f.call(`/api/projects/${f.project}/catalog`),
     );
     expect(catalog.operations).toHaveLength(1);
+    const old = new Date(Date.now() - 31 * 24 * 3600000).toISOString();
+    await env.DB.prepare("UPDATE managed_repository_checks SET created_at=? WHERE id=?")
+      .bind(old, check.id)
+      .run();
+    await env.DB.prepare("UPDATE repository_jobs SET updated_at=? WHERE id=?")
+      .bind(old, check.id)
+      .run();
+    await runScheduledJobs(f.configured);
+    expect(
+      await env.DB.prepare("SELECT id FROM managed_repository_checks WHERE id=?")
+        .bind(check.id)
+        .first(),
+    ).toBeNull();
+    expect((await f.call(`/api/projects/${f.project}/catalog`)).status).toBe(200);
   });
   it("does not let runtime discovery clear a failed newer source scan", async () => {
     const f = await fixture(),

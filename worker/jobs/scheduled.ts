@@ -85,6 +85,9 @@ export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
   summary.deletedSessions = cleanup.sessions;
   summary.circuitOpened = await updateCircuitBreaker(env);
   await env.DB.batch([
+    env.DB.prepare(
+      "DELETE FROM managed_repository_checks WHERE state IN ('FINISHED','CANCELLED') AND created_at<?",
+    ).bind(isoFromNow(-30 * 24 * 60 * 60 * 1000)),
     env.DB.prepare("DELETE FROM repository_check_requests WHERE created_at<?").bind(
       isoFromNow(-30 * 24 * 60 * 60 * 1000),
     ),
