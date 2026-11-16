@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { reportSchema } from "../../../shared/repository/contracts";
 import { spanBatchSchema, redact } from "../../../shared/contracts/traces";
-import { runnerWorkflow } from "../../repositories/runner-workflow";
+import { prepareRepositoryChecks, dispatchRepositoryChecks } from "../../repositories/checks";
+import { getOwnedProject } from "../../persistence/projects";
 import {
   githubRequest,
   githubConfigured,
@@ -149,7 +150,7 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
             )
             .run();
         await c.env.DB.prepare(
-          "UPDATE project_repositories SET runner_enabled=1 WHERE project_id=?",
+          "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY',check_setup_error=NULL WHERE project_id=?",
         )
           .bind(r.project_id)
           .run();
@@ -202,6 +203,80 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       }),
     );
   });
+  routes.post("/repositories/connect", async (c) => {
+    const auth = c.get("auth");
+    if (!auth) throw forbidden("AUTHENTICATION_REQUIRED", "Sign in to connect a repository.");
+    const body = parseWith(
+      z
+        .object({
+          repositoryId: z.number().int().positive(),
+          installationId: z.number().int().positive(),
+        })
+        .strict(),
+      await readJsonBody(c),
+      "Choose a repository.",
+    );
+    if (!githubConfigured(c.env) || !c.env.REPOSITORY_DISCOVERY)
+      throw serviceUnavailable(
+        "GITHUB_APP_UNCONFIGURED",
+        "Repository connection needs GitHub App and discovery configuration.",
+      );
+    if (!(await installationOwned(c.env.DB, auth.user.id, body.installationId)))
+      throw notFound("Installation not found.");
+    const repo = await githubRequest<GitHubRepo>(
+      c.env,
+      body.installationId,
+      `/repositories/${body.repositoryId}`,
+      {},
+      fetcher,
+    );
+    const installation = await c.env.DB.prepare(
+      "SELECT account_id FROM github_installations WHERE id=?",
+    )
+      .bind(body.installationId)
+      .first<{ account_id: string }>();
+    if (repo.owner.type !== "User" || String(repo.owner.id) !== installation?.account_id)
+      throw forbidden(
+        "REPOSITORY_OWNER_MISMATCH",
+        "Select a repository owned by this personal installation.",
+      );
+    async function existing() {
+      const row = await c.env.DB.prepare(
+        "SELECT project_id FROM project_repositories WHERE repository_id=?",
+      )
+        .bind(repo.id)
+        .first<{ project_id: string }>();
+      return row ? await getOwnedProject(c.env.DB, auth!.user.id, row.project_id) : null;
+    }
+    const connected = await existing();
+    if (connected) return c.json(data(c, { project: connected, existing: true }));
+    const id = randomId("prj"),
+      at = nowIso();
+    try {
+      await c.env.DB.batch([
+        c.env.DB.prepare(
+          "INSERT INTO projects(id,slug,name,kind,created_at,owner_user_id) VALUES(?,?,?,'standard',?,?)",
+        ).bind(id, "project-" + id.slice(4), repo.full_name.slice(0, 80), at, auth.user.id),
+        c.env.DB.prepare(
+          "INSERT INTO project_repositories(project_id,repository_id,installation_id,full_name,default_branch,status,updated_at) VALUES(?,?,?,?,?,'CONNECTED',?)",
+        ).bind(id, repo.id, body.installationId, repo.full_name, repo.default_branch, at),
+      ]);
+    } catch (error) {
+      const raced = await existing();
+      if (raced) return c.json(data(c, { project: raced, existing: true }));
+      throw error;
+    }
+    // The saved project remains visible if the background binding cannot start.
+    try {
+      await startScan(c, id, true);
+    } catch {
+      /* startScan persists its failure for retry. */
+    }
+    return c.json(
+      data(c, { project: await getOwnedProject(c.env.DB, auth.user.id, id), existing: false }),
+      201,
+    );
+  });
   routes.get("/projects/:projectId/repository", async (c) => {
     const { projectId } = await ownedProject(c);
     const repository = await c.env.DB.prepare(
@@ -216,7 +291,11 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       .all<RepositoryJob>();
     return c.json(data(c, { repository, jobs: jobs.results }));
   });
-  async function startScan(c: Parameters<typeof ownedProject>[0], projectId: string) {
+  async function startScan(
+    c: Parameters<typeof ownedProject>[0],
+    projectId: string,
+    checks = false,
+  ) {
     if (!c.env.REPOSITORY_DISCOVERY)
       throw serviceUnavailable(
         "DISCOVERY_UNCONFIGURED",
@@ -224,13 +303,16 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       );
     const scanId = randomId("scan");
     const started = await c.env.DB.prepare(
-      "UPDATE project_repositories SET status='DISCOVERING',scan_id=?,last_error=NULL,updated_at=? WHERE project_id=? AND (status!='DISCOVERING' OR updated_at<?) RETURNING project_id",
+      "UPDATE project_repositories SET status='DISCOVERING',scan_id=?,scan_json=NULL,last_error=NULL,updated_at=? WHERE project_id=? AND (status!='DISCOVERING' OR updated_at<?) RETURNING project_id",
     )
       .bind(scanId, nowIso(), projectId, new Date(Date.now() - 15 * 60 * 1000).toISOString())
       .first();
     if (!started) throw conflict("DISCOVERY_RUNNING", "Repository discovery is already running.");
     try {
-      await c.env.REPOSITORY_DISCOVERY.create({ id: scanId, params: { projectId, scanId } });
+      await c.env.REPOSITORY_DISCOVERY.create({
+        id: scanId,
+        params: { projectId, scanId, checks },
+      });
     } catch (error) {
       await c.env.DB.prepare(
         "UPDATE project_repositories SET status='FAILED',last_error='Discovery could not be started.',updated_at=? WHERE project_id=?",
@@ -288,7 +370,7 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     )
       .bind(projectId, list.id, b.installationId, list.full_name, list.default_branch, nowIso())
       .run();
-    await startScan(c, projectId);
+    await startScan(c, projectId, true);
     return c.json(data(c, { connected: true }), 201);
   });
   routes.post("/projects/:projectId/repository/scan", async (c) => {
@@ -306,99 +388,19 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     await startScan(c, projectId);
     return c.json(data(c, { started: true }), 202);
   });
+  routes.post("/projects/:projectId/repository/analyze", async (c) => {
+    const { projectId } = await ownedProject(c);
+    await startScan(c, projectId, true);
+    return c.json(data(c, { started: true }), 202);
+  });
   routes.post("/projects/:projectId/repository/setup", async (c) => {
-    const { projectId, userId } = await ownedProject(c),
-      r = await c.env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
-        .bind(projectId)
-        .first<RepositoryRecord>();
-    if (!r?.installation_id || !r.default_branch) throw notFound("GitHub repository not found.");
-    if (!(await installationOwned(c.env.DB, userId, r.installation_id)))
-      throw forbidden("INSTALLATION_UNAVAILABLE", "GitHub installation access was removed.");
-    if (r.setup_pr_url) return c.json(data(c, { url: r.setup_pr_url }));
-    const origin = c.env.PUBLIC_APP_ORIGIN ?? new URL(c.req.url).origin;
-    if (!origin.startsWith("https://"))
-      throw badRequest(
-        "PUBLIC_ORIGIN_REQUIRED",
-        "GitHub runners need a publicly reachable HTTPS Traceyard URL. Localhost cannot receive their results.",
-      );
-    if (!/^[a-f0-9]{40}$/.test(c.env.TRACEYARD_RUNNER_REF ?? ""))
-      throw badRequest(
-        "RUNNER_REF_REQUIRED",
-        "Configure the immutable Traceyard runner commit first.",
-      );
-    const commit = await githubRequest<{ sha: string }>(
-        c.env,
-        r.installation_id,
-        `/repos/${r.full_name}/commits/${encodeURIComponent(r.default_branch)}`,
-        {},
-        fetcher,
-      ),
-      branch = "traceyard/setup-" + crypto.randomUUID().slice(0, 8);
-    await githubRequest(
-      c.env,
-      r.installation_id,
-      `/repos/${r.full_name}/git/refs`,
-      { method: "POST", body: JSON.stringify({ ref: "refs/heads/" + branch, sha: commit.sha }) },
-      fetcher,
-    );
-    const workflow = runnerWorkflow(origin, r.default_branch, c.env.TRACEYARD_RUNNER_REF!);
-    // This is an additive install. Existing Traceyard workflow files are never silently overwritten.
-    await githubRequest(
-      c.env,
-      r.installation_id,
-      `/repos/${r.full_name}/contents/.github/workflows/traceyard.yml`,
-      {
-        method: "PUT",
-        body: JSON.stringify({
-          message: "Install Traceyard discovery and checks",
-          branch,
-          content: btoa(String.fromCharCode(...new TextEncoder().encode(workflow))),
-        }),
-      },
-      fetcher,
-    );
-    const pr = await githubRequest<{ html_url: string }>(
-      c.env,
-      r.installation_id,
-      `/repos/${r.full_name}/pulls`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          title: "Connect Traceyard discovery and test runs",
-          head: branch,
-          base: r.default_branch,
-          body: "Adds a pinned Traceyard runner on GitHub-hosted infrastructure. Discovers supported source entry points, runs npm install/build/test scripts and sends operational metadata to Traceyard using GitHub OIDC. No Traceyard API key is stored. Review package scripts and use test-only service configuration. Missing tests are reported as skipped. Runtime capture covers supported Node.js libraries; source discovery is not full execution coverage.",
-        }),
-      },
-      fetcher,
-    );
-    await c.env.DB.prepare("UPDATE project_repositories SET setup_pr_url=? WHERE project_id=?")
-      .bind(pr.html_url, projectId)
-      .run();
-    return c.json(data(c, { url: pr.html_url }), 201);
+    const { projectId } = await ownedProject(c);
+    const result = await prepareRepositoryChecks(c.env, projectId, fetcher);
+    return c.json(data(c, result));
   });
   routes.post("/projects/:projectId/repository/run", async (c) => {
-    const { projectId, userId } = await ownedProject(c),
-      r = await c.env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
-        .bind(projectId)
-        .first<RepositoryRecord>();
-    if (
-      !r?.installation_id ||
-      !r.default_branch ||
-      !(await installationOwned(c.env.DB, userId, r.installation_id))
-    )
-      throw notFound("GitHub repository not found.");
-    await githubRequest(
-      c.env,
-      r.installation_id,
-      `/repos/${r.full_name}/actions/workflows/traceyard.yml/dispatches`,
-      { method: "POST", body: JSON.stringify({ ref: r.default_branch }) },
-      fetcher,
-    );
-    return c.json(
-      data(c, { url: "https://github.com/" + r.full_name + "/actions/workflows/traceyard.yml" }),
-      202,
-    );
+    const { projectId } = await ownedProject(c);
+    return c.json(data(c, await dispatchRepositoryChecks(c.env, projectId, fetcher)), 202);
   });
   routes.post("/v1/repository/register", async (c) => {
     const key = await keyPrincipal(c, "traces:write"),
@@ -426,7 +428,9 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       .first<RepositoryRecord>();
     if (!repo) throw notFound("Connect a repository first.");
     if (who.source === "github")
-      await c.env.DB.prepare("UPDATE project_repositories SET runner_enabled=1 WHERE project_id=?")
+      await c.env.DB.prepare(
+        "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY',check_setup_error=NULL WHERE project_id=?",
+      )
         .bind(who.projectId)
         .run();
     const old = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")

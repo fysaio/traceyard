@@ -94,6 +94,7 @@ export async function githubRequest<T>(
     throw badRequest(
       "GITHUB_REQUEST_FAILED",
       `GitHub returned ${response.status}. Check the installation permissions and repository access.`,
+      { githubStatus: response.status },
     );
   return (response.status === 204 ? null : await response.json()) as T;
 }

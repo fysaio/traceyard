@@ -43,6 +43,10 @@ export interface RepositoryRecord {
   last_error: string | null;
   setup_pr_url: string | null;
   runner_enabled: number;
+  check_setup_state: "NOT_STARTED" | "PREPARING" | "AWAITING_MERGE" | "READY" | "QUEUED" | "FAILED";
+  check_setup_error: string | null;
+  check_setup_updated_at: string | null;
+  last_dispatch_at: string | null;
   updated_at: string;
 }
 export interface RepositoryJob {

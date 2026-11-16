@@ -213,6 +213,15 @@ export async function main(args = process.argv.slice(2)) {
       completed = true;
       return;
     }
+    if (!pkg.scripts?.build && (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))) {
+      await report(
+        "complete",
+        "SKIPPED",
+        "No build or tests configured. Source discovery is available; no application commands were run.",
+      );
+      completed = true;
+      return;
+    }
     const env = { ...process.env };
     delete env.TRACEYARD_KEY;
     delete env.NODE_OPTIONS;

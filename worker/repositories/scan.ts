@@ -45,6 +45,28 @@ export async function scanRepository(env: Env, repo: Repo, fetcher: typeof fetch
     if (tree.truncated || candidates.length > 60)
       warnings.push("This scan is limited to 60 source files. Additional files are not analysed.");
     const operations: ReturnType<typeof discoverFile>["operations"] = [];
+    let filesScanned = 0;
+    async function publish(status: "DISCOVERING" | "DISCOVERED") {
+      await env.DB.prepare(
+        "UPDATE project_repositories SET commit_sha=?,status=?,scan_json=?,last_error=NULL,updated_at=? WHERE project_id=? AND (? IS NULL OR scan_id=?)",
+      )
+        .bind(
+          commit.sha,
+          status,
+          JSON.stringify({
+            operations: operations.slice(0, 100),
+            filesScanned,
+            totalFiles: Math.min(candidates.length, 60),
+            warnings: warnings.slice(0, 20),
+          }),
+          nowIso(),
+          repo.project_id,
+          repo.scan_id ?? null,
+          repo.scan_id ?? null,
+        )
+        .run();
+    }
+    await publish("DISCOVERING");
     // Sequential fetches keep GitHub rate use bounded. Each source stays in memory, never in D1.
     for (const file of candidates.slice(0, 60)) {
       const blob = await githubRequest<{ content: string; encoding: string }>(
@@ -62,24 +84,10 @@ export async function scanRepository(env: Env, repo: Repo, fetcher: typeof fetch
       const result = discoverFile(file.path, new TextDecoder().decode(bytes));
       operations.push(...result.operations);
       if (result.warning) warnings.push(result.warning);
+      filesScanned++;
+      if (filesScanned === 1 || filesScanned % 10 === 0) await publish("DISCOVERING");
     }
-    const scan = {
-      operations: operations.slice(0, 100),
-      filesScanned: Math.min(candidates.length, 60),
-      warnings: warnings.slice(0, 20),
-    };
-    await env.DB.prepare(
-      "UPDATE project_repositories SET commit_sha=?,status='DISCOVERED',scan_json=?,last_error=NULL,updated_at=? WHERE project_id=? AND (? IS NULL OR scan_id=?)",
-    )
-      .bind(
-        commit.sha,
-        JSON.stringify(scan),
-        nowIso(),
-        repo.project_id,
-        repo.scan_id ?? null,
-        repo.scan_id ?? null,
-      )
-      .run();
+    await publish("DISCOVERED");
   } catch (error) {
     await env.DB.prepare(
       "UPDATE project_repositories SET status='FAILED',last_error=?,updated_at=? WHERE project_id=? AND (? IS NULL OR scan_id=?)",
