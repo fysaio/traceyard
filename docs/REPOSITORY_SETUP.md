@@ -94,6 +94,8 @@ GitHub runners do not receive developers' local environment files. Mocked tests 
 
 To use an updated runner in an existing connected repository, review a PR changing the pinned Traceyard commit in `.github/workflows/traceyard.yml`. Updating the server's `TRACEYARD_RUNNER_REF` affects new setup PRs; it does not silently rewrite already installed workflows.
 
+The runner preloads the SDK and an ES module instrumentation hook. Both are needed for supported HTTP libraries imported as ES modules, including code loaded through tsx. File, DNS and low-level socket instrumentation are disabled to keep setup and IPC traffic out of application workflows. Test frameworks that terminate workers before telemetry flushes can still omit spans; a short Node HTTP smoke test that exits naturally provides a useful recording check.
+
 ## What is automatically discovered or recorded
 
 Source discovery uses a TypeScript/JavaScript parser, not text matches inside comments/strings. It recognises conventional Express/Hono/Fastify-style HTTP router declarations, Next.js API route exports, Deno.serve, and selected queue/cron declarations. It resolves direct named local handlers and lists their direct calls. It does not resolve every import, dynamic branch, distributed boundary or application-level business workflow. Operation source location is evidence, not proof that the path ran.
