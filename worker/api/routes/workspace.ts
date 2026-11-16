@@ -11,6 +11,7 @@ import { ownedProject } from "../../integrations/access";
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 import { badRequest, notFound, parseWith, unauthorized } from "../errors";
 import { projectCatalog, applicationRuns } from "../../repositories/catalog";
+import { syncRepositoryChecks } from "../../repositories/check-sync";
 import { runnerPrincipal } from "../../repositories/runner-auth";
 import { installationOwned, githubRequest } from "../../repositories/github";
 import { upgradeRepositoryChecks, dispatchRepositoryChecks } from "../../repositories/checks";
@@ -321,10 +322,11 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   });
   // Check-result metadata stays separate from automatic span payload capture.
   app.get("/projects/:projectId/checks/:id", async (c) => {
-    const { projectId } = await ownedProject(c),
-      job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
-        .bind(projectId, c.req.param("id"))
-        .first();
+    const { projectId } = await ownedProject(c);
+    await syncRepositoryChecks(c.env, projectId, undefined, c.req.param("id"));
+    const job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
+      .bind(projectId, c.req.param("id"))
+      .first();
     if (!job) throw notFound("Check not found.");
     const results = await c.env.DB.prepare(
       "SELECT result_json FROM repository_test_results WHERE project_id=? AND check_id=?",

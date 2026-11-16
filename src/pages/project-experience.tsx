@@ -15,6 +15,7 @@ import type {
   TestCaseInput,
 } from "../../shared/repository/workspace";
 import type { RepositoryJob } from "../../shared/repository/contracts";
+import { checkDisplayStatus } from "../../shared/repository/check-status";
 const projectPath = (id: string) => "/projects/" + encodeURIComponent(id);
 const operationPath = (p: string, key: string) =>
   projectPath(p) + "/operations/" + encodeURIComponent(key);
@@ -72,6 +73,7 @@ export function RunStatus({ value }: { value: string }) {
           SUCCEEDED: "Completed",
           FAILED: "Failed",
           RUNNING: "Running",
+          STALE: "Update overdue",
           QUEUED: "Queued",
           SKIPPED: "Not tested",
           CANCELLED: "Cancelled",
@@ -391,9 +393,9 @@ export function ProjectPage() {
       (o) => (!onlyFailed || o.failed > 0) && o.name.toLowerCase().includes(search.toLowerCase()),
     );
   const latest = d.jobs[0],
+    latestStatus = latest ? checkDisplayStatus(latest, q.dataUpdatedAt) : "",
     busy =
-      (latest?.status === "RUNNING" &&
-        q.dataUpdatedAt - Date.parse(latest.updated_at) < 15 * 60000) ||
+      latestStatus === "RUNNING" ||
       (d.repository?.check_setup_state === "QUEUED" &&
         q.dataUpdatedAt - Date.parse(d.repository.check_setup_updated_at ?? "") < 10 * 60000);
   return (
@@ -448,7 +450,7 @@ export function ProjectPage() {
               {latest.commit_sha?.slice(0, 7) ?? "Local directory"} · {stamp(latest.updated_at)}
             </span>
           </div>
-          <RunStatus value={latest.status} />
+          <RunStatus value={latestStatus} />
           <Icon name="chevron-right" />
         </Link>
       )}
@@ -1470,10 +1472,33 @@ export function ProjectCheckPage() {
       message: string;
       at: string;
     }[];
-  const phases = ["discovery", "install", "build", "test", "complete"].map((name) => ({
-    name,
-    event: [...events].reverse().find((e) => e.phase === name),
-  }));
+  const displayStatus = checkDisplayStatus(d.job, q.dataUpdatedAt);
+  const phases = ["discovery", "install", "build", "test", "complete"].map((name) => {
+    const event =
+      [...events].reverse().find((e) => e.phase === name) ??
+      (name === "complete" && d.job.status !== "RUNNING"
+        ? {
+            phase: "complete",
+            status: d.job.status,
+            message: "The runner has ended. Open GitHub logs for the final command output.",
+            at: d.job.updated_at,
+          }
+        : undefined);
+    return {
+      name,
+      event:
+        event?.status === "RUNNING" && displayStatus !== "RUNNING"
+          ? {
+              ...event,
+              status: displayStatus === "SUCCEEDED" ? "SKIPPED" : displayStatus,
+              message:
+                displayStatus === "STALE"
+                  ? "No recent update. Verify the result on GitHub."
+                  : "The check ended before a final update for this stage was received. See the result below.",
+            }
+          : event,
+    };
+  });
   return (
     <div className="flow-page">
       <Crumbs
@@ -1510,9 +1535,19 @@ export function ProjectCheckPage() {
         </button>
       )}
       <div className="flow-run-facts">
-        <RunStatus value={d.job.status} />
+        <RunStatus value={displayStatus} />
         <span>{d.job.source === "github" ? "GitHub runner" : "Local runner"}</span>
       </div>
+      {displayStatus === "STALE" && (
+        <p className="flow-notice" role="status">
+          Traceyard has not received progress for over 15 minutes. This does not mean the tests are
+          still running. Open GitHub logs to verify the result. This page also checks GitHub
+          automatically.{" "}
+          <button className="btn quiet" disabled={q.isFetching} onClick={() => void q.refetch()}>
+            Refresh status
+          </button>
+        </p>
+      )}
       <section className="flow-surface">
         <h2>Progress</h2>
         <ol className="flow-check-stages">
@@ -1527,7 +1562,9 @@ export function ProjectCheckPage() {
                         ? "circle-xmark"
                         : p.event.status === "RUNNING"
                           ? "circle-notch"
-                          : "circle-check"
+                          : p.event.status === "SUCCEEDED"
+                            ? "circle-check"
+                            : "circle"
                   }
                 />
               </span>
@@ -1557,16 +1594,18 @@ export function ProjectCheckPage() {
         runs={catalog.data?.runs.filter((r) => r.checkId === checkId) ?? []}
         title="Runs recorded during this check"
         emptyTitle={
-          d.job.status === "RUNNING"
+          displayStatus === "RUNNING"
             ? "No application activity recorded so far"
             : "No application activity was recorded"
         }
         emptyDescription={
-          d.job.status === "FAILED"
-            ? "This project check failed. Review the failed stage above, correct it, then run Check project again. A failed check and a failed application run are different results; tests that stop before requests or mock those requests may record no application activity."
-            : d.job.status === "RUNNING"
-              ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
-              : "No supported runtime activity was received from this check. Mocked or in-process tests may pass without producing traces. Run a saved HTTP request test to record a real request through your application."
+          displayStatus === "STALE"
+            ? "The check's current status could not be confirmed. Verify its result on GitHub before starting another check."
+            : d.job.status === "FAILED"
+              ? "This project check failed. Review the failed stage above, correct it, then run Check project again. A failed check and a failed application run are different results; tests that stop before requests or mock those requests may record no application activity."
+              : d.job.status === "RUNNING"
+                ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
+                : "No supported runtime activity was received from this check. Mocked or in-process tests may pass without producing traces. Run a saved HTTP request test to record a real request through your application."
         }
       />
     </div>
