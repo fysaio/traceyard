@@ -170,8 +170,8 @@ function Editor({
   }
   return (
     <>
-      <Link className="back" to="/">
-        ← Workflows
+      <Link className="back" to="/builder">
+        ← Build
       </Link>
       <div className="page-head studio-toolbar-restored">
         <div>

@@ -1,3 +1,5 @@
+import { activityRoutes } from "./routes/activity";
+import { createRepositoryRoutes } from "./routes/repositories";
 import { httpRoutes } from "./routes/http-connections";
 import { automationRoutes } from "./routes/automations";
 import { experimentRoutes } from "./routes/experiments";
@@ -43,6 +45,8 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
 
   app.route("/api", createAuthRoutes(options.githubFetch));
   app.route("/api", projectRoutes);
+  app.route("/api", activityRoutes);
+  app.route("/api", createRepositoryRoutes(options.githubFetch));
   app.route("/api", studioRoutes);
   app.route("/api", httpRoutes);
   app.route("/api", traceRoutes);

@@ -30,6 +30,10 @@ Use every reachable screen at 390, 768, 1009 and 1440 CSS pixels. Check navigati
 
 Run the browser tests on a working runtime. Existing UI contract tests intentionally stub some responses and do not replace these authenticated journeys. The optional Cloudflare inspector is disabled in Vite (`inspectorPort: false`), resolving the prior host-interface discovery failure. Local browser verification is now possible; see [recorded scope](PRODUCT_EXPERIENCE_REPAIR.md).
 
+## Repository-first workspace
+
+The main Project view now groups observed operations with their application runs. External trace ingestion and Traceyard-managed runs share this history. Build opens the optional workflow builder. Check the GitHub connection dialog, one-time deployment instructions and local .env.traceyard setup. Follow [repository setup](REPOSITORY_SETUP.md) for a configured personal-GitHub installation and actual hosted test run; do not substitute the isolated account for live GitHub verification.
+
 ## Isolated local acceptance account
 
 For UI/backend checks without live OAuth credentials:
