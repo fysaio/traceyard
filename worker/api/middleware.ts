@@ -184,7 +184,8 @@ export function sameOriginMiddleware(): MiddlewareHandler<AppEnv> {
 
     const origin = c.req.header("origin");
     if (origin !== undefined) {
-      const expected = new URL(c.req.url).origin;
+      const requestUrl = new URL(c.req.url);
+      const expected = requestUrl.origin;
       // A reverse proxy can forward HTTPS to an internal HTTP listener. Trust
       // only the explicit operator-configured origin, never forwarded headers.
       let publicOrigin: string | null = null;
@@ -206,8 +207,46 @@ export function sameOriginMiddleware(): MiddlewareHandler<AppEnv> {
       } catch {
         // Missing/invalid deployment configuration cannot widen trusted origins.
       }
-      if (origin !== expected && origin !== publicOrigin) {
-        throw new ApiError(403, "CROSS_ORIGIN_REJECTED", "Cross-origin writes are not permitted.");
+      // Dev Tunnels can rewrite Origin to its local HTTP target while Vite
+      // reconstructs request.url using X-Forwarded-Proto: https. Permit the
+      // transport counterpart only on the very same loopback host and port,
+      // with an explicitly configured public origin. This is never a rule
+      // for arbitrary hostnames, other loopback ports or forwarded hosts.
+      let localTransportOrigin: string | null = null;
+      if (
+        publicOrigin !== null &&
+        ["localhost", "127.0.0.1", "[::1]"].includes(requestUrl.hostname) &&
+        ["http:", "https:"].includes(requestUrl.protocol)
+      ) {
+        const port = requestUrl.port || (requestUrl.protocol === "https:" ? "443" : "80");
+        const protocol = requestUrl.protocol === "https:" ? "http:" : "https:";
+        localTransportOrigin = new URL(`${protocol}//${requestUrl.hostname}:${port}`).origin;
+      }
+      if (origin !== expected && origin !== publicOrigin && origin !== localTransportOrigin) {
+        let browserOrigin: string | null = null;
+        try {
+          // Origins only: do not echo credentials, paths, query strings or
+          // arbitrary header text into diagnostics or logs.
+          const parsed = new URL(origin);
+          if (["http:", "https:"].includes(parsed.protocol)) browserOrigin = parsed.origin;
+        } catch {
+          /* Invalid/opaque origins remain rejected. */
+        }
+        const details = {
+          browserOrigin,
+          requestOrigin: expected,
+          configuredOrigin: publicOrigin,
+        };
+        log("warn", "http.origin_rejected", {
+          requestId: c.get("requestContext")?.requestId ?? "unknown",
+          ...details,
+        });
+        throw new ApiError(
+          403,
+          "CROSS_ORIGIN_REJECTED",
+          "Cross-origin writes are not permitted.",
+          details,
+        );
       }
     }
     const site = c.req.header("sec-fetch-site");

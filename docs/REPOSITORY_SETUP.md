@@ -34,6 +34,8 @@ These are different from `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`, which cont
 
 When developing through an HTTPS tunnel or reverse proxy, set `PUBLIC_APP_ORIGIN` to the exact public origin and restart Traceyard after changing it. Cookie-authenticated writes accept this explicitly configured origin even when the proxy forwards to local HTTP. Other origins and cross-site browser writes remain blocked; forwarded headers do not grant access. An already installed app offers **Manage access** for changing its repository selection rather than asking you to install it again.
 
+Microsoft Dev Tunnels can also rewrite the browser's `Origin` to its local HTTP target while Vite preserves the forwarded HTTPS protocol in the Worker URL. With a valid public origin configured, Traceyard accepts that transport counterpart only on the identical loopback host and effective port. Other ports, non-loopback protocol mismatches and cross-site requests stay rejected. Rejections include address-only diagnostics (`browserOrigin`, `requestOrigin`, `configuredOrigin`), never keys, cookies or URL paths.
+
 ## GitHub: developer journey
 
 1. Sign in and select **Connect repository** (also available in the project switcher). Install Traceyard on selected personal GitHub repositories if necessary, return and refresh the list. Signed installation webhooks and the signed-in identity establish access; callback query strings do not grant it.
