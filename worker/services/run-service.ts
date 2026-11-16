@@ -248,6 +248,8 @@ export async function launchRun(
     throw tooManyRequests(
       "SANDBOX_CONCURRENCY_LIMIT",
       "The sandbox is running its maximum number of executions. Try again shortly.",
+      undefined,
+      { scope: "concurrency", limit: config.sandbox.globalConcurrencyLimit, active: lease.active },
     );
   }
 
@@ -489,7 +491,17 @@ async function reserveSandboxQuotas(
       // The window end is deterministic, so Retry-After is exact rather than
       // guessed. The caller releases every counter already incremented.
       const retryAfter = Math.max(1, Math.ceil((Date.parse(bucket.expiresAt) - Date.now()) / 1000));
-      throw tooManyRequests(bucket.reason, bucket.message, retryAfter);
+      const scope = bucket.reason.startsWith("GLOBAL")
+        ? "global"
+        : bucket.reason.startsWith("IP")
+          ? "ip"
+          : "session";
+      throw tooManyRequests(bucket.reason, bucket.message, retryAfter, {
+        scope,
+        limit: bucket.limit,
+        used: outcome.count,
+        windowEndsAt: bucket.expiresAt,
+      });
     }
   }
 }
@@ -518,6 +530,8 @@ async function assertSandboxAvailable(
     throw serviceUnavailable(
       "SANDBOX_DISABLED",
       "Anonymous execution is temporarily disabled. Existing runs remain available.",
+      undefined,
+      { scope: "sandbox" },
     );
   }
 
@@ -537,6 +551,7 @@ async function assertSandboxAvailable(
       "SANDBOX_CIRCUIT_OPEN",
       "Anonymous execution is paused after elevated infrastructure failures. Try again shortly.",
       retryAfter,
+      { scope: "circuit", retryAt: circuitUntil },
     );
   }
 
@@ -852,6 +867,8 @@ export async function retryRun(
     throw tooManyRequests(
       "SANDBOX_CONCURRENCY_LIMIT",
       "The sandbox is running its maximum number of executions. Try again shortly.",
+      undefined,
+      { scope: "concurrency", limit: config.sandbox.globalConcurrencyLimit, active: lease.active },
     );
   }
 

@@ -6,6 +6,7 @@ export interface ProjectSummary {
   slug: string;
   name: string;
   createdAt: string;
+  repository?: string | null;
 }
 
 export interface SavedWorkflowSummary {
@@ -44,11 +45,13 @@ export async function getOwnedProject(
 ): Promise<ProjectSummary | null> {
   const row = await db
     .prepare(
-      `SELECT id, slug, name, created_at FROM projects
-        WHERE id = ? AND owner_user_id = ?`,
+      `SELECT p.id, p.slug, p.name, p.created_at, r.full_name AS repository
+        FROM projects p
+        LEFT JOIN project_repositories r ON r.project_id = p.id
+        WHERE p.id = ? AND p.owner_user_id = ?`,
     )
     .bind(projectId, userId)
-    .first<ProjectRow>();
+    .first<ProjectRow & { repository: string | null }>();
   return row === null ? null : toProjectSummary(row);
 }
 
@@ -66,11 +69,13 @@ export async function getDefaultProjectId(db: D1Database, userId: string): Promi
 export async function listOwnedProjects(db: D1Database, userId: string): Promise<ProjectSummary[]> {
   const result = await db
     .prepare(
-      `SELECT id, slug, name, created_at FROM projects
-        WHERE owner_user_id = ? ORDER BY created_at ASC, id ASC`,
+      `SELECT p.id, p.slug, p.name, p.created_at, r.full_name AS repository
+        FROM projects p
+        LEFT JOIN project_repositories r ON r.project_id = p.id
+        WHERE p.owner_user_id = ? ORDER BY p.created_at ASC, p.id ASC`,
     )
     .bind(userId)
-    .all<ProjectRow>();
+    .all<ProjectRow & { repository: string | null }>();
   return result.results.map(toProjectSummary);
 }
 
@@ -201,12 +206,13 @@ export async function deleteSavedWorkflow(
   return result.meta.changes === 1;
 }
 
-function toProjectSummary(row: ProjectRow): ProjectSummary {
+function toProjectSummary(row: ProjectRow & { repository?: string | null }): ProjectSummary {
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     createdAt: row.created_at,
+    repository: row.repository ?? null,
   };
 }
 

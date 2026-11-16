@@ -53,14 +53,12 @@ const NO_RETRY: RetryPolicy = {
   maxAttempts: 1,
   baseDelayMs: 0,
   backoff: "fixed",
-  maxDelayMs: 0,
 };
 
 const STANDARD_RETRY: RetryPolicy = {
   maxAttempts: 3,
   baseDelayMs: 1_000,
   backoff: "exponential",
-  maxDelayMs: 8_000,
 };
 
 export const DOCUMENT_WORKFLOW = {

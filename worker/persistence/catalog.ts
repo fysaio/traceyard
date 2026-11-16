@@ -15,7 +15,6 @@ const stepManifestSchema = z
         maxAttempts: z.number().int().min(1).max(50),
         baseDelayMs: z.number().int().min(0).max(60_000),
         backoff: z.enum(["fixed", "linear", "exponential"]),
-        maxDelayMs: z.number().int().min(0).max(300_000),
       })
       .strict(),
   })

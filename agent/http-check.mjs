@@ -1,6 +1,6 @@
 // Runs only inside the user's local/GitHub test runner. Requests never target a remote host.
 import { TextDecoder } from "node:util";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { connect } from "node:net";
 import { randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -41,7 +41,7 @@ const server = spawn(
       TRACEYARD_FLUSH_ON_TERM: "true",
     },
     stdio: ["ignore", "inherit", "inherit"],
-    shell: false,
+    shell: process.platform === "win32",
   },
 );
 let stopped = false;
@@ -223,14 +223,24 @@ try {
     results.push(result);
   }
 } finally {
-  // Only this temporary test process group is signalled. Its Node preload flushes pending spans.
-  if (process.platform !== "win32")
+  await pause(600);
+  if (process.platform !== "win32") {
     try {
       process.kill(-process.pid, "SIGTERM");
     } catch {
       /* Group already stopped. */
     }
-  else server.kill("SIGTERM");
+  } else {
+    try {
+      execSync(`taskkill /pid ${server.pid} /T /F`, { stdio: "ignore" });
+    } catch {
+      try {
+        server.kill("SIGTERM");
+      } catch {
+        /* Already stopped. */
+      }
+    }
+  }
   const stopDeadline = Date.now() + 4000;
   while (Date.now() < stopDeadline && (await ready())) await pause(50);
   await writeFile(output, JSON.stringify(results), { mode: 0o600 });

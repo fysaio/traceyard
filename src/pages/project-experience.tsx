@@ -182,10 +182,14 @@ export function ProjectsPage() {
   });
   const [connect, setConnect] = useState(false),
     [search, setSearch] = useState("");
+  const hasConnectedRepo = q.data?.items.some((p) => Boolean(p.repository));
   const items =
-    q.data?.items.filter((p) =>
-      (p.repository ?? p.name).toLowerCase().includes(search.toLowerCase()),
-    ) ?? [];
+    q.data?.items.filter((p) => {
+      if (!hasConnectedRepo && !p.repository && p.name === "Main project" && p.runs === 0) {
+        return false;
+      }
+      return (p.repository ?? p.name).toLowerCase().includes(search.toLowerCase());
+    }) ?? [];
   return (
     <div className="flow-page">
       <p className="flow-kicker">Your workspace</p>
@@ -199,7 +203,7 @@ export function ProjectsPage() {
           </button>
         }
       />
-      {!!q.data?.items.length && (
+      {!!items.length && (
         <div className="flow-toolbar">
           <label className="flow-search">
             <Icon name="magnifying-glass" />
@@ -221,17 +225,26 @@ export function ProjectsPage() {
         <LoadingError error={q.error} retry={() => void q.refetch()} />
       ) : !items.length ? (
         <Empty
-          icon="folder-open"
-          title={search ? "No matching projects" : "Start with your application"}
+          icon="code-branch"
+          title={search ? "No matching projects" : "Connect a repository first"}
           action={
-            <button className="btn" onClick={() => (search ? setSearch("") : setConnect(true))}>
-              {search ? "Clear search" : "Connect a repository"}
+            <button
+              className={search ? "btn" : "btn primary"}
+              onClick={() => (search ? setSearch("") : setConnect(true))}
+            >
+              {search ? (
+                "Clear search"
+              ) : (
+                <>
+                  <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
+                </>
+              )}
             </button>
           }
         >
           {search
             ? "Try its name or repository."
-            : "Choose a repository. We’ll discover its supported operations and prepare its first checks."}
+            : "Connect your GitHub repositories to create your projects. Traceyard will discover operations, run checks, and let you choose whichever project you want to work on."}
         </Empty>
       ) : (
         <div className="flow-projects">

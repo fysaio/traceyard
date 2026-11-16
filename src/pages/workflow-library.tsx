@@ -270,9 +270,6 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
           </div>
         </section>
       )}
-      <Link className="text-link section" to="/">
-        Inspect your application’s operations and runs <Icon name="arrow-right" />
-      </Link>
       <input
         ref={file}
         type="file"

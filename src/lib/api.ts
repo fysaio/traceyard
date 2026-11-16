@@ -24,14 +24,75 @@ export class ApiClientError extends Error {
   readonly code: string;
   readonly status: number;
   readonly details: unknown;
+  /** Parsed `Retry-After` value in seconds, when the server provided one. */
+  readonly retryAfterSeconds: number | null;
 
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details?: unknown,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.code = code;
     this.details = details;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
+}
+
+function readRetryAfter(response: Response): number | null {
+  const value = response.headers.get("retry-after");
+  if (value === null) return null;
+  const seconds = Number.parseInt(value, 10);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
+
+/**
+ * Turns an API failure into a message that states what happened and what is
+ * still possible. It never invents a reset time: the countdown is only shown
+ * when the server returned a trustworthy `Retry-After`.
+ */
+export function describeApiError(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiClientError)) return fallback;
+
+  const retry =
+    error.retryAfterSeconds === null
+      ? ""
+      : ` Capacity returns in about ${formatRetryWindow(error.retryAfterSeconds)}.`;
+
+  switch (error.code) {
+    case "SANDBOX_CONCURRENCY_LIMIT":
+      return `${error.message} Your existing executions and their history remain available.`;
+    case "GLOBAL_DAILY_QUOTA":
+    case "SESSION_DAILY_QUOTA":
+    case "SESSION_HOURLY_QUOTA":
+    case "IP_HOURLY_QUOTA":
+      return `${error.message}${retry} Existing executions and their history remain available.`;
+    case "SANDBOX_CIRCUIT_OPEN":
+    case "SANDBOX_DISABLED":
+      return `${error.message}${retry} Existing executions and their history remain available.`;
+    case "IDEMPOTENCY_KEY_REUSED":
+      return `${error.message} Start a new launch with a fresh idempotency key.`;
+    case "IDEMPOTENCY_RECORD_UNAVAILABLE":
+      return `${error.message} Start a new launch to create a new execution.`;
+    case "RETRY_ALREADY_EXISTS":
+      return `${error.message} Open the existing retry execution instead.`;
+    case "RUN_NOT_RETRYABLE":
+      return `${error.message} Only terminal failures can be retried, and a retry creates a new execution.`;
+    default:
+      return error.message;
+  }
+}
+
+function formatRetryWindow(seconds: number): string {
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.ceil(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<T>> {
@@ -66,6 +127,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<
       failure?.error.code ?? "REQUEST_FAILED",
       failure?.error.message ?? `Request failed with status ${response.status}.`,
       failure?.error.details,
+      readRetryAfter(response),
     );
   }
 
@@ -110,6 +172,7 @@ export interface ProjectSummary {
   slug: string;
   name: string;
   createdAt: string;
+  repository?: string | null;
 }
 
 export interface SavedWorkflowSummary {
