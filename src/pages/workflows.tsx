@@ -171,8 +171,7 @@ export function WorkflowsPage() {
                             {step.retry.maxAttempts === 1 ? "" : "s"} · {step.retry.backoff}
                           </div>
                           <div className="font-mono text-[10px] text-faint">
-                            base {formatDuration(step.retry.baseDelayMs)} · max{" "}
-                            {formatDuration(step.retry.maxDelayMs)}
+                            base {formatDuration(step.retry.baseDelayMs)} between attempts
                           </div>
                         </td>
                       </tr>

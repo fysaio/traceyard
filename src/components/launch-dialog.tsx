@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import type { WorkflowSummary } from "../../shared/contracts/api";
 import type { FailureScenario } from "../../shared/workflow/document";
-import { api, ApiClientError, newIdempotencyKey } from "../lib/api";
+import { api, describeApiError, newIdempotencyKey } from "../lib/api";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Field, Input, Select, Textarea } from "./ui/input";
@@ -98,9 +98,10 @@ function LaunchForm({
       navigate(`/executions/${result.run.id}${replayed ? "?replayed=1" : ""}`);
     } catch (caught) {
       setError(
-        caught instanceof ApiClientError
-          ? caught.message
-          : "The execution could not be launched. Check your connection and try again.",
+        describeApiError(
+          caught,
+          "The execution could not be launched. Check your connection and try again.",
+        ),
       );
     } finally {
       setPending(false);

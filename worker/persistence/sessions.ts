@@ -14,6 +14,13 @@ export interface ResolvedSession {
  * Anonymous sessions are identified by a 256-bit random bearer token stored in
  * an HttpOnly cookie. Only its SHA-256 hash is persisted. The token itself is
  * never written to D1 or to logs.
+ *
+ * Client IP trust boundary: `cf-connecting-ip` is set by Cloudflare's edge and
+ * cannot be spoofed by clients when the Worker is reachable only through
+ * Cloudflare. This Worker deliberately ignores `x-forwarded-for` and other
+ * caller-supplied headers, because outside that trusted edge they are
+ * attacker-controlled. `local-development` is used when the header is absent
+ * (wrangler/miniflare), which keeps local evidence separate from real traffic.
  */
 export async function resolveSession(
   db: D1Database,

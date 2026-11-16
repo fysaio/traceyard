@@ -61,7 +61,7 @@ function execute(program, args, options) {
     const child = spawn(program, args, {
       ...options,
       stdio: "inherit",
-      shell: false,
+      shell: process.platform === "win32",
       detached: process.platform !== "win32",
     });
     const timer = setTimeout(() => {

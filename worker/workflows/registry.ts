@@ -14,7 +14,6 @@ export interface WorkflowRuntime {
     timeoutMs: number;
     baseDelayMs: number;
     backoff: "fixed" | "linear" | "exponential";
-    maxDelayMs: number;
   }[];
   /** Validates untrusted input and returns the exact JSON that will be persisted. */
   validateInput(input: unknown): unknown;
@@ -31,7 +30,6 @@ const DOCUMENT_RUNTIME: WorkflowRuntime = {
     timeoutMs: step.timeoutMs,
     baseDelayMs: step.retry.baseDelayMs,
     backoff: step.retry.backoff,
-    maxDelayMs: step.retry.maxDelayMs,
   })),
   validateInput: (input) => validateDocumentInput(input),
 };

@@ -23,10 +23,10 @@ import {
 import { Compare } from "./pages/compare";
 import { Studio } from "./pages/studio";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
-import { Navigate, Route, Routes, useNavigate, useLocation, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, readAllEvents, newIdempotencyKey, type AuthSession } from "./lib/api";
-import type { RunDetail, WorkflowSummary } from "../shared/contracts/api";
+import type { WorkflowSummary } from "../shared/contracts/api";
 import { documentInputSchema, type FailureScenario } from "../shared/workflow/document";
 
 const Icon = ({ name }: { name: string }) => (
@@ -107,7 +107,6 @@ function Empty({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function App() {
-  const location = useLocation();
   const session = useQuery({
     queryKey: ["auth"],
     queryFn: api.authSession,
@@ -128,13 +127,7 @@ export function App() {
         <Notice error={session.error} retry={() => void session.refetch()} />
       </main>
     );
-  if (!session.data.user)
-    return location.pathname.startsWith("/sandbox") ||
-      location.pathname.startsWith("/executions/") ? (
-      <GuestWorkspace session={session.data} />
-    ) : (
-      <Welcome session={session.data} />
-    );
+  if (!session.data.user) return <Welcome session={session.data} />;
   return <Workspace session={session.data} />;
 }
 function Welcome({ session }: { session: AuthSession }) {
@@ -164,9 +157,6 @@ function Welcome({ session }: { session: AuthSession }) {
               </p>
             </>
           )}
-          <Link className="btn" to="/sandbox">
-            Explore the sandbox
-          </Link>
         </div>
         <span className="entry-foot">Open source. Self-hostable.</span>
       </main>
@@ -250,10 +240,8 @@ export function Launch({
   close,
   initialInput,
   fault = "success",
-  guest = false,
 }: {
   workflow: WorkflowSummary;
-  guest?: boolean;
   projectId?: string;
   close: () => void;
   initialInput?: unknown;
@@ -301,7 +289,7 @@ export function Launch({
     onSuccess: (result) => {
       void cache.invalidateQueries({ queryKey: ["runs"] });
       navigate(
-        `${guest ? "/sandbox" : ""}/executions/${result.result.run.id}${projectId ? "?project=" + projectId : ""}`,
+        `/executions/${result.result.run.id}${projectId ? "?project=" + projectId : ""}`,
       );
       close();
     },
@@ -454,103 +442,7 @@ export function Launch({
     </dialog>
   );
 }
-function Executions({ projectId, guest = false }: { projectId: string; guest?: boolean }) {
-  const [status, setStatus] = useState("");
-  const runs = useQuery({
-    queryKey: ["runs", projectId, status],
-    queryFn: () =>
-      api.runs({ projectId, ...(status ? { status: status as RunDetail["status"] } : {}) }),
-    refetchInterval: 2500,
-  });
-  const [cursor, setCursor] = useState<string | null>(null);
-  const more = useQuery({
-    queryKey: ["run-page", projectId, status, cursor],
-    queryFn: () =>
-      api.runs({
-        ...(status ? { status: status as RunDetail["status"] } : {}),
-        projectId,
-        cursor: cursor!,
-        limit: 25,
-      }),
-    enabled: !!cursor,
-  });
-  const data = cursor ? more : runs;
-  return (
-    <>
-      <Heading
-        title="Executions"
-        actions={
-          <Link className="btn" to={guest ? "/sandbox/analytics" : "/analytics"}>
-            Account analytics
-          </Link>
-        }
-      >
-        Persisted execution history for the selected project.
-      </Heading>
-      <div className="content-toolbar">
-        <div className="field">
-          <label htmlFor="run-status">Status</label>
-          <select
-            id="run-status"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setCursor(null);
-            }}
-          >
-            <option value="">All statuses</option>
-            {["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLING", "CANCELLED"].map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-        <button className="btn" onClick={() => void data.refetch()}>
-          Refresh
-        </button>
-      </div>
-      {data.isPending ? (
-        <Loading />
-      ) : data.isError ? (
-        <Notice error={data.error} />
-      ) : data.data.items.length === 0 ? (
-        <Empty title="No executions yet">
-          Open a published workflow and run it with a document.
-        </Empty>
-      ) : (
-        <div className="execution-list">
-          {data.data.items.map((r) => (
-            <Link
-              key={r.id}
-              className="execution-item connected-panel"
-              to={`${guest ? "/sandbox" : ""}/executions/${r.id}`}
-            >
-              <div>
-                <h2>{r.workflow.name}</h2>
-                <p>{new Date(r.createdAt).toLocaleString()}</p>
-              </div>
-              <Status value={r.status} />
-              <span>{duration(r.durationMs)}</span>
-              <Icon name="arrow-right" />
-            </Link>
-          ))}
-        </div>
-      )}
-      <div className="actions pagination">
-        {cursor && (
-          <button className="btn" onClick={() => setCursor(null)}>
-            Latest executions
-          </button>
-        )}
-        {data.data?.nextCursor && (
-          <button className="btn" onClick={() => setCursor(data.data!.nextCursor)}>
-            Older executions
-          </button>
-        )}
-      </div>
-    </>
-  );
-}
-function Execution({ guest = false }: { guest?: boolean }) {
+function Execution() {
   const { id = "" } = useParams(),
     navigate = useNavigate(),
     cache = useQueryClient();
@@ -580,7 +472,7 @@ function Execution({ guest = false }: { guest?: boolean }) {
     onSuccess: (result) => {
       setStep(null);
       setTab("summary");
-      navigate(`${guest ? "/sandbox" : ""}/executions/${result.run.id}`);
+      navigate(`/executions/${result.run.id}`);
     },
   });
   const exportTrace = useMutation({ mutationFn: () => readAllEvents(id) });
@@ -605,8 +497,8 @@ function Execution({ guest = false }: { guest?: boolean }) {
   };
   return (
     <>
-      <Link className="back" to={guest ? "/sandbox/executions" : "/"}>
-        {guest ? "← Executions" : "← Project"}
+      <Link className="back" to="/">
+        ← Project
       </Link>
       <Heading
         title={r.workflow.name}
@@ -645,19 +537,15 @@ function Execution({ guest = false }: { guest?: boolean }) {
         <span>Version {r.workflow.version}</span>
         <span>{duration(r.durationMs)}</span>
         <span>{r.id}</span>
-        {!guest && (
-          <Link className="text-link" to="/approvals">
-            Review approvals
-          </Link>
-        )}
-        {!guest && (
-          <Link className="text-link" to={"/compare?left=" + r.id}>
-            Compare
-          </Link>
-        )}
+        <Link className="text-link" to="/approvals">
+          Review approvals
+        </Link>
+        <Link className="text-link" to={"/compare?left=" + r.id}>
+          Compare
+        </Link>
       </div>
       {r.parentRunId && (
-        <Link to={`${guest ? "/sandbox" : ""}/executions/${r.parentRunId}`} className="text-link">
+        <Link to={`/executions/${r.parentRunId}`} className="text-link">
           Original execution
         </Link>
       )}
@@ -864,199 +752,5 @@ function Settings({ session }: { session: AuthSession }) {
   );
 }
 
-function Analytics() {
-  const [days, setDays] = useState(14);
-  const query = useQuery({
-    queryKey: ["analytics", days],
-    queryFn: () => api.analytics(days),
-    refetchInterval: 30000,
-  });
-  return (
-    <>
-      <Link className="back" to="/executions">
-        ← Executions
-      </Link>
-      <Heading title="Account analytics">
-        Metrics from persisted executions across your account.
-      </Heading>
-      <div className="field">
-        <label htmlFor="analytics-days">Time window</label>
-        <select id="analytics-days" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-          {[7, 14, 30].map((n) => (
-            <option key={n} value={n}>
-              Last {n} days
-            </option>
-          ))}
-        </select>
-      </div>
-      {query.isPending ? (
-        <Loading />
-      ) : query.isError ? (
-        <Notice error={query.error} retry={() => void query.refetch()} />
-      ) : (
-        <>
-          <div className="metrics">
-            {[
-              ["Window", query.data.windowDays + " days"],
-              [
-                "Throughput",
-                query.data.throughputPerDay === null
-                  ? "—"
-                  : query.data.throughputPerDay.toFixed(1) + " / day",
-              ],
-              ["Execution p95", duration(query.data.executionDuration.p95Ms)],
-              ["Queue p95", duration(query.data.queueDelay.p95Ms)],
-            ].map(([name, value]) => (
-              <div key={name}>
-                <span>{name}</span>
-                <strong>{value}</strong>
-              </div>
-            ))}
-          </div>
-          <section className="connected-panel">
-            <h2>Execution history</h2>
-            <div className="analytics-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Runs</th>
-                    <th>Succeeded</th>
-                    <th>Failed</th>
-                    <th>Cancelled</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {query.data.trend.map((row) => (
-                    <tr key={row.date}>
-                      <td>{row.date}</td>
-                      <td>{row.total}</td>
-                      <td>{row.succeeded}</td>
-                      <td>{row.failed}</td>
-                      <td>{row.cancelled}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <section className="connected-panel section">
-            <h2>Failure classes</h2>
-            {query.data.failureClasses.length ? (
-              query.data.failureClasses.map((row) => (
-                <div className="stat-row" key={row.class}>
-                  <strong>{row.class}</strong>
-                  <span>{row.count}</span>
-                </div>
-              ))
-            ) : (
-              <p>No recorded failures in this window.</p>
-            )}
-          </section>
-          <section className="connected-panel section">
-            <h2>Step performance</h2>
-            {query.data.stepDurations.length ? (
-              query.data.stepDurations.map((row) => (
-                <div className="stat-row" key={row.stepKey}>
-                  <strong>{row.name}</strong>
-                  <span>
-                    {row.sampleSize} samples · p95 {duration(row.p95Ms)}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <p>Complete a workflow to see step timings.</p>
-            )}
-          </section>
-        </>
-      )}
-    </>
-  );
-}
 
-function GuestWorkspace({ session }: { session: AuthSession }) {
-  return (
-    <div className="product-shell">
-      <header className="product-header">
-        <Link className="brand" to="/sandbox">
-          Traceyard.
-        </Link>
-        <nav aria-label="Main navigation">
-          <Link to="/sandbox">Workflows</Link>
-          <Link to="/sandbox/executions">Executions</Link>
-        </nav>
-        <div className="header-tools">
-          <span className="badge">Sandbox</span>
-          {session.githubSignInAvailable ? (
-            <a className="btn" href="/api/auth/github/start">
-              Continue with GitHub
-            </a>
-          ) : (
-            <Link className="btn" to="/">
-              Sign-in setup
-            </Link>
-          )}
-        </div>
-      </header>
-      <main className="product-main">
-        <Routes>
-          <Route path="/sandbox" element={<SandboxWorkflows />} />
-          <Route path="/sandbox/executions" element={<Executions projectId="" guest />} />
-          <Route path="/sandbox/executions/:id" element={<Execution guest />} />
-          <Route path="/executions/:id" element={<Execution guest />} />
-          <Route path="/sandbox/analytics" element={<Analytics />} />
-        </Routes>
-      </main>
-    </div>
-  );
-}
-function SandboxWorkflows() {
-  const q = useQuery({ queryKey: ["sandbox-workflows"], queryFn: () => api.workflows() }),
-    [launch, setLaunch] = useState<WorkflowSummary | null>(null);
-  return (
-    <>
-      <Heading title="Workflows">
-        Run the document pipeline and inspect its actual execution history.
-      </Heading>
-      {q.isPending ? (
-        <Loading />
-      ) : q.isError ? (
-        <Notice error={q.error} />
-      ) : (
-        <div className="saved-workflows list">
-          {q.data.map((w) => (
-            <article className="saved-workflow" key={w.id}>
-              <div className="workflow-main">
-                <span className="workflow-icon">
-                  <Icon name="file-lines" />
-                </span>
-                <div>
-                  <h2>{w.name}</h2>
-                  <p>{w.description}</p>
-                  <p className="hint">{w.steps.length} steps</p>
-                </div>
-              </div>
-              <button className="btn" onClick={() => setLaunch(w)}>
-                <Icon name="play" />
-                Run workflow
-              </button>
-            </article>
-          ))}
-        </div>
-      )}
-      <section className="connect-strip">
-        <div>
-          <Icon name="folder" />
-          <div>
-            <h3>Build in your own project</h3>
-            <p>Sign in to create workflows, connect applications and configure providers.</p>
-          </div>
-        </div>
-        <Link className="btn" to="/">
-          Continue with GitHub
-        </Link>
-      </section>
-      {launch && <Launch workflow={launch} close={() => setLaunch(null)} guest />}
-    </>
-  );
-}
+

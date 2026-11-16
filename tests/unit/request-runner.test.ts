@@ -128,7 +128,11 @@ it.each([true, false])(
     } finally {
       collector.closeAllConnections();
       await new Promise<void>((r) => collector.close(() => r()));
-      await rm(root, { recursive: true, force: true });
+      try {
+        await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch {
+        /* Windows file lock on temporary fixture directory */
+      }
     }
   },
   60000,

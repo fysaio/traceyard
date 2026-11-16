@@ -155,6 +155,12 @@ export async function finalizeRunCancelled(
       .bind(now, now, runId, runId),
     db
       .prepare(
+        `UPDATE execution_steps SET status = 'CANCELLED', completed_at = ?, updated_at = ?
+          WHERE run_id = ? AND status = 'RUNNING'`,
+      )
+      .bind(now, now, runId),
+    db
+      .prepare(
         `UPDATE step_attempts SET status = 'ABANDONED', completed_at = ?
           WHERE run_id = ? AND status = 'RUNNING' AND EXISTS (SELECT 1 FROM runs WHERE id = ? AND status = 'CANCELLED')`,
       )
