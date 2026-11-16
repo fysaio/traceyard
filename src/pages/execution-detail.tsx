@@ -10,7 +10,8 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Icon, type IconName } from "../components/ui/icon";
 import { Skeleton } from "../components/ui/skeleton";
-import { api, ApiClientError } from "../lib/api";
+import { api, ApiClientError, describeApiError } from "../lib/api";
+import { runPollInterval } from "../lib/polling";
 import { cn, formatDate, formatDuration, formatRelative, shortId } from "../lib/utils";
 
 export function ExecutionDetailPage() {
@@ -25,10 +26,8 @@ export function ExecutionDetailPage() {
     queryKey: ["run", runId],
     queryFn: () => api.run(runId),
     enabled: runId.length > 0,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      return status === "QUEUED" || status === "RUNNING" || status === "CANCELLING" ? 2_000 : false;
-    },
+    refetchInterval: (query) => runPollInterval(query.state.data?.status),
+    refetchIntervalInBackground: false,
   });
 
   const events = useInfiniteQuery({
@@ -37,10 +36,9 @@ export function ExecutionDetailPage() {
     initialPageParam: 0,
     getNextPageParam: (page) => page.nextCursor,
     enabled: runId.length > 0,
-    refetchInterval: (query) => {
-      const status = query.state.data?.pages[0] === undefined ? undefined : run.data?.status;
-      return status === "QUEUED" || status === "RUNNING" || status === "CANCELLING" ? 2_000 : false;
-    },
+    refetchInterval: (query) =>
+      runPollInterval(query.state.data?.pages[0] === undefined ? undefined : run.data?.status),
+    refetchIntervalInBackground: false,
   });
 
   const cancel = useMutation({
@@ -53,7 +51,7 @@ export function ExecutionDetailPage() {
     },
     onError: (error) => {
       setActionMessage(null);
-      setActionError(error instanceof ApiClientError ? error.message : "Cancellation failed.");
+      setActionError(describeApiError(error, "Cancellation failed."));
     },
   });
 
@@ -65,7 +63,12 @@ export function ExecutionDetailPage() {
     },
     onError: (error) => {
       setActionMessage(null);
-      setActionError(error instanceof ApiClientError ? error.message : "Retry failed.");
+      setActionError(
+        describeApiError(
+          error,
+          "The retry could not be started. A retry creates a new execution; the original failure is unchanged.",
+        ),
+      );
     },
   });
 

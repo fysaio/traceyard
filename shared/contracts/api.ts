@@ -83,7 +83,6 @@ export interface WorkflowStepContract {
     maxAttempts: number;
     baseDelayMs: number;
     backoff: BackoffStrategy;
-    maxDelayMs: number;
   };
 }
 

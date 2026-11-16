@@ -30,12 +30,14 @@ export function WorkspaceShell({
     ),
     [name, setName] = useState("");
   const projects = q.data ?? [],
+    connectedProjects = projects.filter((p) => Boolean(p.repository)),
+    hasConnectedRepo = connectedProjects.length > 0,
     pathProject = location.pathname.match(/^\/projects\/([^/]+)/)?.[1],
     project =
       (pathProject ? projects.find((p) => p.id === pathProject) : undefined) ??
       projects.find((p) => p.id === new URLSearchParams(location.search).get("project")) ??
       projects.find((p) => p.id === selection) ??
-      projects[0],
+      (connectedProjects.length > 0 ? connectedProjects[0] : projects[0]),
     projectId = project?.id ?? "";
   function selectProject(id: string) {
     if (!projects.some((p) => p.id === id)) return;
@@ -58,22 +60,6 @@ export function WorkspaceShell({
       setMenu(null);
       setName("");
       navigate("/projects/" + p.id);
-    },
-  });
-  const guestWork = useQuery({
-    queryKey: ["guest-work"],
-    queryFn: async () => {
-      const response = await fetch("/api/auth/guest-work", { credentials: "same-origin" });
-      if (!response.ok) throw Error("Sandbox work could not be checked.");
-      return ((await response.json()) as { data: { executions: number } }).data;
-    },
-  });
-  const claim = useMutation({
-    mutationFn: () => api.claim(projectId),
-    onSuccess: () => {
-      void cache.invalidateQueries({ queryKey: ["guest-work"] });
-      void cache.invalidateQueries({ queryKey: ["runs"] });
-      void cache.invalidateQueries({ queryKey: ["connection-status", projectId] });
     },
   });
   const logout = useMutation({
@@ -147,16 +133,21 @@ export function WorkspaceShell({
               <Icon name="magnifying-glass" />
             </button>
             <button
-              className="btn project-switch"
-              aria-label="Switch project"
+              className={"btn project-switch " + (!hasConnectedRepo ? "connect-prompt" : "")}
+              aria-label={hasConnectedRepo ? "Switch project" : "Connect repository"}
               aria-haspopup="dialog"
               disabled={q.isPending || q.isError}
               onClick={() => setMenu("projects")}
             >
+              <Icon name={hasConnectedRepo ? "folder" : "code-branch"} />
               <span>
-                {q.isPending ? "Loading projects…" : (project?.name ?? "Choose a project")}
+                {q.isPending
+                  ? "Loading projects…"
+                  : hasConnectedRepo
+                    ? (project?.repository ?? project?.name ?? "Choose a project")
+                    : "Connect repository"}
               </span>
-              <Icon name="chevron-down" />
+              <Icon name={hasConnectedRepo ? "chevron-down" : "plus"} />
             </button>
             <button
               className="btn icon-only"
@@ -199,48 +190,63 @@ export function WorkspaceShell({
               </button>
             </section>
           ) : (
-            <>
-              {!!guestWork.data?.executions && (
-                <section className="sandbox-claim">
-                  <div>
-                    <strong>Your sandbox work is still here.</strong>
-                    <p>
-                      Move {guestWork.data.executions} executions into {project?.name}.
-                    </p>
-                  </div>
-                  <button className="btn" disabled={claim.isPending} onClick={() => claim.mutate()}>
-                    Keep this work
-                  </button>
-                  <ErrorMessage error={claim.error} />
-                </section>
-              )}
-              {children(projectId)}
-            </>
+            children(projectId)
           )}
         </main>
         {menu === "projects" && (
-          <Modal title="Workspace & projects" menu close={() => setMenu(null)}>
+          <Modal
+            title="Workspace & projects"
+            menu
+            close={() => setMenu(null)}
+            actions={
+              <Link
+                className="btn icon-only"
+                to="/settings/projects"
+                title="Workspace settings"
+                aria-label="Workspace settings"
+                onClick={() => setMenu(null)}
+              >
+                <Icon name="gear" />
+              </Link>
+            }
+          >
             <p className="hint">{session.user!.name ?? session.user!.login}’s workspace</p>
             <div className="project-menu-list">
-              {projects.map((p) => (
-                <button
-                  className="menu-action"
-                  key={p.id}
-                  aria-pressed={p.id === projectId}
-                  onClick={() => selectProject(p.id)}
-                >
-                  <Icon name={p.id === projectId ? "circle-check" : "folder"} />
-                  <span>{p.name}</span>
-                </button>
-              ))}
-              {!projects.length && <p>No projects yet.</p>}
+              {hasConnectedRepo ? (
+                projects.map((p) => (
+                  <button
+                    className="menu-action"
+                    key={p.id}
+                    aria-pressed={p.id === projectId}
+                    onClick={() => selectProject(p.id)}
+                  >
+                    <Icon
+                      name={
+                        p.id === projectId
+                          ? "circle-check"
+                          : p.repository
+                            ? "code-branch"
+                            : "folder"
+                      }
+                    />
+                    <span>{p.repository ?? p.name}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="modal-connect-card">
+                  <div className="modal-connect-icon">
+                    <i className="fa-brands fa-github" aria-hidden="true" />
+                  </div>
+                  <p className="modal-connect-title">Connect a repository first</p>
+                  <p className="hint">
+                    Connecting repositories will create your projects. Once connected, you can choose whichever project to work on.
+                  </p>
+                </div>
+              )}
             </div>
             <div className="dialog-actions">
               <Link className="btn" to="/projects" onClick={() => setMenu(null)}>
                 All projects
-              </Link>
-              <Link className="btn" to="/settings/projects" onClick={() => setMenu(null)}>
-                Workspace settings
               </Link>
               <button className="btn primary" onClick={() => setMenu("connect")}>
                 <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository

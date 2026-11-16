@@ -2,13 +2,25 @@ import { nowIso } from "../lib/time";
 import type { StepRow } from "./rows";
 
 export interface StepStartResult {
-  state: "started" | "already_succeeded" | "terminal";
+  state: "started" | "already_succeeded" | "busy" | "terminal";
   step: StepRow | null;
 }
 
 /**
  * Claims a step for an attempt. The conditional UPDATE is the concurrency
- * boundary: two attempts cannot both move a step from PENDING to RUNNING.
+ * boundary.
+ *
+ * Claim rules:
+ *  - PENDING steps may be claimed by any attempt (normally attempt 1).
+ *  - A RUNNING step may only be taken over by a *strictly newer* attempt.
+ *    `attempt_count` is a monotonic fence: attempt N cannot run while the row
+ *    still records an equal or higher generation. This makes simultaneous
+ *    claims by two execution contexts impossible.
+ *
+ * A RUNNING step is therefore resumable only by a later Workflow attempt. A
+ * duplicate delivery that re-enters with the same attempt number receives
+ * `busy` and must not compute the step; the executor turns that into a
+ * retryable claim conflict.
  */
 export async function startStepAttempt(
   db: D1Database,
@@ -26,21 +38,24 @@ export async function startStepAttempt(
       `UPDATE execution_steps
           SET status = 'RUNNING',
               started_at = COALESCE(started_at, ?),
-              attempt_count = CASE WHEN attempt_count < ? THEN ? ELSE attempt_count END,
+              attempt_count = ?,
               input_json = COALESCE(input_json, ?),
               updated_at = ?
         WHERE id = ? AND run_id = ? AND step_key = ?
-          AND status IN ('PENDING', 'RUNNING')`,
+          AND (
+            status = 'PENDING'
+            OR (status = 'RUNNING' AND attempt_count < ?)
+          )`,
     )
     .bind(
       now,
-      options.attemptNumber,
       options.attemptNumber,
       options.inputJson,
       now,
       options.stepId,
       options.runId,
       options.stepKey,
+      options.attemptNumber,
     )
     .run();
 
@@ -49,25 +64,45 @@ export async function startStepAttempt(
     if (step !== null && step.status === "SUCCEEDED") {
       return { state: "already_succeeded", step };
     }
+    if (step !== null && step.status === "RUNNING") {
+      return { state: "busy", step };
+    }
     return { state: "terminal", step };
   }
 
-  await db
-    .prepare(
-      `INSERT INTO step_attempts (
-         id, run_id, step_id, attempt_number, status, started_at, input_json
-       ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
-       ON CONFLICT (step_id, attempt_number) DO NOTHING`,
-    )
-    .bind(
-      `att_${crypto.randomUUID().replace(/-/g, "")}`,
-      options.runId,
-      options.stepId,
-      options.attemptNumber,
-      now,
-      options.inputJson,
-    )
-    .run();
+  const statements: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `INSERT INTO step_attempts (
+           id, run_id, step_id, attempt_number, status, started_at, input_json
+         ) VALUES (?, ?, ?, ?, 'RUNNING', ?, ?)
+         ON CONFLICT (step_id, attempt_number) DO NOTHING`,
+      )
+      .bind(
+        `att_${crypto.randomUUID().replace(/-/g, "")}`,
+        options.runId,
+        options.stepId,
+        options.attemptNumber,
+        now,
+        options.inputJson,
+      ),
+  ];
+
+  if (options.attemptNumber > 1) {
+    // A newer attempt generation supersedes older ones. Without this, a
+    // takeover would leave the previous attempt RUNNING forever, and the
+    // inspector would show two active attempts for a single step.
+    statements.push(
+      db
+        .prepare(
+          `UPDATE step_attempts SET status = 'ABANDONED', completed_at = ?
+            WHERE step_id = ? AND attempt_number < ? AND status = 'RUNNING'`,
+        )
+        .bind(now, options.stepId, options.attemptNumber),
+    );
+  }
+
+  await db.batch(statements);
 
   return { state: "started", step: await getStep(db, options.runId, options.stepKey) };
 }
@@ -102,9 +137,18 @@ export async function completeStep(
         `UPDATE execution_steps
             SET status = 'SUCCEEDED', output_json = ?, completed_at = ?, updated_at = ?,
                 error_json = NULL, error_class = NULL
-          WHERE id = ? AND run_id = ? AND step_key = ? AND status = 'RUNNING'`,
+          WHERE id = ? AND run_id = ? AND step_key = ? AND status = 'RUNNING'
+            AND attempt_count = ?`,
       )
-      .bind(options.outputJson, now, now, options.stepId, options.runId, options.stepKey),
+      .bind(
+        options.outputJson,
+        now,
+        now,
+        options.stepId,
+        options.runId,
+        options.stepKey,
+        options.attemptNumber,
+      ),
     db
       .prepare(
         `UPDATE step_attempts
@@ -187,9 +231,17 @@ export async function failStepAttempt(
         .prepare(
           `UPDATE execution_steps
               SET status = 'FAILED', error_json = ?, error_class = ?, completed_at = ?, updated_at = ?
-            WHERE id = ? AND run_id = ? AND status = 'RUNNING'`,
+            WHERE id = ? AND run_id = ? AND status = 'RUNNING' AND attempt_count = ?`,
         )
-        .bind(errorJson, options.error.class, now, now, options.stepId, options.runId),
+        .bind(
+          errorJson,
+          options.error.class,
+          now,
+          now,
+          options.stepId,
+          options.runId,
+          options.attemptNumber,
+        ),
       db
         .prepare(
           `INSERT INTO execution_events (

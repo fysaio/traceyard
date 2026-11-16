@@ -47,20 +47,22 @@ export function tooManyRequests(
   code: string,
   message: string,
   retryAfterSeconds?: number,
+  details?: unknown,
 ): ApiError {
   const headers =
     retryAfterSeconds === undefined ? undefined : { "Retry-After": String(retryAfterSeconds) };
-  return new ApiError(429, code, message, undefined, headers);
+  return new ApiError(429, code, message, details, headers);
 }
 
 export function serviceUnavailable(
   code: string,
   message: string,
   retryAfterSeconds?: number,
+  details?: unknown,
 ): ApiError {
   const headers =
     retryAfterSeconds === undefined ? undefined : { "Retry-After": String(retryAfterSeconds) };
-  return new ApiError(503, code, message, undefined, headers);
+  return new ApiError(503, code, message, details, headers);
 }
 
 export function parseWith<T>(schema: ZodType<T>, value: unknown, message: string): T {
