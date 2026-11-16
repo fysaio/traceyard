@@ -185,14 +185,34 @@ export function sameOriginMiddleware(): MiddlewareHandler<AppEnv> {
     const origin = c.req.header("origin");
     if (origin !== undefined) {
       const expected = new URL(c.req.url).origin;
-      if (origin !== expected) {
+      // A reverse proxy can forward HTTPS to an internal HTTP listener. Trust
+      // only the explicit operator-configured origin, never forwarded headers.
+      let publicOrigin: string | null = null;
+      try {
+        const configured = new URL(c.env.PUBLIC_APP_ORIGIN?.trim() ?? "");
+        const localHttp =
+          configured.protocol === "http:" &&
+          ["localhost", "127.0.0.1"].includes(configured.hostname);
+        if (
+          (configured.protocol === "https:" || localHttp) &&
+          configured.pathname === "/" &&
+          !configured.search &&
+          !configured.hash &&
+          !configured.username &&
+          !configured.password
+        ) {
+          publicOrigin = configured.origin;
+        }
+      } catch {
+        // Missing/invalid deployment configuration cannot widen trusted origins.
+      }
+      if (origin !== expected && origin !== publicOrigin) {
         throw new ApiError(403, "CROSS_ORIGIN_REJECTED", "Cross-origin writes are not permitted.");
       }
-    } else {
-      const site = c.req.header("sec-fetch-site");
-      if (site !== undefined && site !== "same-origin" && site !== "none") {
-        throw new ApiError(403, "CROSS_ORIGIN_REJECTED", "Cross-site writes are not permitted.");
-      }
+    }
+    const site = c.req.header("sec-fetch-site");
+    if (site !== undefined && site !== "same-origin" && site !== "none") {
+      throw new ApiError(403, "CROSS_ORIGIN_REJECTED", "Cross-site writes are not permitted.");
     }
 
     await next();

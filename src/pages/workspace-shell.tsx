@@ -134,7 +134,7 @@ export function WorkspaceShell({
             </button>
             <button
               className={"btn project-switch " + (!hasConnectedRepo ? "connect-prompt" : "")}
-              aria-label={hasConnectedRepo ? "Switch project" : "Connect repository"}
+              aria-label={hasConnectedRepo ? "Switch project" : "Connect repo"}
               aria-haspopup="dialog"
               disabled={q.isPending || q.isError}
               onClick={() => setMenu("projects")}
@@ -145,7 +145,7 @@ export function WorkspaceShell({
                   ? "Loading projects…"
                   : hasConnectedRepo
                     ? (project?.repository ?? project?.name ?? "Choose a project")
-                    : "Connect repository"}
+                    : "Connect repo"}
               </span>
               <Icon name={hasConnectedRepo ? "chevron-down" : "plus"} />
             </button>
@@ -195,8 +195,9 @@ export function WorkspaceShell({
         </main>
         {menu === "projects" && (
           <Modal
-            title="Workspace & projects"
+            title="Projects"
             menu
+            className="project-switcher"
             close={() => setMenu(null)}
             actions={
               <Link
@@ -237,19 +238,17 @@ export function WorkspaceShell({
                   <div className="modal-connect-icon">
                     <i className="fa-brands fa-github" aria-hidden="true" />
                   </div>
-                  <p className="modal-connect-title">Connect a repository first</p>
-                  <p className="hint">
-                    Connecting repositories will create your projects. Once connected, you can choose whichever project to work on.
-                  </p>
+                  <p className="modal-connect-title">Connect your first repo</p>
+                  <p className="hint">Your connected repos appear here as projects.</p>
                 </div>
               )}
             </div>
-            <div className="dialog-actions">
+            <div className="dialog-actions project-menu-actions">
               <Link className="btn" to="/projects" onClick={() => setMenu(null)}>
                 All projects
               </Link>
               <button className="btn primary" onClick={() => setMenu("connect")}>
-                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
+                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repo
               </button>
             </div>
           </Modal>

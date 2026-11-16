@@ -32,6 +32,8 @@ Keep both private-key files out of Git and put the resulting key in the deployme
 
 These are different from `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`, which continue to authenticate user sign-in. No personal GitHub token is requested from the developer.
 
+When developing through an HTTPS tunnel or reverse proxy, set `PUBLIC_APP_ORIGIN` to the exact public origin and restart Traceyard after changing it. Cookie-authenticated writes accept this explicitly configured origin even when the proxy forwards to local HTTP. Other origins and cross-site browser writes remain blocked; forwarded headers do not grant access. An already installed app offers **Manage access** for changing its repository selection rather than asking you to install it again.
+
 ## GitHub: developer journey
 
 1. Sign in and select **Connect repository** (also available in the project switcher). Install Traceyard on selected personal GitHub repositories if necessary, return and refresh the list. Signed installation webhooks and the signed-in identity establish access; callback query strings do not grant it.

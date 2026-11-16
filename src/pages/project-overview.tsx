@@ -3,6 +3,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ProjectLink as Link } from "../components/project-link";
 import { Modal, Icon, ErrorMessage } from "../components/product-ui";
+import {
+  RepositoryPicker,
+  type RepositoryChoice,
+  type RepositoryChoices,
+} from "../components/repository-picker";
 import { integrationRequest, integrations } from "../lib/integrations-api";
 import type { ProjectSummary } from "../lib/api";
 import { useWorkspace, savePreference } from "../lib/workspace";
@@ -136,7 +141,7 @@ export function ProjectOverview({ projectId }: { projectId: string }) {
           ) : (
             <button className="btn" onClick={() => setConnect("github")}>
               <i className="fa-brands fa-github" aria-hidden="true" />
-              Connect repository
+              Connect repo
             </button>
           )}
         </div>
@@ -702,24 +707,23 @@ export function ConnectRepository({
     cache = useQueryClient(),
     navigate = useNavigate();
   const q = useQuery({
-    queryKey: ["github-repositories"],
+    queryKey: ["github-repositories", session.user!.id],
     queryFn: async () => {
-      const r = await fetch("/api/repositories");
+      const r = await fetch("/api/repositories", { credentials: "same-origin" });
       const body = (await r.json()) as {
-        data: {
-          configured: boolean;
-          installUrl: string | null;
-          items: { id: number; name: string; installationId: number }[];
-        };
+        data: RepositoryChoices;
         error?: { message: string };
       };
       if (!r.ok) throw Error(body.error?.message ?? "Repositories could not be loaded.");
       return body.data;
     },
     enabled: !local,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
   const connect = useMutation({
-    mutationFn: async (r: { id: number; installationId: number }) => {
+    mutationFn: async (r: RepositoryChoice) => {
       if (attachToProject && projectId) {
         await integrationRequest(projectId, "repository", "POST", {
           repositoryId: r.id,
@@ -733,6 +737,7 @@ export function ConnectRepository({
       }
       const response = await fetch("/api/repositories/connect", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repositoryId: r.id, installationId: r.installationId }),
       });
@@ -745,6 +750,7 @@ export function ConnectRepository({
       return body.data.project;
     },
     onSuccess: (project) => {
+      void cache.invalidateQueries({ queryKey: ["workspace-projects"] });
       cache.setQueryData<ProjectSummary[]>(["projects", session.user!.id], (old) => [
         ...(old ?? []).filter((p) => p.id !== project.id),
         project,
@@ -758,8 +764,9 @@ export function ConnectRepository({
   const env = "TRACEYARD_ORIGIN=" + window.location.origin + "\nTRACEYARD_KEY=<your project key>\n";
   return (
     <Modal
-      title={local ? "Connect your local project" : "Connect a GitHub repository"}
+      title={local ? "Connect your local project" : "Connect a repo"}
       close={close}
+      className={local ? "" : "repository-dialog"}
     >
       {local ? (
         <>
@@ -795,68 +802,19 @@ export function ConnectRepository({
           </p>
         </>
       ) : (
-        <>
-          <p>
-            Choose a repository to create or open its project. Source discovery starts in the
-            background. Traceyard also prepares a setup PR; merging it runs the first checks on
-            GitHub. Later checks run on request.
-          </p>
-          <ErrorMessage error={q.error || connect.error} />
-          {q.isPending ? (
-            <p role="status">Loading repositories…</p>
-          ) : q.data?.configured ? (
-            <>
-              <div className="repository-choices section">
-                {q.data.items.map((r) => (
-                  <button
-                    key={r.id}
-                    className="repository-choice"
-                    disabled={connect.isPending}
-                    onClick={() => connect.mutate(r)}
-                  >
-                    <i className="fa-brands fa-github" aria-hidden="true" />
-                    <strong>{r.name}</strong>
-                    <span>{connect.isPending ? "Connecting…" : "Connect"}</span>
-                    <Icon name="arrow-right" />
-                  </button>
-                ))}
-              </div>
-              {!q.data.items.length && (
-                <p className="section">
-                  No repositories available. Install Traceyard below, select a personal repository,
-                  then refresh.
-                </p>
-              )}
-              {q.data.installUrl && (
-                <a
-                  className="btn primary section"
-                  href={q.data.installUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Install Traceyard on GitHub
-                </a>
-              )}
-              <button className="btn section" onClick={() => void q.refetch()}>
-                Refresh repositories
-              </button>
-            </>
-          ) : (
-            <div className="activity-empty section">
-              <h3>GitHub connection needs server setup</h3>
-              <p>
-                The Traceyard deployment needs its GitHub App credentials, signed webhook and pinned
-                runner version before repositories can be listed.
-              </p>
-              <a className="text-link" href="/repository-setup">
-                Deployment setup instructions <Icon name="arrow-up-right-from-square" />
-              </a>
-            </div>
-          )}
-          <button className="text-link section" onClick={() => setLocal(true)}>
-            Connect a local project instead
-          </button>
-        </>
+        <RepositoryPicker
+          data={q.data}
+          loading={q.isPending}
+          refreshing={q.isFetching}
+          error={q.error || connect.error}
+          connectingId={connect.isPending ? connect.variables?.id : undefined}
+          onConnect={(repo) => connect.mutate(repo)}
+          onRefresh={() => {
+            connect.reset();
+            void q.refetch();
+          }}
+          onLocal={() => setLocal(true)}
+        />
       )}
     </Modal>
   );
