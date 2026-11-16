@@ -143,7 +143,7 @@ function ProjectCard({
       </p>
       <div className="actions">
         <button className="btn" onClick={open}>
-          {current ? "Open workflows" : "Open project"}
+          {current ? "Open project" : "Open project"}
         </button>
         <button className="btn" onClick={() => setEditing(true)}>
           Rename

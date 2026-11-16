@@ -180,6 +180,14 @@ async function failQueuedRun(env: Env, run: RunRow, code: string, message: strin
 
 async function cleanupExpiredData(db: D1Database): Promise<number> {
   const now = nowIso();
+  await db
+    .prepare("DELETE FROM github_webhook_deliveries WHERE received_at<?")
+    .bind(isoFromNow(-30 * 24 * 60 * 60 * 1000))
+    .run();
+  await db
+    .prepare("DELETE FROM repository_jobs WHERE updated_at<?")
+    .bind(isoFromNow(-30 * 24 * 60 * 60 * 1000))
+    .run();
   // D1 reports cascaded rows in `meta.changes`, so use RETURNING to count the
   // runs that were actually deleted rather than their dependent rows.
   const deleted = await db

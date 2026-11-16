@@ -2,6 +2,7 @@ import { createApp } from "./api/app";
 import { handleQueueBatch } from "./queue/consumer";
 import { runScheduledJobs } from "./jobs/scheduled";
 
+export { RepositoryDiscoveryWorkflow } from "./repositories/workflow";
 export { RunExecutionWorkflow } from "./execution/workflow";
 
 const app = createApp();
