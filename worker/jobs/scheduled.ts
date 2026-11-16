@@ -62,6 +62,14 @@ export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
   summary.failedStaleRuns = await failStaleQueuedRuns(env);
   summary.deletedRuns = await cleanupExpiredData(env.DB);
   summary.circuitOpened = await updateCircuitBreaker(env);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM repository_check_requests WHERE created_at<?").bind(
+      isoFromNow(-30 * 24 * 60 * 60 * 1000),
+    ),
+    env.DB.prepare("DELETE FROM repository_test_results WHERE created_at<?").bind(
+      isoFromNow(-30 * 24 * 60 * 60 * 1000),
+    ),
+  ]);
   await runIntegrationJobs(env);
 
   log("info", "scheduled.reconcile", { ...summary });

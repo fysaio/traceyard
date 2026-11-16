@@ -425,6 +425,7 @@ describe("repository connection and execution evidence", () => {
       if (url.endsWith("/pulls"))
         return Response.json({ html_url: "https://github.com/repository-810/somni/pull/1" });
       if (url.includes("/dispatches")) return new Response(null, { status: 204 });
+      if (url.endsWith("/cancel")) return new Response(null, { status: 202 });
       if (url.endsWith("/commits/main")) return Response.json({ sha: "a".repeat(40) });
       if (url.includes("/git/trees/"))
         return Response.json({
@@ -520,6 +521,14 @@ describe("repository connection and execution evidence", () => {
       (await webhook({ action: "in_progress", repository: { id: 99 }, workflow_run: workflow }))
         .status,
     ).toBe(200);
+    expect(
+      (await invoke("/api/projects/" + a.projectId + "/checks/555-1/cancel", "POST")).status,
+    ).toBe(202);
+    expect(
+      await env.DB.prepare("SELECT status FROM repository_jobs WHERE project_id=? AND id='555-1'")
+        .bind(a.projectId)
+        .first(),
+    ).toEqual({ status: "RUNNING" });
     await webhook({
       action: "completed",
       repository: { id: 99 },

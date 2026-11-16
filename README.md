@@ -6,6 +6,8 @@ This branch contains the integrated application. The separate chatgpt.site UI pr
 
 ## Product flow
 
+The connected application UI now follows **Projects → Project → Operation → Run**, with saved local request tests, actual execution timelines, check progress, comparison and in-context test settings. See [project experience](docs/PROJECT_EXPERIENCE.md) for implemented actions, evidence rules and verification limits.
+
 **Connect repository** creates or opens its project, starts source discovery and prepares a one-time setup PR in the background. Merging that PR starts the first existing Node build/tests; later **Check project** runs source refresh and tests together. Jobs are short-lived and bounded, with no ordinary-push autoruns.
 
 **Project** is now the main workspace: connect source, inspect discovered operations, review project checks and investigate actual application runs in one place. External spans and Traceyard-managed runs share the same activity list; selecting an external run opens its steps beside it. **Build** retains the optional workflow editor. Gateway and workflow experiments remain available through the account menu.

@@ -439,6 +439,66 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     if (old && old.source !== who.source)
       throw conflict("RUN_SOURCE_MISMATCH", "This check belongs to another runner source.");
     if (old && old.status !== "RUNNING") return c.json(data(c, { received: true }));
+    if (
+      b.testResults?.length &&
+      (b.phase !== "test" || !["SUCCEEDED", "FAILED"].includes(b.status))
+    )
+      throw badRequest(
+        "TEST_PHASE_REQUIRED",
+        "Completed request results belong to the test phase.",
+      );
+    if (
+      b.testResults?.some(
+        (result) =>
+          result.status === "SUCCEEDED" &&
+          (result.checks.length === 0 ||
+            result.checks.some((check) => !check.passed) ||
+            !!result.error),
+      )
+    )
+      throw badRequest(
+        "TEST_VERDICT_MISMATCH",
+        "A passed request result needs passing assertions and no error.",
+      );
+    if (b.status === "SUCCEEDED" && b.testResults?.some((result) => result.status === "FAILED"))
+      throw badRequest(
+        "TEST_VERDICT_MISMATCH",
+        "A successful phase cannot contain a failed request test.",
+      );
+    const safeResults = [];
+    const requestSnapshot = b.testResults?.length
+      ? await c.env.DB.prepare(
+          "SELECT snapshot_json FROM repository_check_requests WHERE project_id=? AND runner_id=? LIMIT 1",
+        )
+          .bind(who.projectId, b.id)
+          .first<{ snapshot_json: string }>()
+      : null;
+    const snapshotCases = requestSnapshot
+      ? (
+          JSON.parse(requestSnapshot.snapshot_json) as {
+            cases: { id: string; operationKey: string; captureResponse: boolean }[];
+          }
+        ).cases
+      : [];
+    for (const result of b.testResults ?? []) {
+      const saved = await c.env.DB.prepare(
+        "SELECT operation_key,config_json FROM repository_test_cases WHERE project_id=? AND id=?",
+      )
+        .bind(who.projectId, result.caseId)
+        .first<{ operation_key: string; config_json: string }>();
+      const frozen = snapshotCases.find((item) => item.id === result.caseId);
+      if ((frozen?.operationKey ?? saved?.operation_key) !== result.operationKey)
+        throw badRequest(
+          "TEST_CASE_MISMATCH",
+          "The result does not belong to a saved test in this project.",
+        );
+      const clean = { ...result };
+      if (!(
+        frozen?.captureResponse ?? (saved ? JSON.parse(saved.config_json).captureResponse : false)
+      ))
+        delete clean.responsePreview;
+      safeResults.push(clean);
+    }
     const events = (old ? JSON.parse(old.events_json) : []) as {
       phase: string;
       status: string;
@@ -483,6 +543,21 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
         nowIso(),
       )
       .run();
+    if (safeResults.length) {
+      for (const result of safeResults)
+        await c.env.DB.prepare(
+          "INSERT INTO repository_test_results(project_id,check_id,case_id,trace_id,result_json,created_at) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+        )
+          .bind(
+            who.projectId,
+            b.id,
+            result.caseId,
+            result.traceId,
+            JSON.stringify(redact(result)),
+            nowIso(),
+          )
+          .run();
+    }
     if (b.operations && (who.source === "github" || repo.repository_id === null))
       await c.env.DB.prepare(
         "UPDATE project_repositories SET commit_sha=?,scan_json=?,status='DISCOVERED',last_error=NULL,updated_at=? WHERE project_id=?",

@@ -1,5 +1,7 @@
 # Frontend / backend contracts
 
+The connected application journey and request-runner contracts are detailed in [project experience](PROJECT_EXPERIENCE.md). New owner-scoped APIs expose `/api/workspace/projects`, project `catalog`, `operations/:key`, `runner-config`, operation `cases`/`test`, `application-runs/:trace`, check detail/cancellation and a reviewable runner upgrade PR. `/api/v1/repository/configuration` supplies a project-scoped runner manifest/snapshot through the existing key or verified GitHub OIDC identity. Migration 0011 adds these configurations, case snapshots and retained results.
+
 The React app and API run on one origin. Cookie-authenticated writes preserve origin checks. Project routes verify authenticated ownership; `/api/v1` routes require a scoped project API key, except repository runner reports and OTLP ingestion, which also accept a verified GitHub Actions OIDC identity restricted to the connected project. Missing configuration produces a setup/error state, never a generated account or fabricated result.
 
 | Surface                   | Contract                                                                                                                                                             |

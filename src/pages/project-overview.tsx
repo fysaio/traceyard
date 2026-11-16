@@ -685,11 +685,14 @@ export function ProjectActivity({
   );
 }
 export function ConnectRepository({
+  projectId,
+  attachToProject = false,
   mode,
   close,
   connected,
 }: {
   projectId?: string;
+  attachToProject?: boolean;
   mode: "github" | "local";
   close: () => void;
   connected: () => void;
@@ -717,6 +720,17 @@ export function ConnectRepository({
   });
   const connect = useMutation({
     mutationFn: async (r: { id: number; installationId: number }) => {
+      if (attachToProject && projectId) {
+        await integrationRequest(projectId, "repository", "POST", {
+          repositoryId: r.id,
+          installationId: r.installationId,
+        });
+        const project = cache
+          .getQueryData<ProjectSummary[]>(["projects", session.user!.id])
+          ?.find((p) => p.id === projectId);
+        if (!project) throw Error("Project is no longer available.");
+        return project;
+      }
       const response = await fetch("/api/repositories/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -736,7 +750,7 @@ export function ConnectRepository({
         project,
       ]);
       savePreference("project:" + session.user!.id, project.id);
-      navigate("/?project=" + encodeURIComponent(project.id));
+      navigate("/projects/" + encodeURIComponent(project.id));
       connected();
     },
   });

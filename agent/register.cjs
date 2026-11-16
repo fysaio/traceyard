@@ -13,6 +13,13 @@ const sdk = new NodeSDK({
 });
 try {
   sdk.start();
+  if (process.env.TRACEYARD_FLUSH_ON_TERM === "true")
+    process.once("SIGTERM", () => {
+      sdk
+        .shutdown()
+        .catch(() => console.warn("Traceyard telemetry could not be flushed."))
+        .finally(() => process.exit(0));
+    });
   // Short test processes must flush their actual spans before exiting naturally.
   process.once("beforeExit", () =>
     sdk.shutdown().catch(() => console.warn("Traceyard telemetry could not be flushed.")),
