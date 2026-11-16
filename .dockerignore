@@ -1,0 +1,7 @@
+**
+!package.json
+!package-lock.json
+!agent/
+!agent/**
+!runner/
+!runner/Dockerfile

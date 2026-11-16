@@ -1,5 +1,5 @@
-import { useState, type ReactNode, type FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useRef, useState, type ReactNode, type FormEvent } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon, Modal, ErrorMessage, downloadJson } from "../components/product-ui";
 import { ConnectRepository } from "./project-overview";
@@ -78,7 +78,6 @@ export function RunStatus({ value }: { value: string }) {
           SKIPPED: "Not tested",
           CANCELLED: "Cancelled",
           DISCOVERING: "Discovering",
-          AWAITING_MERGE: "Setup to approve",
           PREPARING: "Preparing",
           READY: "Connected",
         } as Record<string, string>
@@ -258,8 +257,8 @@ export function ProjectsPage() {
                 </span>
                 {p.lastCheck ? (
                   <RunStatus value={p.lastCheck} />
-                ) : p.setupState && p.setupState !== "NOT_STARTED" ? (
-                  <RunStatus value={p.setupState} />
+                ) : p.discoveryStatus ? (
+                  <RunStatus value={p.discoveryStatus} />
                 ) : (
                   <span className="flow-muted">Ready to connect</span>
                 )}
@@ -308,68 +307,35 @@ function SourceLink({ catalog, operation }: { catalog: Catalog; operation: Opera
   ) : null;
 }
 function SetupProgress({ catalog, refresh }: { catalog: Catalog; refresh: () => void }) {
-  const p = catalog.project.id,
-    r = catalog.repository,
-    cache = useQueryClient();
+  const r = catalog.repository;
   const action = useMutation({
-    mutationFn: (kind: string) => integrationRequest(p, "repository/" + kind, "POST"),
-    onSuccess: () => {
-      refresh();
-      void cache.invalidateQueries({ queryKey: ["repository", p] });
-    },
+    mutationFn: () => integrationRequest(catalog.project.id, "repository/scan", "POST"),
+    onSuccess: refresh,
   });
-  if (!r?.repository_id) return null;
-  const needsSetup = !r.runner_enabled,
-    failed = !!r.check_setup_error || r.status === "FAILED";
-  if (!needsSetup && r.status !== "DISCOVERING" && !failed) return null;
+  if (!r?.repository_id || !["DISCOVERING", "FAILED"].includes(r.status)) return null;
   return (
-    <section className="flow-setup-banner" aria-label="Connection progress">
+    <section className="flow-setup-banner" aria-label="Source discovery">
       <div className="flow-setup-line">
         <span className="flow-icon">
-          <Icon
-            name={
-              failed
-                ? "circle-exclamation"
-                : r.status === "DISCOVERING"
-                  ? "circle-notch"
-                  : "code-pull-request"
-            }
-          />
+          <Icon name={r.status === "DISCOVERING" ? "circle-notch" : "circle-exclamation"} />
         </span>
         <div>
           <h2>
-            {r.status === "DISCOVERING"
-              ? "Getting to know your code"
-              : needsSetup
-                ? "One approval, then your first run"
-                : "Connection needs attention"}
+            {r.status === "DISCOVERING" ? "Reading your repository" : "Source scan needs attention"}
           </h2>
           <p>
             {r.status === "DISCOVERING"
-              ? `${catalog.filesScanned} source files read. Operations appear as they’re discovered.`
-              : needsSetup
-                ? "Review and merge the runner setup PR. Its first build and tests start automatically."
-                : (r.last_error ?? r.check_setup_error)}
+              ? "Operations appear as they are discovered. Existing discoveries stay available while this scan runs."
+              : (r.last_error ??
+                "The scan stopped. Existing discoveries and recorded runs are still available.")}
           </p>
         </div>
-        <div className="flow-actions">
-          {needsSetup && r.setup_pr_url ? (
-            <a className="btn primary" target="_blank" rel="noreferrer" href={r.setup_pr_url}>
-              Review setup PR
-              <Icon name="arrow-up-right-from-square" />
-            </a>
-          ) : (
-            <button
-              className="btn"
-              disabled={action.isPending}
-              onClick={() => action.mutate(needsSetup ? "setup" : "scan")}
-            >
-              {action.isPending ? "Starting…" : needsSetup ? "Prepare setup PR" : "Retry discovery"}
-            </button>
-          )}
-        </div>
+        {r.status === "FAILED" && (
+          <button className="btn" disabled={action.isPending} onClick={() => action.mutate()}>
+            {action.isPending ? "Starting…" : "Retry scan"}
+          </button>
+        )}
       </div>
-      {r.check_setup_error && <p className="flow-error">{r.check_setup_error}</p>}
       <ErrorMessage error={action.error} />
     </section>
   );
@@ -377,14 +343,23 @@ function SetupProgress({ catalog, refresh }: { catalog: Catalog; refresh: () => 
 export function ProjectPage() {
   const { projectId } = useWorkspace(),
     q = useCatalog(projectId),
-    cache = useQueryClient();
+    cache = useQueryClient(),
+    navigate = useNavigate(),
+    checkRequest = useRef(crypto.randomUUID());
   const [search, setSearch] = useState(""),
     [onlyFailed, setOnlyFailed] = useState(false),
     [connect, setConnect] = useState(false),
     [settings, setSettings] = useState(false);
   const run = useMutation({
-    mutationFn: () => integrationRequest(projectId, "repository/analyze", "POST"),
-    onSuccess: () => void cache.invalidateQueries({ queryKey: ["catalog", projectId] }),
+    mutationFn: () =>
+      integrationRequest<{ url: string }>(projectId, "repository/analyze", "POST", {
+        requestId: checkRequest.current,
+      }),
+    onSuccess: (result) => {
+      checkRequest.current = crypto.randomUUID();
+      void cache.invalidateQueries({ queryKey: ["catalog", projectId] });
+      navigate(result.url);
+    },
   });
   if (q.isPending) return <LoadingPage />;
   if (q.error || !q.data) return <LoadingError error={q.error} retry={() => void q.refetch()} />;
@@ -394,10 +369,7 @@ export function ProjectPage() {
     );
   const latest = d.jobs[0],
     latestStatus = latest ? checkDisplayStatus(latest, q.dataUpdatedAt) : "",
-    busy =
-      latestStatus === "RUNNING" ||
-      (d.repository?.check_setup_state === "QUEUED" &&
-        q.dataUpdatedAt - Date.parse(d.repository.check_setup_updated_at ?? "") < 10 * 60000);
+    busy = ["RUNNING", "QUEUED"].includes(latestStatus);
   return (
     <div className="flow-page">
       <Crumbs items={[{ label: d.repository?.full_name ?? d.project.name }]} />
@@ -417,12 +389,7 @@ export function ProjectPage() {
             {d.repository?.repository_id ? (
               <button
                 className="btn primary"
-                disabled={
-                  run.isPending ||
-                  busy ||
-                  !d.repository.runner_enabled ||
-                  d.repository.status === "DISCOVERING"
-                }
+                disabled={run.isPending || busy || !d.executionAvailable}
                 onClick={() => run.mutate()}
               >
                 <Icon name={busy ? "circle-notch" : "play"} />
@@ -439,6 +406,12 @@ export function ProjectPage() {
       />
       <ErrorMessage error={run.error} />
       <SetupProgress catalog={d} refresh={() => void q.refetch()} />
+      {d.executionAvailable === false && (
+        <p className="flow-notice" role="status">
+          Checks are temporarily unavailable. You can still explore source operations and previous
+          results.
+        </p>
+      )}
       {latest && (
         <Link className="flow-check-summary" to={checkPath(projectId, latest.id)}>
           <span className="flow-icon small">
@@ -711,7 +684,8 @@ interface OperationData extends Catalog {
 export function OperationPage() {
   const { projectId } = useWorkspace(),
     { operationKey = "" } = useParams(),
-    cache = useQueryClient();
+    cache = useQueryClient(),
+    testRequest = useRef({ caseId: "", id: crypto.randomUUID() });
   const q = useQuery({
     queryKey: ["operation", projectId, operationKey],
     queryFn: () =>
@@ -726,14 +700,18 @@ export function OperationPage() {
     [notice, setNotice] = useState(""),
     [pendingDelete, setPendingDelete] = useState<SavedTestCase | null>(null);
   const test = useMutation({
-    mutationFn: (caseId: string) =>
-      integrationRequest<{ url: string }>(
+    mutationFn: (caseId: string) => {
+      if (testRequest.current.caseId !== caseId)
+        testRequest.current = { caseId, id: crypto.randomUUID() };
+      return integrationRequest<{ url: string }>(
         projectId,
         `operations/${encodeURIComponent(operationKey)}/test`,
         "POST",
-        { caseId },
-      ),
+        { caseId, requestId: testRequest.current.id },
+      );
+    },
     onSuccess: () => {
+      testRequest.current = { caseId: "", id: crypto.randomUUID() };
       setNotice("Test requested. Its check and recorded run will appear in this project.");
       void cache.invalidateQueries({ queryKey: ["catalog", projectId] });
     },
@@ -880,7 +858,7 @@ export function OperationPage() {
                   </button>
                   <button
                     className="btn primary"
-                    disabled={test.isPending || !d.repository?.runner_enabled}
+                    disabled={test.isPending || !d.executionAvailable}
                     onClick={() => test.mutate(c.id)}
                   >
                     <Icon name="play" />
@@ -891,9 +869,10 @@ export function OperationPage() {
             ))}
           </div>
         )}
-        {!!d.cases.length && !d.repository?.runner_enabled && (
+        {!!d.cases.length && !d.executionAvailable && (
           <p className="flow-note">
-            GitHub execution needs the setup PR merged first. For a local project, run{" "}
+            Managed checks are unavailable right now. Your saved tests and discovered operations
+            remain available. For local execution, run{" "}
             <code>node /path/to/traceyard/agent/cli.mjs run . --case {d.cases[0]?.id}</code> from
             your application folder.
           </p>
@@ -948,9 +927,6 @@ function TestSettings({
 }) {
   const [value, setValue] = useState(config),
     cache = useQueryClient();
-  const upgrade = useMutation({
-    mutationFn: () => integrationRequest<{ url: string }>(projectId, "repository/upgrade", "POST"),
-  });
   const save = useMutation({
     mutationFn: () => integrationRequest(projectId, "runner-config", "PUT", value),
     onSuccess: () => {
@@ -965,25 +941,6 @@ function TestSettings({
         These settings are used by the next runner. Keep provider keys and database credentials in
         your test environment; don’t paste them here.
       </p>
-      <div className="flow-upgrade">
-        <p className="flow-note">
-          Already installed an earlier runner? Propose an upgrade before using saved request tests.
-        </p>
-        <button
-          className="btn flow-space"
-          disabled={upgrade.isPending}
-          onClick={() => upgrade.mutate()}
-        >
-          {upgrade.isPending ? "Preparing PR…" : "Prepare runner upgrade PR"}
-        </button>
-        <ErrorMessage error={upgrade.error} />
-        {upgrade.data && (
-          <a className="btn flow-space" href={upgrade.data.url} target="_blank" rel="noreferrer">
-            Review runner upgrade
-            <Icon name="arrow-up-right-from-square" />
-          </a>
-        )}
-      </div>
       <form
         className="flow-form"
         onSubmit={(e) => {
@@ -1473,27 +1430,37 @@ export function ProjectCheckPage() {
       at: string;
     }[];
   const displayStatus = checkDisplayStatus(d.job, q.dataUpdatedAt);
-  const phases = ["discovery", "install", "build", "test", "complete"].map((name) => {
+  const phases = [
+    ...(d.job.source === "managed" ? ["checkout"] : []),
+    "discovery",
+    "install",
+    "build",
+    "test",
+    "complete",
+  ].map((name) => {
     const event =
       [...events].reverse().find((e) => e.phase === name) ??
-      (name === "complete" && d.job.status !== "RUNNING"
+      (name === "complete" && !["RUNNING", "QUEUED"].includes(d.job.status)
         ? {
             phase: "complete",
             status: d.job.status,
-            message: "The runner has ended. Open GitHub logs for the final command output.",
+            message:
+              d.job.source === "github"
+                ? "The runner has ended. Open GitHub logs for the final command output."
+                : "This check has ended. Review the reported stages above.",
             at: d.job.updated_at,
           }
         : undefined);
     return {
       name,
       event:
-        event?.status === "RUNNING" && displayStatus !== "RUNNING"
+        event?.status === "RUNNING" && !["RUNNING", "QUEUED"].includes(displayStatus)
           ? {
               ...event,
               status: displayStatus === "SUCCEEDED" ? "SKIPPED" : displayStatus,
               message:
                 displayStatus === "STALE"
-                  ? "No recent update. Verify the result on GitHub."
+                  ? "No recent runner update. The outcome has not been confirmed."
                   : "The check ended before a final update for this stage was received. See the result below.",
             }
           : event,
@@ -1522,27 +1489,36 @@ export function ProjectCheckPage() {
       <ErrorMessage error={cancel.error} />
       {cancel.isSuccess && (
         <p role="status" className="flow-notice">
-          Cancellation requested. Waiting for GitHub to confirm it has stopped.
+          {d.job.source === "managed"
+            ? "Check cancelled. Its discovered operations remain available."
+            : "Cancellation requested. Waiting for GitHub to confirm it has stopped."}
         </p>
       )}
-      {d.job.source === "github" && d.job.status === "RUNNING" && (
-        <button
-          className="btn flow-space"
-          disabled={cancel.isPending || cancel.isSuccess}
-          onClick={() => cancel.mutate()}
-        >
-          Cancel check
-        </button>
-      )}
+      {["github", "managed"].includes(d.job.source) &&
+        ["RUNNING", "QUEUED"].includes(d.job.status) && (
+          <button
+            className="btn flow-space"
+            disabled={cancel.isPending || cancel.isSuccess}
+            onClick={() => cancel.mutate()}
+          >
+            Cancel check
+          </button>
+        )}
       <div className="flow-run-facts">
         <RunStatus value={displayStatus} />
-        <span>{d.job.source === "github" ? "GitHub runner" : "Local runner"}</span>
+        <span>
+          {d.job.source === "managed"
+            ? "Traceyard runner"
+            : d.job.source === "github"
+              ? "GitHub runner"
+              : "Local runner"}
+        </span>
       </div>
       {displayStatus === "STALE" && (
         <p className="flow-notice" role="status">
-          Traceyard has not received progress for over 15 minutes. This does not mean the tests are
-          still running. Open GitHub logs to verify the result. This page also checks GitHub
-          automatically.{" "}
+          {d.job.source === "github"
+            ? "No progress for over 15 minutes. This page checks GitHub automatically; open GitHub logs to verify the outcome."
+            : "No recent runner update. This check's outcome is unconfirmed. Traceyard will close an expired check without repeating it automatically."}{" "}
           <button className="btn quiet" disabled={q.isFetching} onClick={() => void q.refetch()}>
             Refresh status
           </button>
@@ -1573,6 +1549,7 @@ export function ProjectCheckPage() {
                   {
                     (
                       {
+                        checkout: "Download repository",
                         discovery: "Read source",
                         install: "Install dependencies",
                         build: "Build application",
@@ -1594,18 +1571,20 @@ export function ProjectCheckPage() {
         runs={catalog.data?.runs.filter((r) => r.checkId === checkId) ?? []}
         title="Runs recorded during this check"
         emptyTitle={
-          displayStatus === "RUNNING"
+          ["RUNNING", "QUEUED"].includes(displayStatus)
             ? "No application activity recorded so far"
             : "No application activity was recorded"
         }
         emptyDescription={
           displayStatus === "STALE"
-            ? "The check's current status could not be confirmed. Verify its result on GitHub before starting another check."
+            ? "The check’s outcome could not be confirmed. Review its status before starting another attempt."
             : d.job.status === "FAILED"
               ? "This project check failed. Review the failed stage above, correct it, then run Check project again. A failed check and a failed application run are different results; tests that stop before requests or mock those requests may record no application activity."
-              : d.job.status === "RUNNING"
-                ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
-                : "No supported runtime activity was received from this check. Mocked or in-process tests may pass without producing traces. Run a saved HTTP request test to record a real request through your application."
+              : d.job.status === "QUEUED"
+                ? "This check is waiting for an isolated runner. Your source operations are available now."
+                : d.job.status === "RUNNING"
+                  ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
+                  : "No supported runtime activity was received from this check. Mocked or in-process tests may pass without producing traces. Run a saved HTTP request test to record a real request through your application."
         }
       />
     </div>

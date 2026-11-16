@@ -6,6 +6,7 @@ import { sha256Hex } from "../lib/crypto";
 import { getOwnedProject } from "../persistence/projects";
 import { notFound } from "../api/errors";
 import { syncRepositoryChecks } from "./check-sync";
+import { managedChecksAvailable } from "./managed";
 export async function operationKey(file: string, name: string) {
   return "op_" + (await sha256Hex(file + "\0" + name)).slice(0, 32);
 }
@@ -68,8 +69,9 @@ export async function projectCatalog(
       .bind(projectId)
       .all<ApplicationRun>(),
   ]);
-  const scan = repository?.scan_json
-    ? (JSON.parse(repository.scan_json) as {
+  const sourceIndex = repository?.scan_json ?? repository?.scan_progress_json;
+  const scan = sourceIndex
+    ? (JSON.parse(sourceIndex) as {
         operations: DiscoveredOperation[];
         warnings: string[];
         filesScanned: number;
@@ -176,5 +178,6 @@ export async function projectCatalog(
       : runnerConfigSchema.parse({}),
     warnings: scan?.warnings ?? [],
     filesScanned: scan?.filesScanned ?? 0,
+    executionAvailable: managedChecksAvailable(env),
   };
 }

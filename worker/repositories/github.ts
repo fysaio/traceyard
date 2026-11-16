@@ -14,23 +14,20 @@ export function githubConfigured(env: Env) {
     env.GITHUB_APP_ID &&
     env.GITHUB_APP_SLUG &&
     env.GITHUB_APP_PRIVATE_KEY &&
-    env.GITHUB_APP_WEBHOOK_SECRET &&
-    /^[a-f0-9]{40}$/.test(env.TRACEYARD_RUNNER_REF ?? "")
+    env.GITHUB_APP_WEBHOOK_SECRET
   );
 }
-export async function githubRequest<T>(
+export async function installationAccessToken(
   env: Env,
   installationId: number,
-  path: string,
-  init: RequestInit = {},
   fetcher: typeof fetch = fetch,
-): Promise<T> {
+  repositoryId?: number,
+): Promise<string> {
   if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY)
     throw serviceUnavailable(
       "GITHUB_APP_UNCONFIGURED",
       "Repository connection needs the Traceyard GitHub App configuration.",
     );
-  if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
   const encode = (v: unknown) => base64UrlEncode(new TextEncoder().encode(JSON.stringify(v))),
     now = Math.floor(Date.now() / 1000);
   const content =
@@ -70,7 +67,19 @@ export async function githubRequest<T>(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
       method: "POST",
-      headers: { ...headers, Authorization: "Bearer " + appToken },
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + appToken,
+      },
+      ...(repositoryId
+        ? {
+            body: JSON.stringify({
+              repository_ids: [repositoryId],
+              permissions: { contents: "read" },
+            }),
+          }
+        : {}),
       signal: AbortSignal.timeout(10000),
     },
   );
@@ -80,13 +89,26 @@ export async function githubRequest<T>(
       "GitHub installation access could not be verified.",
     );
   const token = (await tokenResponse.json()) as { token: string };
+  return token.token;
+}
+export async function githubRequest<T>(
+  env: Env,
+  installationId: number,
+  path: string,
+  init: RequestInit = {},
+  fetcher: typeof fetch = fetch,
+): Promise<T> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
+  const token = await installationAccessToken(env, installationId, fetcher);
   const response = await fetcher("https://api.github.com" + path, {
     ...init,
     headers: {
-      ...headers,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Traceyard",
+      "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
       ...init.headers,
-      Authorization: "Bearer " + token.token,
+      Authorization: "Bearer " + token,
     },
     signal: AbortSignal.timeout(15000),
   });

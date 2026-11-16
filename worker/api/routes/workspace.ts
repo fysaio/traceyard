@@ -9,12 +9,13 @@ import {
 } from "../../../shared/repository/workspace";
 import { ownedProject } from "../../integrations/access";
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
-import { badRequest, notFound, parseWith, unauthorized } from "../errors";
+import { badRequest, conflict, notFound, parseWith, unauthorized } from "../errors";
 import { projectCatalog, applicationRuns } from "../../repositories/catalog";
 import { syncRepositoryChecks } from "../../repositories/check-sync";
 import { runnerPrincipal } from "../../repositories/runner-auth";
 import { installationOwned, githubRequest } from "../../repositories/github";
-import { upgradeRepositoryChecks, dispatchRepositoryChecks } from "../../repositories/checks";
+import { dispatchRepositoryChecks } from "../../repositories/checks";
+import { finishManagedCheck } from "../../repositories/managed";
 import { randomId } from "../../lib/crypto";
 import { nowIso } from "../../lib/time";
 import type { RepositoryRecord } from "../../../shared/repository/contracts";
@@ -41,13 +42,29 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   });
   app.post("/projects/:projectId/repository/upgrade", async (c) => {
     const { projectId } = await ownedProject(c);
-    return c.json(data(c, await upgradeRepositoryChecks(c.env, projectId, fetcher)));
+    void projectId;
+    throw badRequest(
+      "UPGRADE_RETIRED",
+      "Traceyard manages runner updates. No repository pull request is required.",
+    );
   });
   app.post("/projects/:projectId/checks/:id/cancel", async (c) => {
     const { projectId, userId } = await ownedProject(c),
       job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
         .bind(projectId, c.req.param("id"))
         .first<{ id: string; status: string; source: string }>();
+    if (job?.source === "managed") {
+      if (!["RUNNING", "QUEUED"].includes(job.status))
+        throw badRequest("CHECK_FINISHED", "This check has already finished.");
+      await finishManagedCheck(
+        c.env,
+        job.id,
+        "CANCELLED",
+        "This check was cancelled. Source discoveries remain available.",
+      );
+      await c.env.MANAGED_REPOSITORY_RUNNERS?.getByName(job.id).cancel();
+      return c.json(data(c, { requested: true }), 202);
+    }
     const repo = await c.env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
       .bind(projectId)
       .first<RepositoryRecord>();
@@ -157,7 +174,15 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   app.post("/projects/:projectId/operations/:key/test", async (c) => {
     const { projectId } = await ownedProject(c),
       body = parseWith(
-        z.object({ caseId: z.string().max(100) }).strict(),
+        z
+          .object({
+            caseId: z.string().max(100),
+            requestId: z
+              .string()
+              .regex(/^[A-Za-z0-9_-]{1,100}$/)
+              .optional(),
+          })
+          .strict(),
         await readJsonBody(c),
         "Choose a saved test.",
       );
@@ -178,9 +203,16 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
         "START_SCRIPT_REQUIRED",
         "Set the application startup script under Test settings first.",
       );
-    const id = randomId("req");
+    const id = body.requestId ? "req_" + body.requestId : randomId("req");
+    const previous = await c.env.DB.prepare(
+      "SELECT snapshot_json FROM repository_check_requests WHERE id=? AND project_id=?",
+    )
+      .bind(id, projectId)
+      .first<{ snapshot_json: string }>();
+    if (previous && JSON.parse(previous.snapshot_json).cases?.[0]?.id !== saved.id)
+      throw conflict("CHECK_REQUEST_REUSED", "This request ID belongs to another saved test.");
     await c.env.DB.prepare(
-      "INSERT INTO repository_check_requests(id,project_id,snapshot_json,created_at) VALUES(?,?,?,?)",
+      "INSERT INTO repository_check_requests(id,project_id,snapshot_json,created_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING",
     )
       .bind(
         id,
@@ -194,17 +226,8 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
         nowIso(),
       )
       .run();
-    try {
-      const result = await dispatchRepositoryChecks(c.env, projectId, fetcher, id);
-      return c.json(data(c, { ...result, requestId: id }), 202);
-    } catch (error) {
-      await c.env.DB.prepare(
-        "DELETE FROM repository_check_requests WHERE id=? AND runner_id IS NULL",
-      )
-        .bind(id)
-        .run();
-      throw error;
-    }
+    const result = await dispatchRepositoryChecks(c.env, projectId, fetcher, id);
+    return c.json(data(c, { ...result, requestId: id }), 202);
   });
   app.get("/projects/:projectId/application-runs/:traceId", async (c) => {
     const { projectId } = await ownedProject(c),
@@ -264,6 +287,15 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   app.get("/v1/repository/configuration", async (c) => {
     const who = await runnerPrincipal(c, fetcher),
       requestId = c.req.query("request");
+    if (who.source === "managed") {
+      const snapshot = await c.env.DB.prepare(
+        "SELECT snapshot_json FROM managed_repository_checks WHERE id=? AND project_id=?",
+      )
+        .bind(who.runId, who.projectId)
+        .first<{ snapshot_json: string }>();
+      if (!snapshot) throw notFound("Managed check snapshot not found.");
+      return c.json(data(c, JSON.parse(snapshot.snapshot_json).manifest));
+    }
     if (requestId) {
       const row = await c.env.DB.prepare(
         "SELECT snapshot_json,runner_id FROM repository_check_requests WHERE id=? AND project_id=? AND created_at>?",

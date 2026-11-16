@@ -10,7 +10,12 @@ export default defineConfig(({ mode }) => ({
     react(),
     tailwindcss(),
     cloudflare({
-      configPath: mode === "acceptance" ? "wrangler.acceptance.jsonc" : "wrangler.jsonc",
+      configPath:
+        mode === "acceptance"
+          ? "wrangler.acceptance.jsonc"
+          : mode === "managed"
+            ? "wrangler.managed.jsonc"
+            : "wrangler.jsonc",
       inspectorPort: false,
       viteEnvironment: { name: "worker" },
     }),

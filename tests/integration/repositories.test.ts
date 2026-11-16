@@ -6,7 +6,6 @@ import { createSession, apiFetchWithGitHub, ORIGIN, readSuccess } from "./helper
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import { base64UrlEncode } from "../../worker/lib/crypto";
-import { prepareRepositoryChecks } from "../../worker/repositories/checks";
 import { scanRepository } from "../../worker/repositories/scan";
 async function account(id = 810) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
@@ -469,24 +468,9 @@ describe("repository connection and execution evidence", () => {
     expect(listed.items[0]?.id).toBe(99);
     expect(
       (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
-    ).toBe(200);
-    expect(
-      (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
-    ).toBe(200);
-    // Runtime dispatch requires actual installation evidence, rather than merely an open PR.
+    ).toBe(400);
     expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
-      409,
-    );
-    await env.DB.prepare(
-      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
-    )
-      .bind(a.projectId)
-      .run();
-    expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
-      202,
-    );
-    expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
-      409,
+      503,
     );
     async function webhook(body: unknown) {
       const text = JSON.stringify(body),
@@ -550,7 +534,7 @@ describe("repository connection and execution evidence", () => {
       await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
     ).toEqual({ suspended: 1 });
   });
-  it("creates one project per selected repository, starts background setup, and resumes partial PR setup without duplicate runs", async () => {
+  it("creates one project per repository and discovers source without modifying customer workflows", async () => {
     const a = await account(),
       other = await account(811);
     await env.DB.prepare(
@@ -592,8 +576,8 @@ describe("repository connection and execution evidence", () => {
     };
     let branch = false,
       file: string | null = null,
-      pr = false,
-      failUpload = true;
+      pr = false;
+    const failUpload = true;
     let branches = 0,
       prs = 0,
       dispatches = 0;
@@ -706,10 +690,6 @@ describe("repository connection and execution evidence", () => {
           .first<{ count: number }>()
       )?.count,
     ).toBe(2);
-    // A failed external setup does not discard successful source discovery.
-    await expect(prepareRepositoryChecks(configured, id, fetcher)).rejects.toThrow(
-      "GitHub returned 500",
-    );
     await scanRepository(
       configured,
       {
@@ -722,38 +702,16 @@ describe("repository connection and execution evidence", () => {
     );
     expect(
       await env.DB.prepare(
-        "SELECT status,check_setup_state FROM project_repositories WHERE project_id=?",
+        "SELECT status,setup_pr_url FROM project_repositories WHERE project_id=?",
       )
         .bind(id)
         .first(),
-    ).toEqual({ status: "DISCOVERED", check_setup_state: "FAILED" });
-    failUpload = false;
-    expect(await prepareRepositoryChecks(configured, id, fetcher)).toMatchObject({
-      state: "AWAITING_MERGE",
-    });
-    expect(await prepareRepositoryChecks(configured, id, fetcher)).toMatchObject({
-      state: "AWAITING_MERGE",
-    });
-    expect(branches).toBe(1);
-    expect(prs).toBe(1);
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
-    await env.DB.prepare(
-      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
-    )
-      .bind(id)
-      .run();
-    expect((await invoke(`/api/projects/${id}/repository/analyze`)).status).toBe(202);
-    expect(tasks).toHaveLength(2);
-    expect(tasks[1]?.params.checks).toBe(true);
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(202);
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
-    expect(dispatches).toBe(1);
-    // Even after the short click cooldown, a queued job holds the lease.
-    await env.DB.prepare("UPDATE project_repositories SET last_dispatch_at=? WHERE project_id=?")
-      .bind(new Date(Date.now() - 2 * 60000).toISOString(), id)
-      .run();
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
-    expect(dispatches).toBe(1);
+    ).toEqual({ status: "DISCOVERED", setup_pr_url: null });
+    expect((await invoke(`/api/projects/${id}/repository/setup`)).status).toBe(400);
+    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(503);
+    expect(branches).toBe(0);
+    expect(prs).toBe(0);
+    expect(dispatches).toBe(0);
   });
   it("finishes independent background setup stages and retains both failures without configured services", async () => {
     const a = await account();
@@ -789,7 +747,7 @@ describe("repository connection and execution evidence", () => {
       }>();
     expect(state?.status).toBe("FAILED");
     expect(state?.last_error).toContain("GitHub App configuration");
-    expect(state?.check_setup_state).toBe("FAILED");
-    expect(state?.check_setup_error).toContain("runner commit");
+    expect(state?.check_setup_state).toBe("NOT_STARTED");
+    expect(state?.check_setup_error).toBeNull();
   });
 });

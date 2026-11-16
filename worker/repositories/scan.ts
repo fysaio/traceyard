@@ -8,6 +8,7 @@ interface Repo {
   installation_id: number;
   full_name: string;
   default_branch: string;
+  ref?: string;
 }
 export async function scanRepository(env: Env, repo: Repo, fetcher: typeof fetch = fetch) {
   try {
@@ -19,7 +20,7 @@ export async function scanRepository(env: Env, repo: Repo, fetcher: typeof fetch
     const commit = await githubRequest<{ sha: string }>(
       env,
       repo.installation_id,
-      `/repos/${repo.full_name}/commits/${encodeURIComponent(repo.default_branch)}`,
+      `/repos/${repo.full_name}/commits/${encodeURIComponent(repo.ref ?? repo.default_branch)}`,
       {},
       fetcher,
     );
@@ -48,7 +49,9 @@ export async function scanRepository(env: Env, repo: Repo, fetcher: typeof fetch
     let filesScanned = 0;
     async function publish(status: "DISCOVERING" | "DISCOVERED") {
       await env.DB.prepare(
-        "UPDATE project_repositories SET commit_sha=?,status=?,scan_json=?,last_error=NULL,updated_at=? WHERE project_id=? AND (? IS NULL OR scan_id=?)",
+        status === "DISCOVERED"
+          ? "UPDATE project_repositories SET commit_sha=?,status=?,scan_json=?,scan_progress_json=NULL,last_error=NULL,updated_at=? WHERE project_id=? AND (? IS NULL OR scan_id=?)"
+          : "UPDATE project_repositories SET commit_sha=COALESCE(commit_sha,?),status=?,scan_progress_json=?,last_error=NULL,updated_at=? WHERE project_id=? AND (? IS NULL OR scan_id=?)",
       )
         .bind(
           commit.sha,

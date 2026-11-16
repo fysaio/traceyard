@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { reportSchema } from "../../../shared/repository/contracts";
 import { spanBatchSchema, redact } from "../../../shared/contracts/traces";
-import { prepareRepositoryChecks, dispatchRepositoryChecks } from "../../repositories/checks";
+import { dispatchRepositoryChecks } from "../../repositories/checks";
 import { getOwnedProject } from "../../persistence/projects";
 import {
   githubRequest,
@@ -55,6 +55,9 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     const event = c.req.header("x-github-event"),
       b = JSON.parse(raw) as {
         action: string;
+        ref?: string;
+        after?: string;
+        deleted?: boolean;
         installation?: { id: number; account: { id: number; login: string; type: string } };
         repository?: { id: number };
         workflow_run?: {
@@ -67,6 +70,25 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
           conclusion: string | null;
         };
       };
+    if (event === "push" && b.repository && !b.deleted && /^[a-f0-9]{40}$/.test(b.after ?? "")) {
+      const repo = await c.env.DB.prepare(
+        "SELECT r.* FROM project_repositories r JOIN github_installations g ON g.id=r.installation_id WHERE r.repository_id=? AND g.suspended=0",
+      )
+        .bind(b.repository.id)
+        .first<RepositoryRecord>();
+      if (repo?.installation_id && b.ref === "refs/heads/" + repo.default_branch) {
+        const head = await githubRequest<{ sha: string }>(
+          c.env,
+          repo.installation_id,
+          `/repos/${repo.full_name}/commits/${encodeURIComponent(repo.default_branch!)}`,
+          {},
+          fetcher,
+        );
+        // Delayed webhook deliveries must not roll discovery back to an older push.
+        if (head.sha === b.after)
+          await startScan(c, repo.project_id, true, b.after, repo.scan_id ?? null);
+      }
+    }
     if (event === "installation" && b.installation) {
       const i = b.installation;
       if (b.action === "deleted")
@@ -299,29 +321,45 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     c: Parameters<typeof ownedProject>[0],
     projectId: string,
     checks = false,
+    commitSha?: string,
+    expectedScan?: string | null,
   ) {
     if (!c.env.REPOSITORY_DISCOVERY)
       throw serviceUnavailable(
         "DISCOVERY_UNCONFIGURED",
         "The repository discovery Workflow binding needs configuration.",
       );
-    const scanId = randomId("scan");
+    const scanId = commitSha
+      ? "scan_" + projectId + "_" + commitSha.slice(0, 32)
+      : randomId("scan");
     const started = await c.env.DB.prepare(
-      "UPDATE project_repositories SET status='DISCOVERING',scan_id=?,scan_json=NULL,last_error=NULL,updated_at=? WHERE project_id=? AND (status!='DISCOVERING' OR updated_at<?) RETURNING project_id",
+      "UPDATE project_repositories SET status='DISCOVERING',scan_id=?,scan_progress_json=NULL,last_error=NULL,updated_at=? WHERE project_id=? AND ((?=1 AND scan_id IS ?) OR (?=0 AND (status!='DISCOVERING' OR updated_at<?))) AND (scan_id IS NULL OR scan_id!=?) RETURNING project_id",
     )
-      .bind(scanId, nowIso(), projectId, new Date(Date.now() - 15 * 60 * 1000).toISOString())
+      .bind(
+        scanId,
+        nowIso(),
+        projectId,
+        commitSha ? 1 : 0,
+        expectedScan ?? null,
+        commitSha ? 1 : 0,
+        new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        scanId,
+      )
       .first();
-    if (!started) throw conflict("DISCOVERY_RUNNING", "Repository discovery is already running.");
+    if (!started) {
+      if (commitSha) return;
+      throw conflict("DISCOVERY_RUNNING", "Repository discovery is already running.");
+    }
     try {
       await c.env.REPOSITORY_DISCOVERY.create({
         id: scanId,
-        params: { projectId, scanId, checks },
+        params: { projectId, scanId, checks, ...(commitSha ? { commitSha } : {}) },
       });
     } catch (error) {
       await c.env.DB.prepare(
-        "UPDATE project_repositories SET status='FAILED',last_error='Discovery could not be started.',updated_at=? WHERE project_id=?",
+        "UPDATE project_repositories SET status='FAILED',last_error='Discovery could not be started.',updated_at=? WHERE project_id=? AND scan_id=?",
       )
-        .bind(nowIso(), projectId)
+        .bind(nowIso(), projectId, scanId)
         .run();
       throw error;
     }
@@ -394,13 +432,23 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
   });
   routes.post("/projects/:projectId/repository/analyze", async (c) => {
     const { projectId } = await ownedProject(c);
-    await startScan(c, projectId, true);
-    return c.json(data(c, { started: true }), 202);
+    const b = parseWith(
+      z.object({ requestId: z.string().regex(/^[A-Za-z0-9:_-]{1,140}$/) }).strict(),
+      await readJsonBody(c),
+      "Provide a check request ID.",
+    );
+    return c.json(
+      data(c, await dispatchRepositoryChecks(c.env, projectId, fetcher, undefined, b.requestId)),
+      202,
+    );
   });
   routes.post("/projects/:projectId/repository/setup", async (c) => {
     const { projectId } = await ownedProject(c);
-    const result = await prepareRepositoryChecks(c.env, projectId, fetcher);
-    return c.json(data(c, result));
+    void projectId;
+    throw badRequest(
+      "SETUP_RETIRED",
+      "No repository changes are required. Start a check from the project.",
+    );
   });
   routes.post("/projects/:projectId/repository/run", async (c) => {
     const { projectId } = await ownedProject(c);
@@ -425,8 +473,8 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       b = parseWith(reportSchema, await readJsonBody(c), "Invalid runner report.");
     if (who.source === "local" && !b.id.startsWith("local-"))
       throw badRequest("LOCAL_RUN_ID_REQUIRED", "Local check IDs must start with local-.");
-    if (who.source === "github" && (b.id !== who.runId || b.sha !== who.sha))
-      throw forbidden("RUN_IDENTITY_MISMATCH", "The report does not match the signed GitHub run.");
+    if (who.source !== "local" && (b.id !== who.runId || b.sha !== who.sha))
+      throw forbidden("RUN_IDENTITY_MISMATCH", "The report does not match its assigned run.");
     const repo = await c.env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
       .bind(who.projectId)
       .first<RepositoryRecord>();
@@ -509,7 +557,7 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       message: string;
       at: string;
     }[];
-    const order = ["discovery", "install", "build", "test", "complete"];
+    const order = ["checkout", "discovery", "install", "build", "test", "complete"];
     if (old && order.indexOf(b.phase) < order.indexOf(old.phase))
       throw conflict("RUN_PHASE_ORDER", "Runner phases cannot move backwards.");
     if (
@@ -532,8 +580,8 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       who.source === "github"
         ? "https://github.com/" + repo.full_name + "/actions/runs/" + who.runId!.split("-")[0]
         : null;
-    await c.env.DB.prepare(
-      "INSERT INTO repository_jobs(id,project_id,commit_sha,source,phase,status,events_json,github_url,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET phase=excluded.phase,status=excluded.status,events_json=excluded.events_json,updated_at=excluded.updated_at",
+    const accepted = await c.env.DB.prepare(
+      "INSERT INTO repository_jobs(id,project_id,commit_sha,source,phase,status,events_json,github_url,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET phase=excluded.phase,status=excluded.status,events_json=excluded.events_json,updated_at=excluded.updated_at WHERE repository_jobs.status='RUNNING' RETURNING id",
     )
       .bind(
         b.id,
@@ -546,7 +594,8 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
         url,
         nowIso(),
       )
-      .run();
+      .first();
+    if (!accepted) return c.json(data(c, { received: true }));
     if (safeResults.length) {
       for (const result of safeResults)
         await c.env.DB.prepare(
@@ -562,21 +611,30 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
           )
           .run();
     }
-    if (b.operations && (who.source === "github" || repo.repository_id === null))
+    if (b.operations) {
+      const prior = repo.scan_json ? JSON.parse(repo.scan_json) : { operations: [] };
+      const combined = [...(prior.operations ?? []), ...b.operations];
+      const operations = [
+        ...new Map(combined.map((operation) => [operation.id, operation])).values(),
+      ].slice(0, 100);
+      // Runtime evidence can enrich the current successful index, never replace
+      // an active/failed newer scan or roll it back to an older commit.
       await c.env.DB.prepare(
-        "UPDATE project_repositories SET commit_sha=?,scan_json=?,status='DISCOVERED',last_error=NULL,updated_at=? WHERE project_id=?",
+        "UPDATE project_repositories SET commit_sha=?,scan_json=?,status='DISCOVERED',last_error=NULL,updated_at=? WHERE project_id=? AND (repository_id IS NULL OR (status='DISCOVERED' AND commit_sha=?))",
       )
         .bind(
           b.sha,
           JSON.stringify({
-            operations: b.operations,
-            filesScanned: b.filesScanned ?? 0,
+            operations,
+            filesScanned: Math.max(prior.filesScanned ?? 0, b.filesScanned ?? 0),
             warnings: b.warnings ?? [],
           }),
           nowIso(),
           who.projectId,
+          b.sha,
         )
         .run();
+    }
     return c.json(data(c, { received: true }));
   });
   routes.post("/v1/otlp/v1/traces", async (c) => {
@@ -588,7 +646,7 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       { spans: convertOtlp(body) },
       "Invalid OTLP JSON spans.",
     ).spans;
-    if (who.source === "github")
+    if (who.source !== "local")
       for (const span of spans) {
         span.attributes["traceyard.run.id"] = who.runId;
         span.attributes["service.version"] = who.sha;

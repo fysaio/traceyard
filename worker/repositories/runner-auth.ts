@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../api/middleware";
 import { keyPrincipal } from "../integrations/access";
 import { unauthorized } from "../api/errors";
+import { sha256Hex } from "../lib/crypto";
 export function decodePart(value: string) {
   const base = value.replace(/-/g, "+").replace(/_/g, "/");
   return Uint8Array.from(atob(base.padEnd(Math.ceil(base.length / 4) * 4, "=")), (c) =>
@@ -10,6 +11,24 @@ export function decodePart(value: string) {
 }
 export async function runnerPrincipal(c: Context<AppEnv>, fetcher: typeof fetch = fetch) {
   const token = c.req.header("authorization")?.replace(/^Bearer /, "") ?? "";
+  if (/^tyr_[A-Za-z0-9_-]{43}$/.test(token)) {
+    const managed = await c.env.DB.prepare(
+      "SELECT m.id,m.project_id,j.commit_sha FROM managed_repository_checks m JOIN repository_jobs j ON j.id=m.id AND j.project_id=m.project_id WHERE m.token_hash=? AND m.expires_at>? AND m.state='RUNNING' AND j.status='RUNNING'",
+    )
+      .bind(await sha256Hex(token), new Date().toISOString())
+      .first<{ id: string; project_id: string; commit_sha: string }>();
+    if (!managed)
+      throw unauthorized(
+        "RUNNER_IDENTITY_INVALID",
+        "This check's credential is invalid, expired or no longer active.",
+      );
+    return {
+      projectId: managed.project_id,
+      source: "managed" as const,
+      runId: managed.id,
+      sha: managed.commit_sha,
+    };
+  }
   if (token.startsWith("tyk_"))
     return {
       ...(await keyPrincipal(c, "traces:write")),

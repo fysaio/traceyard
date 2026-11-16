@@ -1,117 +1,107 @@
-# Repository discovery and project checks
+# Repository connection and checks
 
-This adds the first repository-first path. The main Project screen combines source discoveries, actual application executions and build/test checks. The former Executions URL uses the same project activity view, so external Somni traces no longer disappear behind zero managed-engine runs. Build retains the optional Traceyard workflow builder; Gateway and workflow experiments are under the account menu.
+## Developer flow
 
-This is a bounded first implementation, not complete understanding of arbitrary repositories. Source discovery identifies supported entry points; recording supplies evidence of actual execution. A passing test command establishes only that the configured tests passed.
+1. Sign in with GitHub and grant the Traceyard GitHub App access to selected repositories.
+2. Choose **Connect repo**. Traceyard creates or reopens the repository's project and starts source discovery.
+3. Open the project. Discovered operations become available without waiting for installation, build or tests to pass.
+4. On a managed deployment, Traceyard downloads the selected commit into its own temporary workspace and runs supported checks. Later default-branch pushes refresh discovery and request another bounded check. **Check project** requests a check explicitly.
 
-## GitHub: one-time deployment setup
+Connecting does not create a branch, write `.github/workflows/traceyard.yml`, open a setup PR or dispatch customer GitHub Actions. The retired setup and upgrade endpoints return an explanatory error. Previously installed Actions can still report into their existing projects; they are compatibility support, not a prerequisite for new connections. Remove an old Traceyard workflow separately if you no longer want it to run.
 
-This section is for the person hosting Traceyard, not every customer installing it.
+Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.
 
-1. Deploy Traceyard at a public HTTPS origin. GitHub cannot send webhooks or test results to localhost. Review/apply migrations 0008, 0009 and 0010 and deploy the `REPOSITORY_DISCOVERY` Workflow binding in wrangler.jsonc. Production resources have not been deployed by this change.
-2. Register a GitHub App, separate from the existing OAuth sign-in app. Set its webhook URL to `https://YOUR_HOST/api/github/webhook`, content type JSON, and a strong webhook secret. Subscribe to **Installation** and **Workflow run** events. Set its post-install setup URL to your Traceyard project page. Keep existing installations updated when adding these event subscriptions.
-3. Request repository permissions: **Contents read/write**, **Pull requests read/write**, **Workflows read/write**, and **Actions read/write**. Metadata is read-only. Writes are used to propose the one-time workflow installation PR and dispatch checks. This initial release links personal installations whose GitHub account ID matches the signed-in identity; organization/team delegation is not implemented.
-4. Store these server values:
+## When something fails
 
-```text
-PUBLIC_APP_ORIGIN=https://YOUR_HOST
-GITHUB_APP_ID=<App ID>
-GITHUB_APP_SLUG=<App slug>
-GITHUB_APP_PRIVATE_KEY=<PKCS#8 PEM private key; secret>
-GITHUB_APP_WEBHOOK_SECRET=<matching webhook secret; secret>
-TRACEYARD_RUNNER_REF=<immutable 40-character Traceyard commit containing agent/ and its lockfile>
-```
+| Failure                                | What remains available                                         | Next action                                                                                              |
+| -------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Source scan cannot read GitHub         | Last successful source index and recorded history              | Check access and retry discovery                                                                         |
+| Dependency installation or build fails | Source operations, their code links and history                | Read the failed stage and correct the prerequisite                                                       |
+| Tests fail                             | Source operations and any activity recorded before the failure | Inspect the failed stage or recorded run; request a new attempt when ready                               |
+| One saved HTTP test fails              | Other operations and saved tests                               | Correct its input or application issue; run an independent test if its prerequisites work                |
+| Runner is interrupted or loses contact | Source operations and retained evidence                        | Outcome is unconfirmed; Traceyard closes expired checks without automatically repeating application work |
+| Managed execution is not configured    | Source discovery and browsing                                  | Operator deploys the managed execution service                                                           |
 
-Convert a downloaded PKCS#1 GitHub RSA key to PKCS#8 locally if necessary:
+An unavailable database can prevent an operation that needs that database from executing. Traceyard cannot safely bypass application prerequisites. Browsing source is independent. A selected HTTP request test can start the selected application directly instead of requiring an unrelated root build, but the configured startup script must prepare everything that application needs.
 
-```bash
-openssl pkcs8 -topk8 -nocrypt -in github-app.pem -out github-app-pkcs8.pem
-```
+Retries of the same managed request ID return the original check and frozen commit/configuration. Reusing an ID for a different saved request conflicts. An intentional new attempt has a new ID. This prevents duplicate job launches; it does not replace application-level idempotency for an external payment, email or other side effect. Checks must use test data and test services.
 
-Keep both private-key files out of Git and put the resulting key in the deployment secret store. Multiline PEM or literal `\n` separators are accepted. `TRACEYARD_RUNNER_REF` is not a credential. Pin the reviewed implementation commit, not the pre-feature main commit and not a moving branch.
+## One-time operator setup
 
-These are different from `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`, which continue to authenticate user sign-in. No personal GitHub token is requested from the developer.
+This is configured once by the Traceyard operator. Individual developers install the existing App; they do not create another GitHub App or supply its private key.
 
-When developing through an HTTPS tunnel or reverse proxy, set `PUBLIC_APP_ORIGIN` to the exact public origin and restart Traceyard after changing it. Cookie-authenticated writes accept this explicitly configured origin even when the proxy forwards to local HTTP. Other origins and cross-site browser writes remain blocked; forwarded headers do not grant access. An already installed app offers **Manage access** for changing its repository selection rather than asking you to install it again.
+The current connection implementation supports personal GitHub accounts. Create/configure one GitHub App with:
 
-Microsoft Dev Tunnels can also rewrite the browser's `Origin` to its local HTTP target while Vite preserves the forwarded HTTPS protocol in the Worker URL. With a valid public origin configured, Traceyard accepts that transport counterpart only on the identical loopback host and effective port. Other ports, non-loopback protocol mismatches and cross-site requests stay rejected. Rejections include address-only diagnostics (`browserOrigin`, `requestOrigin`, `configuredOrigin`), never keys, cookies or URL paths.
+- Repository **Contents: read**, **Metadata: read**.
+- **Push** webhook events. GitHub sends installation lifecycle events automatically. Keep **Workflow run** and **Actions: read** only if retaining legacy Actions reporting/status recovery.
+- Public HTTPS webhook URL: `https://YOUR_TRACEYARD_HOST/api/github/webhook`.
+- A securely generated webhook secret. Keep the App private key in the Worker secret store.
 
-## GitHub: developer journey
+GitHub sign-in OAuth configuration remains separate from repository installation. The sign-in callback is `https://YOUR_TRACEYARD_HOST/api/auth/github/callback`.
 
-1. Sign in and select **Connect repository** (also available in the project switcher). Install Traceyard on selected personal GitHub repositories if necessary, return and refresh the list. Signed installation webhooks and the signed-in identity establish access; callback query strings do not grant it.
-2. Choose a repository. Traceyard creates a named project automatically, or opens the already connected project without duplicating it. A durable background Workflow starts source discovery and test setup independently. Initial source coverage is bounded to 60 eligible files, each up to 64 KB, and 100 operations. Discovered operations appear incrementally, with exact commit/file links and coverage warnings.
-3. While discovery continues, Traceyard prepares a reviewable PR adding `.github/workflows/traceyard.yml`. Stable branches and read-before-write let a failed setup resume without creating another branch/PR. Existing different workflow content is never overwritten. **Review setup PR** is the one first-run action: review npm scripts and merge it. This grants permission to execute the configured scripts; there is no silent arbitrary application execution before that merge.
-4. Merging the workflow into the default branch starts the initial GitHub-hosted Ubuntu job. It installs the pinned runner's production dependencies, indexes source, runs `npm ci`, an existing build script if present, then existing tests with supported Node recording. A lockfile is required. Missing/unsupported tests are shown as not tested. If neither build nor tests exists, the local/hosted agent skips dependency installation entirely after indexing.
-5. GitHub displays real logs; Traceyard displays check phases and recorded application runs. **Check project** starts source refresh and a bounded test run in the background together. **Refresh source** performs discovery only. Tests exercise only the paths reached by the existing suite: this does not generate tests, run arbitrary exported functions or promise full workflow coverage. **View recorded application runs** filters real spans by check identity.
-
-### Runtime and cost limits
-
-There is no persistent application server in this flow. The initial run is automatic after the setup PR merges. Later runs are requested explicitly; ordinary application pushes do not start another job. Changing the installed workflow itself also triggers a check. The generated workflow limits the entire job to **10 minutes**, each application command to **180 seconds**, cancels overlapping jobs for the same ref, caches npm downloads and installs only production runner dependencies. API dispatch rejects active runs, holds a queued-run lease for 10 minutes and has a 60-second repeated-request cooldown. This limits accidental duplicates, not total monthly spending.
-
-GitHub Actions usage belongs to the repository owner. Standard public-repository runners are free under GitHub's current terms; private-repository usage draws from the account's included compute usage and may incur charges beyond it. See [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions). Test scripts can also call external services at their own cost; no provider credentials or application secrets are automatically supplied. Traceyard does not estimate a bill from a successful test. Review account budgets separately.
-
-Source and test setup retain independent progress/error state. One failing does not erase the other's results. A real Workflow integration test checks that both stages settle and retain their errors when service configuration is absent. A stale setup can be retried; runtime dispatch failures release their queue lease for retry.
-
-GitHub runners authenticate reports with short-lived OIDC identities instead of stored Traceyard API keys. The receiver verifies the GitHub signature/JWKS, issuer, exact audience, repository/owner IDs, default branch, expected workflow path, GitHub-hosted environment, event type, commit and run identity. Suspended/deleted personal installations are rejected. The workflow does not run on fork PRs or pull_request_target; the source checkout does not persist Git credentials. OIDC identities allow writes only to their linked Traceyard project.
-
-GitHub App/runner API exchanges are integration-tested with explicit service doubles, including valid RSA/HMAC signatures. Live installation, PR creation and GitHub-hosted execution remain to be verified with configured deployment credentials. They have not occurred in this workspace.
-
-## Local code
-
-Requires Node.js 22.12+, a Traceyard checkout with `npm ci`, and a project key with `traces:write`. There is not yet a published npm package; the executable currently ships in this repository.
-
-In the target application's directory, create `.env.traceyard`:
+Required environment values:
 
 ```text
-TRACEYARD_ORIGIN=http://localhost:5173
-TRACEYARD_KEY=<project key entered privately>
+PUBLIC_APP_ORIGIN=https://YOUR_TRACEYARD_HOST
+GITHUB_CLIENT_ID=<sign-in OAuth client ID>
+GITHUB_CLIENT_SECRET=<sign-in OAuth secret>
+GITHUB_APP_ID=<repository App ID>
+GITHUB_APP_SLUG=<repository App slug>
+GITHUB_APP_WEBHOOK_SECRET=<secret>
+GITHUB_APP_PRIVATE_KEY=<PKCS#8 PEM private key>
 ```
 
-Add `.env.traceyard` to that application's .gitignore. The agent reads this named file through Node's native environment loader. The key stays out of source reports and child build/install environments. Runtime recording needs its credential in the test process's exporter configuration; use test-only applications/configuration and do not run untrusted scripts. Localhost is appropriate only when the application process can actually reach that Traceyard server.
+A literal `\n`-separated PEM is accepted. Convert a downloaded PKCS#1 key locally if needed:
 
 ```bash
-# Offline source discovery; no network or application execution:
+openssl pkcs8 -topk8 -nocrypt -in downloaded-key.pem -out github-app-pkcs8.pem
+```
+
+Never commit key files or environment secrets. `TRACEYARD_RUNNER_REF` is no longer needed for managed checks: the agent is baked into Traceyard's deployed image.
+
+### Cloudflare deployment
+
+`wrangler.managed.jsonc` adds the `RepositoryCheckRunner` Durable Object, container image and global execution admission setting to the existing Worker/D1/Queues/Workflows application. Ordinary `wrangler.jsonc` remains available for source/UI development without Docker. This separation makes execution availability explicit instead of offering a setup PR as a workaround.
+
+Requirements: configured Cloudflare account with Containers enabled, Docker available for image building, existing application bindings/secrets, and a publicly reachable HTTPS application origin. Review account/resource IDs before remote commands.
+
+```bash
+npm ci
+npm run db:migrate:remote
+npm run deploy
+```
+
+Migration **0013** adds independent source-progress storage and managed check controls. Apply all migrations in order. `npm run deploy` builds using managed mode before Wrangler follows the Vite-generated deployment config. It creates/updates paid execution infrastructure; review the account and billing before running it. No remote migration or deployment has been performed by this code change.
+
+For local managed development, apply local migrations, set a public HTTPS callback origin reachable from the runner, and run `npm run dev:managed` with Docker running. Ordinary `npm run dev` supports discovery and UI work; it intentionally reports that hosted checks are unavailable. A working public tunnel is needed for GitHub webhooks and runner callbacks; a localhost-only origin cannot receive cloud callbacks.
+
+See [managed execution](MANAGED_EXECUTION.md) for implementation and release checks.
+
+## Current runtime support and limits
+
+- Node.js 22, npm lockfile installs, existing `build`/`test` scripts. A selected npm workspace may use the repository's shared lockfile if it contains that workspace. Other package managers/runtimes are not automatically executed.
+- Initial GitHub discovery reads at most 60 eligible JavaScript/TypeScript files, each at most 64 KB. It exposes up to 100 operations and labels coverage limits. A downloaded agent scan can inspect up to 10,000 eligible files, with the same file/operation bounds.
+- Managed queue deadline: 10 minutes. Managed execution deadline: 10 minutes; each application command/request-test process is bounded to 180 seconds. VM entrypoint lifetime is at most 15 minutes if the controller fails.
+- At most 6 accepted checks per project per hour; default global concurrency is 2 (`MANAGED_CHECK_CONCURRENCY_LIMIT`, bounded 1–8). These are capacity limits, not a monthly spending guarantee. Pushes beyond the project allowance still update source discovery.
+- Each check uses a fresh workspace and frozen commit/settings. No persistent service or dependency cache is supplied yet. External services, private registry authentication and application secrets are not inferred or provisioned.
+- Supported Node HTTP activity is recorded automatically during tests. Mocked/in-process tests can pass without recording a trace. Continuous monitoring of an already deployed application requires that application's runtime integration; repository access alone does not instrument production.
+- Visual business-logic editing, automatic fixes/commits and arbitrary workflow replay are not implemented.
+
+## Local CLI
+
+Create a project-scoped key with `traces:write`. In the target repository, create an ignored `.env.traceyard`:
+
+```text
+TRACEYARD_ORIGIN=https://YOUR_TRACEYARD_HOST
+TRACEYARD_KEY=<project-scoped API key>
+```
+
+From that repository:
+
+```bash
 node /path/to/traceyard/agent/cli.mjs scan .
-
-# Upload source index into the key's project; no application execution:
 node /path/to/traceyard/agent/cli.mjs connect .
-
-# Install dependencies and run the project's existing build/tests with recording:
 node /path/to/traceyard/agent/cli.mjs run .
 ```
 
-Local discovery skips symlinks, environment files, generated/vendor/dependency directories and test/declaration files. It bounds source files and reports omitted coverage. It uploads operation names, source locations, direct call names and scan warnings, not raw source contents. Reports identify a Git commit when available; an uncommitted directory is explicitly labelled. Local reports use the existing expiring/revocable project API key and its request quota.
-
-`run` executes the target application's package scripts. It is not a deployment or a persistent production agent. It can only observe behavior that the existing test suite actually exercises. A project with no test script is shown as skipped, never passed. Test failures produce a nonzero exit code and retained failed phase evidence.
-
-### When a project check fails
-
-Project and check-detail reads recover missed GitHub completion events using the installation's Actions access. Stale running checks are verified at most once per minute, with repository, commit and run-attempt identity checks; a concurrent runner report wins over the fallback. A successful GitHub job without a completed test report remains unverified rather than being called tested. If GitHub cannot be reached and no progress has arrived for 15 minutes, the UI says **Update overdue** and links to GitHub instead of showing an endless running indicator.
-
-Build/test checks and recorded application runs are separate evidence. A failed check may have no application traces if test imports failed or the tests mocked every request. The failed-application-runs filter does not filter build or test checks.
-
-The runner reports bounded diagnostic categories (such as missing Supabase test configuration, a missing module, or an npm lockfile mismatch) and failed test-file counts. It retains full command output in the local terminal or GitHub logs; it does not upload arbitrary logs, assertion snapshots, or their possible secrets into project reports. Unrecognized failures point to those logs.
-
-GitHub runners do not receive developers' local environment files. Mocked tests should fully replace live clients and use scoped dummy provider configuration; they should not require production API keys. Live tests need separately configured test services and credentials.
-
-To use an updated runner in an existing connected repository, review a PR changing the pinned Traceyard commit in `.github/workflows/traceyard.yml`. Updating the server's `TRACEYARD_RUNNER_REF` affects new setup PRs; it does not silently rewrite already installed workflows.
-
-The runner preloads the SDK and an ES module instrumentation hook. Both are needed for supported HTTP libraries imported as ES modules, including code loaded through tsx. File, DNS and low-level socket instrumentation are disabled to keep setup and IPC traffic out of application workflows. Test frameworks that terminate workers before telemetry flushes can still omit spans; a short Node HTTP smoke test that exits naturally provides a useful recording check.
-
-## What is automatically discovered or recorded
-
-Source discovery uses a TypeScript/JavaScript parser, not text matches inside comments/strings. It recognises conventional Express/Hono/Fastify-style HTTP router declarations, Next.js API route exports, Deno.serve, and selected queue/cron declarations. It resolves direct named local handlers and lists their direct calls. It does not resolve every import, dynamic branch, distributed boundary or application-level business workflow. Operation source location is evidence, not proof that the path ran.
-
-Runtime recording uses OpenTelemetry's Node instrumentation for supported libraries. HTTP client/server activity is verified using a real spawned npm test project, without adding wrappers to that project's application code. The Node preload flushes short-lived test processes before natural exit and bounds exporter timeouts. Tests are sampled fully within this bounded test process. A build alone does not exercise all application routes.
-
-OTLP ingestion currently accepts HTTP JSON at `/api/v1/otlp/v1/traces`, up to the existing 32 KB body limit and 50 spans/batch; the agent batches at 32. Protobuf, metrics and logs ingestion are not implemented. The receiver preserves real IDs, parent relationships and timestamps while selecting only operational attributes. Raw prompts, outputs, SQL statements, full URLs and arbitrary payload attributes from automatic instrumentation are excluded. Error type may be retained; sensitive exception messages are not collected automatically. Existing manual trace ingestion remains available.
-
-Node startup instrumentation does not automatically cover remote Deno/Supabase Edge Functions, Python, browser-only execution, arbitrary custom functions or a preconfigured competing OpenTelemetry SDK. Those require runtime-specific integration. Saved per-operation HTTP request tests now run against a configured local npm application process; see [project experience](PROJECT_EXPERIENCE.md). Arbitrary-function replay, visual-to-code editing and automatic business-logic fixes are not included. Source scans and observed runs are presented together but not claimed to be a complete inferred dependency graph.
-
-## Verification and release boundary
-
-At this checkpoint, 82 unit tests and 93 Worker integration tests pass. Automated checks cover scanner correctness, actual spawned npm runs that pass/fail/have no tests, compatible automatically exported HTTP spans, D1 project isolation, OTLP ingestion into unified activity, report transitions, signed installation and runner identity checks, pinned source scan, setup PR generation/dispatch, and terminal report immutability.
-
-Earlier browser QA uses the separate local acceptance account/config. The latest automatic-setup revision could not be visually checked because the cloud browser could not access the local preview; no fresh visual acceptance is claimed. It checks the new Project/Build navigation, visible local environment instructions, missing GitHub configuration state and retained managed execution in unified activity. It does not claim live GitHub OAuth or installation, remote application execution or physical-phone acceptance.
-
-Before release: configure and test a personal GitHub App on a publicly reachable test deployment; merge its installation PR in a disposable Node application; verify real GitHub action stages/results/spans, cancellation and installation removal; verify the supported runtime against the actual application; complete device/layout checks. Do not describe this as arbitrary-codebase automatic understanding or a fully verified Vercel replacement.
+`scan` only prints source discoveries locally. `connect` uploads discovery without running application commands. `run` installs locked dependencies and executes configured checks on your machine. Local scripts receive your local environment except Traceyard's API key; configure test services deliberately. A published, browser-authenticated CLI installer is not yet shipped.

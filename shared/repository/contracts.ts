@@ -34,6 +34,7 @@ export const reportSchema = z
   .strict();
 export type RepositoryReport = z.infer<typeof reportSchema>;
 export interface RepositoryRecord {
+  scan_id?: string | null;
   project_id: string;
   repository_id: number | null;
   full_name: string;
@@ -42,6 +43,7 @@ export interface RepositoryRecord {
   commit_sha: string | null;
   status: string;
   scan_json: string | null;
+  scan_progress_json?: string | null;
   last_error: string | null;
   setup_pr_url: string | null;
   runner_enabled: number;

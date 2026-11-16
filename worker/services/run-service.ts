@@ -428,7 +428,7 @@ async function reserveSandboxQuotas(
   const day = dayKey(now);
   const hour = hourKey(now);
   const dayExpiry = endOfUtcDay(now);
-  const hourExpiry = new Date(Date.parse(`${hour}:00:00.000Z`) + 2 * 60 * 60 * 1000).toISOString();
+  const hourExpiry = new Date(Date.parse(`${hour}:00:00.000Z`) + 60 * 60 * 1000).toISOString();
   const ipHourlyLimit = Math.max(12, config.sandbox.sessionHourlyLimit * 2);
 
   const buckets = [
@@ -969,7 +969,7 @@ export async function retryRun(
 function isUniqueIdempotencyConflict(error: unknown): boolean {
   return (
     error instanceof Error &&
-    /UNIQUE constraint failed: idempotency_records\.scope, idempotency_records\.key/u.test(
+    /UNIQUE constraint failed: (?:idempotency_records\.scope, idempotency_records\.key|runs\.owner_session_hash, runs\.idempotency_key)/u.test(
       error.message,
     )
   );
