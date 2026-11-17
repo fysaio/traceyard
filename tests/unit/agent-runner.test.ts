@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, rm, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { convertOtlp } from "../../worker/repositories/otlp";
 import { spanBatchSchema } from "../../shared/contracts/traces";
 
@@ -14,6 +15,8 @@ it.each([
   ["SUCCEEDED", "managed"],
   ["FAILED", "managed"],
   ["SUCCEEDED", "managed-workspace"],
+  ["SUCCEEDED", "vitest"],
+  ["FAILED", "vitest"],
 ])(
   "runs real project checks and reports %s using the %s runner with actual spans",
   async (expectedStatus, mode) => {
@@ -65,7 +68,15 @@ it.each([
           name: "agent-fixture",
           version: "1.0.0",
           type: "module",
-          scripts: expectedStatus === "SKIPPED" ? {} : { test: "node --test test.mjs" },
+          scripts:
+            expectedStatus === "SKIPPED"
+              ? {}
+              : {
+                  test:
+                    mode === "vitest"
+                      ? `node ${JSON.stringify(resolve("node_modules/vitest/vitest.mjs"))} run --config vitest.config.mjs`
+                      : "node --test test.mjs",
+                },
         }),
       );
       await writeFile(
@@ -107,9 +118,14 @@ it.each([
         join(appRoot, "server.ts"),
         "app.post('/interpret',async()=>generateReply());",
       );
+      if (mode === "vitest")
+        await writeFile(
+          join(appRoot, "vitest.config.mjs"),
+          "export default {test:{include:['test.mjs'],pool:'forks',fileParallelism:false}};",
+        );
       await writeFile(
         join(appRoot, "test.mjs"),
-        `import {test} from 'node:test';import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${expectedStatus === "FAILED" ? "throw new Error('supabaseUrl is required. private@example.test');" : ""}});`,
+        `import {test} from ${JSON.stringify(mode === "vitest" ? pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href : "node:test")};import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${mode === "vitest" ? "await new Promise(r=>setTimeout(r,700));" : ""}${expectedStatus === "FAILED" ? "throw new Error('supabaseUrl is required. private@example.test');" : ""}});`,
       );
       const result = await new Promise<{ code: number | null; output: string }>((done, reject) => {
         const child = spawn(process.execPath, [resolve("agent/cli.mjs"), "run", root], {
