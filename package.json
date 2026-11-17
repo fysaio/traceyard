@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "deploy": "npm run build:managed && wrangler deploy",
+    "deploy": "npm run build && wrangler deploy --config dist/worker/wrangler.json",
     "build:managed": "npm run typecheck && vite build --mode managed",
     "dev:managed": "vite --mode managed",
     "typecheck": "npm run cf:typegen && tsc -b --pretty false",
@@ -32,7 +32,9 @@
     "dev:acceptance": "vite --mode acceptance",
     "db:migrate:acceptance": "wrangler d1 migrations apply traceyard-acceptance-db --config wrangler.acceptance.jsonc --local",
     "predev": "npm run db:migrate:local",
-    "predev:acceptance": "npm run db:migrate:acceptance"
+    "predev:acceptance": "npm run db:migrate:acceptance",
+    "deploy:managed": "npm run build:managed && wrangler deploy --config dist/worker/wrangler.json",
+    "configure:cloudflare": "node scripts/configure-cloudflare.mjs"
   },
   "dependencies": {
     "@babel/parser": "^7.29.14",
