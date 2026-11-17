@@ -13,6 +13,10 @@ This revision implements a connected, repository-backed application journey rath
 
 The optional Traceyard builder, Gateway and other existing tools remain accessible. Native SVG icons were not introduced: new controls use the existing Font Awesome font pack. Soft card/control radii, custom rounded checkboxes, surface focus states, keyboard labels, reduced-motion styles, touch-size inputs and narrow-screen layouts are in `src/styles/project-experience.css`.
 
+## Source-first exploration
+
+Operation pages expose a credential-free source call tree before any application execution. Readable nested calls show same-file helper relationships, source lines, conditional/error/loop/callback context and unresolved boundaries. The call tree is source evidence, never a fabricated run timeline. Legacy direct-call indexes remain readable. Empty runtime histories link back to source exploration. Failed checks or missing execution configuration do not hide this view. The feature currently resolves only unambiguous top-level local functions, with 12-call/three-level bounds; cross-file imports and general business-workflow reconstruction remain incomplete.
+
 ## Operation identity and evidence
 
 Source operation keys hash the repository-relative file and operation name, so adding lines above a handler does not change its key. A source operation links to runtime evidence only through an explicit operation key, a unique method/route combination, or a corresponding source file/name. Name-only matching is deliberately insufficient. Unlinked runtime groups include the service name in their identity. This is not full inter-file call graph inference.

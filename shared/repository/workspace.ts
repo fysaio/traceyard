@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SourceFlow } from "./source-flow";
 import type { RepositoryRecord, RepositoryJob } from "./contracts";
 export const runnerConfigSchema = z
   .object({
@@ -65,6 +66,7 @@ export interface Operation {
   file: string | null;
   line: number | null;
   calls: string[];
+  sourceFlow?: SourceFlow;
   evidence: "source" | "recorded" | "linked";
   runtimeNames: string[];
   runs: number;

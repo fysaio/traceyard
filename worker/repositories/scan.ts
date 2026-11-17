@@ -142,7 +142,11 @@ export async function scanRepository(
           const bytes = Uint8Array.from(atob(blob.content.replace(/\s/g, "")), (c) =>
             c.charCodeAt(0),
           );
-          return discoverFile(file.path, new TextDecoder().decode(bytes));
+          // Keep extra expansion bounded on Workers Free's per-step CPU budget.
+          // Larger files retain direct calls; a GitHub runner can enrich them.
+          return discoverFile(file.path, new TextDecoder().decode(bytes), {
+            includeFlow: !bounded || bytes.length <= 4000,
+          });
         });
         operations.push(...result.operations);
         if (result.warning) warnings.push(result.warning);

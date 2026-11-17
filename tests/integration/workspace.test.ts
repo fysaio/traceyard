@@ -4,6 +4,7 @@ import { apiFetch, ORIGIN, createSession, readSuccess } from "./helpers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import type { Catalog, Operation, SavedTestCase } from "../../shared/repository/workspace";
+import { discoverFile } from "../../agent/discovery.mjs";
 async function account(id = 920) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
       id,
@@ -72,6 +73,82 @@ async function setup() {
   return { ...a, token: key.token };
 }
 describe("connected project experience", () => {
+  it("serves a source flow without application keys or runtime success", async () => {
+    const a = await account(),
+      other = await account(921);
+    const operations = discoverFile(
+      "server.ts",
+      `function load(){return database.read();}app.get('/health',()=>load());`,
+    ).operations;
+    await env.DB.prepare(
+      "INSERT INTO project_repositories(project_id,full_name,status,scan_json,last_error,updated_at) VALUES(?,'Example/app','FAILED',?,'Application could not start without a provider',?)",
+    )
+      .bind(
+        a.projectId,
+        JSON.stringify({ operations, filesScanned: 1, warnings: [] }),
+        new Date().toISOString(),
+      )
+      .run();
+    const catalog = await readSuccess<Catalog>(
+      await call(a, `/api/projects/${a.projectId}/catalog`),
+    );
+    expect(catalog.runs).toHaveLength(0);
+    expect(catalog.operations[0]?.sourceFlow?.steps.map((s) => s.name)).toEqual([
+      "load",
+      "database.read",
+    ]);
+    expect(catalog.operations[0]?.evidence).toBe("source");
+    const operation = await readSuccess<{ operation: Operation }>(
+      await call(a, `/api/projects/${a.projectId}/operations/${catalog.operations[0]!.key}`),
+    );
+    expect(operation.operation.sourceFlow?.steps).toHaveLength(2);
+    expect((await call(other, `/api/projects/${a.projectId}/catalog`)).status).toBe(404);
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS n FROM api_keys WHERE project_id=?")
+          .bind(a.projectId)
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(0);
+  });
+  it("keeps exact-revision static flows when an older runner reports without them", async () => {
+    const a = await setup();
+    const sourceFlow = {
+      steps: [{ id: "c0", parentId: null, name: "loadHealth", line: 1, resolution: "unresolved" }],
+      truncated: false,
+    };
+    const row = await env.DB.prepare(
+      "SELECT scan_json FROM project_repositories WHERE project_id=?",
+    )
+      .bind(a.projectId)
+      .first<{ scan_json: string }>();
+    const scan = JSON.parse(row!.scan_json);
+    scan.operations[0].sourceFlow = sourceFlow;
+    await env.DB.prepare("UPDATE project_repositories SET scan_json=? WHERE project_id=?")
+      .bind(JSON.stringify(scan), a.projectId)
+      .run();
+    const report = (id: string, sha: string) =>
+      call(
+        a,
+        "/api/v1/repository-runs",
+        "POST",
+        {
+          id,
+          sha,
+          phase: "discovery",
+          status: "SUCCEEDED",
+          message: "Older runner",
+          operations: [{ ...scan.operations[0], sourceFlow: undefined }],
+        },
+        a.token,
+      );
+    expect((await report("local-compat", "a".repeat(40))).status).toBe(200);
+    let catalog = await readSuccess<Catalog>(await call(a, `/api/projects/${a.projectId}/catalog`));
+    expect(catalog.operations[0]?.sourceFlow).toEqual(sourceFlow);
+    expect((await report("local-new-revision", "b".repeat(40))).status).toBe(200);
+    catalog = await readSuccess<Catalog>(await call(a, `/api/projects/${a.projectId}/catalog`));
+    expect(catalog.operations[0]?.sourceFlow).toBeUndefined();
+  });
   it("links unique source routes to real runs, isolates projects and serves a complete run detail", async () => {
     const a = await setup(),
       other = await account(921);

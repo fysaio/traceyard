@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { testResultSchema } from "./workspace";
+import { sourceFlowSchema } from "./source-flow";
 const path = z
   .string()
   .min(1)
@@ -13,6 +14,7 @@ export const operationSchema = z
     file: path,
     line: z.number().int().min(1),
     calls: z.array(z.string().max(150)).max(12),
+    sourceFlow: sourceFlowSchema.optional(),
     evidence: z.literal("source"),
   })
   .strict();

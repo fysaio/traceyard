@@ -88,7 +88,11 @@ export async function projectCatalog(
     sourceMap.set(
       source.key,
       previous
-        ? { ...previous, calls: [...new Set([...previous.calls, ...source.calls])].slice(0, 12) }
+        ? {
+            ...previous,
+            calls: [...new Set([...previous.calls, ...source.calls])].slice(0, 12),
+            sourceFlow: undefined,
+          }
         : source,
     );
   }
@@ -126,6 +130,7 @@ export async function projectCatalog(
       file: o.file,
       line: o.line,
       calls: o.calls,
+      sourceFlow: o.sourceFlow,
       evidence: matches.length ? "linked" : "source",
       runtimeNames: [...new Set(matches.map((r) => r.name))],
       runs: matches.length,

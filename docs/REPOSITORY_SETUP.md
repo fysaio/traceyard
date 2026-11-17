@@ -13,6 +13,14 @@ Connecting and scanning do not write repository files. An explicit first-run set
 
 Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.
 
+## Source flow without application credentials
+
+Connecting and browsing source never require a Groq, Supabase or other application service key. Source discovery does not execute repository code. Open any discovered operation to inspect its possible calls before running checks. The parser expands unambiguous top-level local functions within the same file, annotates conditional/callback/loop/catch paths and leaves imported, computed or dynamically assigned implementations unresolved. Unused function bodies are not treated as executed calls. The view is bounded to 12 calls and three levels of local helpers; recursion and truncation are explicit. On the free hosted preview, deeper helper expansion is limited to files of at most 4 KB to control per-step CPU use; larger eligible files retain direct calls. A runner built from this revision can add deeper metadata for its wider source scan. Older pinned runners remain compatible and do not erase same-commit helper metadata. It does not infer a complete business workflow, actual branch selection or execution order.
+
+This analysis feature changes Traceyard only. Customer application and test edits are not connection requirements. The optional GitHub execution integration adds/updates only its reviewed workflow file. A specific customer test-suite repair is a separately approved change, not evidence that every repository must be repaired for Traceyard to work.
+
+Application execution can still fail when an operation needs an unavailable external service. Traceyard reports that failure while keeping source exploration usable; it cannot authenticate a real third-party service without access or truthfully call a simulated result live verification. Source views remain source evidence until a supported runtime trace is actually recorded. Old runner reports preserve static call metadata only when their immutable source commit matches. Existing scans without the new metadata still show their direct calls; rescan source after deploying the updated parser to expand local helpers. No database migration or customer workflow update is needed for this source-view change.
+
 ## When something fails
 
 | Failure                                | What remains available                                         | Next action                                                                                              |

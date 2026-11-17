@@ -2,13 +2,15 @@
 
 Traceyard builds and runs durable workflows, records what happened at each step, and helps investigate failures. The React interface talks to the Hono Worker on the same origin. D1 stores account, project, workflow, execution and integration state; Cloudflare Queues dispatches work and Workflows checkpoints execution.
 
-This branch contains the integrated application. The separate chatgpt.site UI preview is not the backend deployment. No production deployment or remote migration has been performed from this workspace.
+This branch contains the integrated application. The separate chatgpt.site UI preview is not the backend deployment. The operator deployed the GitHub-check flow to Cloudflare; newer branch changes require a further deployment.
 
 ## Product flow
 
 The connected application UI now follows **Projects → Project → Operation → Run**, with saved local request tests, actual execution timelines, check progress, comparison and in-context test settings. See [project experience](docs/PROJECT_EXPERIENCE.md) for implemented actions, evidence rules and verification limits.
 
 **Connect repo** creates or opens its project and starts source discovery. **Run checks** uses GitHub Actions on standard deployments: the first run previews a one-file workflow change and offers **Enable and run** inside Traceyard. Traceyard creates and requests the setup merge through GitHub's API, respects repository rules, and waits for the workflow to be available before dispatching. Later runs start directly, with results displayed here. No local download or Traceyard API key is required for GitHub checks. Failed checks leave source operations available. Optional managed Containers remain a separate paid deployment mode.
+
+**Source flow** is available before execution. The parser follows supported local function calls in each scanned file and marks conditional, loop, callback and error paths. Imported/dynamic implementations stay unresolved; these relationships are inferred and do not prove runtime order or success. No application API keys or application code changes are required for discovery. Checks and actual runtime recording are separate capabilities.
 
 **Project** is now the main workspace: connect source, inspect discovered operations, review project checks and investigate actual application runs in one place. External spans and Traceyard-managed runs share the same activity list; selecting an external run opens its steps beside it. **Build** retains the optional workflow editor. Gateway and workflow experiments remain available through the account menu.
 
