@@ -98,6 +98,15 @@ describe("repository connection and execution evidence", () => {
     const fetcher: typeof fetch = async (input) => {
       requests++;
       const url = String(input);
+      if (url.endsWith("/users/repository-810/installation"))
+        return Response.json({
+          id: 7,
+          app_id: 123,
+          account: { id: 810, login: "repository-810", type: "User" },
+          suspended_at: null,
+        });
+      if (url.endsWith("/users/repository-811/installation"))
+        return new Response(null, { status: 404 });
       if (url.endsWith("/access_tokens"))
         return Response.json({ token: "never-persist-installation-token" });
       if (url.includes("/commits/")) return Response.json({ sha: "a".repeat(40) });
@@ -158,6 +167,134 @@ describe("repository connection and execution evidence", () => {
     expect(state).not.toContain("private-source-marker");
     expect(state).not.toContain("PRIVATE KEY");
   });
+  it.each([
+    "existing",
+    "reinstalled",
+    "missing",
+    "suspended",
+    "unavailable",
+    "foreign-account",
+    "wrong-app",
+  ])(
+    "refreshes %s GitHub installations without depending on an installation webhook",
+    async (mode) => {
+      const a = await account();
+      const pair = await crypto.subtle.generateKey(
+        {
+          name: "RSASSA-PKCS1-v1_5",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        },
+        true,
+        ["sign", "verify"],
+      );
+      const configured = {
+        ...env,
+        GITHUB_APP_ID: "123",
+        GITHUB_APP_SLUG: "traceyard-test",
+        GITHUB_APP_WEBHOOK_SECRET: "test-only",
+        GITHUB_APP_PRIVATE_KEY:
+          "-----BEGIN PRIVATE KEY-----\n" +
+          btoa(
+            String.fromCharCode(
+              ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+            ),
+          ) +
+          "\n-----END PRIVATE KEY-----",
+      };
+      if (mode === "reinstalled" || mode === "missing")
+        await env.DB.prepare(
+          "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(7,'810','repository-810',?)",
+        )
+          .bind(new Date().toISOString())
+          .run();
+      let lookup = 0,
+        repositoryReads = 0;
+      const fetcher: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/users/repository-810/installation")) {
+          lookup++;
+          const token = new Headers(init?.headers).get("Authorization")!.slice(7);
+          const [header, claims, signature] = token.split(".");
+          expect(JSON.parse(atob(claims!)).iss).toBe("123");
+          const bytes = Uint8Array.from(
+            atob(signature!.replace(/-/g, "+").replace(/_/g, "/")),
+            (c) => c.charCodeAt(0),
+          );
+          expect(
+            await crypto.subtle.verify(
+              "RSASSA-PKCS1-v1_5",
+              pair.publicKey,
+              bytes,
+              new TextEncoder().encode(header + "." + claims),
+            ),
+          ).toBe(true);
+          if (mode === "missing") return new Response(null, { status: 404 });
+          if (mode === "unavailable") return new Response(null, { status: 503 });
+          return Response.json({
+            id: 182604347,
+            app_id: mode === "wrong-app" ? 999 : 123,
+            account: {
+              id: mode === "foreign-account" ? 811 : 810,
+              login: "repository-810",
+              type: "User",
+            },
+            suspended_at: mode === "suspended" ? "2026-11-17T00:00:00Z" : null,
+          });
+        }
+        if (url.endsWith("/access_tokens"))
+          return Response.json({ token: "fixture-installation-token" });
+        if (url.includes("/installation/repositories")) {
+          repositoryReads++;
+          return Response.json({ repositories: [{ id: 99, full_name: "repository-810/somni" }] });
+        }
+        throw Error("Unexpected fixture URL");
+      };
+      const app = createApp({ githubFetch: fetcher });
+      const response = await app.fetch(
+        new Request(ORIGIN + "/api/repositories", { headers: { cookie: a.cookie } }),
+        configured,
+        createExecutionContext(),
+      );
+      expect(lookup).toBe(1);
+      if (["unavailable", "foreign-account", "wrong-app"].includes(mode)) {
+        expect(response.status).toBe(503);
+        expect(repositoryReads).toBe(0);
+        expect(await env.DB.prepare("SELECT id FROM github_installations").all()).toMatchObject({
+          results: [],
+        });
+        return;
+      }
+      const value = await readSuccess<{
+        installationCount: number;
+        manageUrl: string | null;
+        items: unknown[];
+      }>(response);
+      if (mode === "missing") {
+        expect(value).toMatchObject({ installationCount: 0, manageUrl: null, items: [] });
+        expect(
+          await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
+        ).toEqual({ suspended: 1 });
+        return;
+      }
+      expect(value).toMatchObject({
+        installationCount: 1,
+        manageUrl: "https://github.com/settings/installations/182604347",
+      });
+      expect(value.items).toHaveLength(mode === "suspended" ? 0 : 1);
+      expect(repositoryReads).toBe(mode === "suspended" ? 0 : 1);
+      expect(
+        await env.DB.prepare(
+          "SELECT account_id,suspended FROM github_installations WHERE id=182604347",
+        ).first(),
+      ).toEqual({ account_id: "810", suspended: mode === "suspended" ? 1 : 0 });
+      if (mode === "reinstalled")
+        expect(
+          await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
+        ).toEqual({ suspended: 1 });
+    },
+  );
   it("keeps repository state owner-scoped and exposes missing GitHub configuration honestly", async () => {
     const a = await account(),
       b = await account(811);
@@ -499,6 +636,15 @@ describe("repository connection and execution evidence", () => {
     const source = "app.post('/interpret',async c=>model.generate(c));";
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
+      if (url.endsWith("/users/repository-810/installation"))
+        return Response.json({
+          id: 7,
+          app_id: 123,
+          account: { id: 810, login: "repository-810", type: "User" },
+          suspended_at: null,
+        });
+      if (url.endsWith("/users/repository-811/installation"))
+        return new Response(null, { status: 404 });
       if (url.endsWith("/access_tokens"))
         return Response.json({ token: "test-installation-token" });
       if (url.includes("/installation/repositories"))
@@ -679,6 +825,15 @@ describe("repository connection and execution evidence", () => {
       dispatches = 0;
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
+      if (url.endsWith("/users/repository-810/installation"))
+        return Response.json({
+          id: 7,
+          app_id: 123,
+          account: { id: 810, login: "repository-810", type: "User" },
+          suspended_at: null,
+        });
+      if (url.endsWith("/users/repository-811/installation"))
+        return new Response(null, { status: 404 });
       if (url.endsWith("/access_tokens")) return Response.json({ token: "fixture-token" });
       if (url.includes("/installation/repositories"))
         return Response.json({ repositories: [{ id: 99, full_name: "repository-810/somni" }] });
