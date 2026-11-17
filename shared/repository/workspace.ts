@@ -96,6 +96,7 @@ export interface Catalog {
   warnings: string[];
   filesScanned: number;
   executionAvailable?: boolean;
+  executionProvider?: "github" | "managed" | null;
 }
 export interface TestResult {
   caseId: string;

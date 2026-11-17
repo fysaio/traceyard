@@ -1,0 +1,46 @@
+// Reviewed agent revision; customer CI does not execute a moving platform branch.
+export const DEFAULT_RUNNER_REF = "53fe4069b5b9045a2cb6ee8b184b00d95f423ded";
+export function runnerWorkflow(origin: string, runnerRef: string) {
+  return `name: Traceyard
+run-name: Traceyard \${{ inputs.run_request }}
+on:
+  workflow_dispatch:
+    inputs:
+      run_request:
+        description: Traceyard check request
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: traceyard-\${{ github.repository_id }}
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Fetch Traceyard runner
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: fysaio/traceyard
+          ref: ${runnerRef}
+          path: .traceyard-runner
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install runner dependencies
+        run: npm ci --prefix .traceyard-runner --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Discover, build and test
+        env:
+          CI: 'true'
+          TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
+          TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
+        run: node .traceyard-runner/agent/cli.mjs run .
+`;
+}

@@ -1,3 +1,4 @@
+import { ApiClientError } from "./api";
 import type { ModelResult, ModelRouteConfig } from "../../shared/contracts/gateway";
 export async function integrationRequest<T>(
   project: string,
@@ -14,8 +15,17 @@ export async function integrationRequest<T>(
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const result = (await response.json()) as { data: T; error?: { message: string } };
-  if (!response.ok) throw new Error(result.error?.message ?? "Request failed.");
+  const result = (await response.json()) as {
+    data: T;
+    error?: { message: string; code?: string; details?: unknown };
+  };
+  if (!response.ok)
+    throw new ApiClientError(
+      response.status,
+      result.error?.code ?? "REQUEST_FAILED",
+      result.error?.message ?? "Request failed.",
+      result.error?.details,
+    );
   return result.data;
 }
 export interface RouteRecord {

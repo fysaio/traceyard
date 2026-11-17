@@ -10,6 +10,7 @@ import {
 import { ownedProject } from "../../integrations/access";
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 import { badRequest, conflict, notFound, parseWith, unauthorized } from "../errors";
+import { bindGitHubDispatch, syncGitHubDispatches } from "../../repositories/github-checks";
 import { projectCatalog, applicationRuns } from "../../repositories/catalog";
 import { syncRepositoryChecks } from "../../repositories/check-sync";
 import { runnerPrincipal } from "../../repositories/runner-auth";
@@ -45,14 +46,36 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
     void projectId;
     throw badRequest(
       "UPGRADE_RETIRED",
-      "Traceyard manages runner updates. No repository pull request is required.",
+      "Use Run checks to review and enable the current workflow inside Traceyard.",
     );
   });
   app.post("/projects/:projectId/checks/:id/cancel", async (c) => {
-    const { projectId, userId } = await ownedProject(c),
-      job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
-        .bind(projectId, c.req.param("id"))
+    const { projectId, userId } = await ownedProject(c);
+    const dispatch = await c.env.DB.prepare(
+      "SELECT runner_id FROM github_check_dispatches WHERE project_id=? AND id=?",
+    )
+      .bind(projectId, c.req.param("id"))
+      .first<{ runner_id: string | null }>();
+    let job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
+      .bind(projectId, dispatch?.runner_id ?? c.req.param("id"))
+      .first<{ id: string; status: string; source: string }>();
+    if (job?.source === "github-pending") {
+      const cancelled = await c.env.DB.batch([
+        c.env.DB.prepare(
+          "UPDATE github_check_dispatches SET state='CANCELLED',updated_at=? WHERE id=? AND project_id=? AND runner_id IS NULL",
+        ).bind(nowIso(), job.id, projectId),
+        c.env.DB.prepare(
+          "UPDATE repository_jobs SET status='CANCELLED',phase='complete',updated_at=? WHERE id=? AND project_id=? AND source='github-pending' AND EXISTS(SELECT 1 FROM github_check_dispatches WHERE id=? AND state='CANCELLED')",
+        ).bind(nowIso(), job.id, projectId, job.id),
+      ]);
+      if (cancelled[0]?.meta.changes) return c.json(data(c, { requested: true }), 202);
+      // The runner may have bound between the read and cancellation claim.
+      job = await c.env.DB.prepare(
+        "SELECT j.* FROM repository_jobs j JOIN github_check_dispatches d ON d.runner_id=j.id AND d.project_id=j.project_id WHERE d.id=? AND d.project_id=?",
+      )
+        .bind(c.req.param("id"), projectId)
         .first<{ id: string; status: string; source: string }>();
+    }
     if (job?.source === "managed") {
       if (!["RUNNING", "QUEUED"].includes(job.status))
         throw badRequest("CHECK_FINISHED", "This check has already finished.");
@@ -310,6 +333,7 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
         .first();
       if (!bound)
         throw badRequest("REQUEST_ALREADY_BOUND", "This test request belongs to another run.");
+      await bindGitHubDispatch(c.env, who.projectId, requestId, who.runId!, who.sha!);
       return c.json(data(c, JSON.parse(row.snapshot_json)));
     }
     const config = await c.env.DB.prepare(
@@ -355,15 +379,22 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   // Check-result metadata stays separate from automatic span payload capture.
   app.get("/projects/:projectId/checks/:id", async (c) => {
     const { projectId } = await ownedProject(c);
-    await syncRepositoryChecks(c.env, projectId, undefined, c.req.param("id"));
+    await syncGitHubDispatches(c.env, projectId, fetcher);
+    const mapped = await c.env.DB.prepare(
+      "SELECT runner_id FROM github_check_dispatches WHERE id=? AND project_id=?",
+    )
+      .bind(c.req.param("id"), projectId)
+      .first<{ runner_id: string | null }>();
+    const id = mapped?.runner_id ?? c.req.param("id");
+    await syncRepositoryChecks(c.env, projectId, undefined, id);
     const job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
-      .bind(projectId, c.req.param("id"))
+      .bind(projectId, id)
       .first();
     if (!job) throw notFound("Check not found.");
     const results = await c.env.DB.prepare(
       "SELECT result_json FROM repository_test_results WHERE project_id=? AND check_id=?",
     )
-      .bind(projectId, c.req.param("id"))
+      .bind(projectId, id)
       .all<{ result_json: string }>();
     const repo = await c.env.DB.prepare(
       "SELECT full_name,repository_id FROM project_repositories WHERE project_id=?",

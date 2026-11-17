@@ -34,6 +34,7 @@ export const reportSchema = z
   .strict();
 export type RepositoryReport = z.infer<typeof reportSchema>;
 export interface RepositoryRecord {
+  ci_setup_json?: string | null;
   scan_id?: string | null;
   project_id: string;
   repository_id: number | null;
@@ -47,7 +48,15 @@ export interface RepositoryRecord {
   last_error: string | null;
   setup_pr_url: string | null;
   runner_enabled: number;
-  check_setup_state: "NOT_STARTED" | "PREPARING" | "AWAITING_MERGE" | "READY" | "QUEUED" | "FAILED";
+  check_setup_state:
+    | "NOT_STARTED"
+    | "PREPARING"
+    | "AWAITING_MERGE"
+    | "READY"
+    | "QUEUED"
+    | "FAILED"
+    | "MERGING"
+    | "BLOCKED";
   check_setup_error: string | null;
   check_setup_updated_at: string | null;
   last_dispatch_at: string | null;

@@ -35,7 +35,7 @@ The local key's project supplies its settings. Source paths stay relative to the
 
 The runner installs locked dependencies, then builds/runs the existing npm test suite. A selected HTTP request test starts the configured application directly; its startup script must prepare any required build artifacts. It waits up to 30 seconds for the local port, rejects an already occupied port, uses a 15-second bounded request and never follows redirects. The entire request-check process is bounded to 180 seconds. It records a real measured trace and assertion verdict, then stops the application process group. Test-only Node instrumentation also records supported server activity. This does not automatically provision databases, configure external services, generate inputs, discover every business workflow, or record remote Deno/Python/browser execution.
 
-The Traceyard-managed image carries the agent version. Setup/upgrade PRs are retired; legacy Actions ingestion remains compatible with existing installations.
+Standard deployments use GitHub Actions with a pinned agent. First-run setup previews one workflow file inside Traceyard; **Enable and run** requests its merge while respecting GitHub repository rules, then starts the check. Subsequent checks do not need another approval unless the workflow changes. The Traceyard-managed image remains an optional paid execution mode.
 
 The local CLI still ships from a checkout, not a published/browser-authenticated package. Existing local `scan` and `connect` commands remain supported. Per-project fixtures are not a permanent application server, and this change does not implement visual rewriting of application business logic or automatically generated fixes.
 

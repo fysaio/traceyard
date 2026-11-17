@@ -1,8 +1,8 @@
-import { requestManagedCheck } from "./managed";
+import { dispatchGitHubChecks } from "./github-checks";
+import { managedChecksAvailable, requestManagedCheck } from "./managed";
 import { randomId } from "../lib/crypto";
 
-// Repository execution belongs to Traceyard. Connecting never writes customer
-// workflow files, opens setup PRs, or dispatches their GitHub Actions.
+// An explicit Run action uses GitHub CI on standard deployments.
 export async function dispatchRepositoryChecks(
   env: Env,
   projectId: string,
@@ -10,6 +10,14 @@ export async function dispatchRepositoryChecks(
   savedRequestId?: string,
   requestKey?: string,
 ) {
+  if (!managedChecksAvailable(env))
+    return dispatchGitHubChecks(
+      env,
+      projectId,
+      requestKey ?? savedRequestId ?? randomId("manual"),
+      fetcher,
+      savedRequestId,
+    );
   return requestManagedCheck(
     env,
     projectId,
@@ -25,11 +33,32 @@ export async function startInitialChecks(
   scanId?: string,
 ) {
   const repo = await env.DB.prepare(
-    "SELECT scan_id,commit_sha,status FROM project_repositories WHERE project_id=?",
+    "SELECT scan_id,commit_sha,status,runner_enabled FROM project_repositories WHERE project_id=?",
   )
     .bind(projectId)
-    .first<{ scan_id: string | null; commit_sha: string | null; status: string }>();
+    .first<{
+      scan_id: string | null;
+      commit_sha: string | null;
+      status: string;
+      runner_enabled: number;
+    }>();
   if (scanId && repo?.scan_id !== scanId) return { state: "SUPERSEDED" };
+  if (!managedChecksAvailable(env)) {
+    if (!repo?.runner_enabled) return { state: "SETUP_REQUIRED" };
+    // A setup merge can finish discovery after the owner's first manual Run.
+    const recent = await env.DB.prepare(
+      "SELECT id FROM repository_jobs WHERE project_id=? AND source='github' AND commit_sha=? AND updated_at>? LIMIT 1",
+    )
+      .bind(projectId, repo.commit_sha, new Date(Date.now() - 15 * 60000).toISOString())
+      .first();
+    if (recent) return { state: "ALREADY_CHECKED" };
+    return dispatchGitHubChecks(
+      env,
+      projectId,
+      "scan:" + (repo?.scan_id ?? randomId("scan")),
+      fetcher,
+    );
+  }
   return requestManagedCheck(
     env,
     projectId,
