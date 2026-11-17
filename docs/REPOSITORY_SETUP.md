@@ -112,7 +112,13 @@ TRACEYARD_ORIGIN=https://YOUR_TRACEYARD_HOST
 TRACEYARD_KEY=<project-scoped API key>
 ```
 
-From that repository:
+With Node.js 22.12+ and Git, run this from that repository (no separate Traceyard checkout required):
+
+```bash
+npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#53fe4069b5b9045a2cb6ee8b184b00d95f423ded -- traceyard run .
+```
+
+The command installs an immutable reviewed runner revision into npm's cache. In Traceyard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing Traceyard checkout instead:
 
 ```bash
 node /path/to/traceyard/agent/cli.mjs scan .
