@@ -105,6 +105,12 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 - Supported Node HTTP activity is recorded automatically during tests. Mocked/in-process tests can pass without recording a trace. Continuous monitoring of an already deployed application requires that application's runtime integration; repository access alone does not instrument production.
 - Visual business-logic editing, automatic fixes/commits and arbitrary workflow replay are not implemented.
 
+## Runner update for existing deployments
+
+The reviewed runner revision is `a23df5c114e7302e76418309206150983255a3c8`. It avoids a redundant Node ESM loader inside Vitest's own transformed module runtime while retaining ordinary application ESM hooks and supported Node HTTP recording. The three-minute command deadline and ten-minute job limit are unchanged. Regression fixtures exercise real HTTP recording for passing and failing Vitest suites.
+
+An existing deployment can select this immutable revision through its operator-controlled `TRACEYARD_RUNNER_REF` setting. The repository workflow must use the same revision; Traceyard validates the exact generated workflow before dispatch. Application test fixes and runner updates are separate changes. Mock-only tests do not establish observed application activity, and batch exporters may lose the final spans of a worker that is forcibly stopped.
+
 ## GitHub check recovery
 
 A durable request ID prevents an uncertain response from dispatching a second job. The generated workflow includes that request in its run name, so polling can recover a missed runner callback. Pending requests become unconfirmed after ten minutes without a matching runner. Active jobs have a ten-minute GitHub deadline and individual application commands have a three-minute deadline. Cancellation before runner binding prevents application commands from starting. Source discovery remains independent.
@@ -123,7 +129,7 @@ TRACEYARD_KEY=<project-scoped API key>
 With Node.js 22.12+ and Git, run this from that repository (no separate Traceyard checkout required):
 
 ```bash
-npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#53fe4069b5b9045a2cb6ee8b184b00d95f423ded -- traceyard run .
+npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#a23df5c114e7302e76418309206150983255a3c8 -- traceyard run .
 ```
 
 The command installs an immutable reviewed runner revision into npm's cache. In Traceyard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing Traceyard checkout instead:
