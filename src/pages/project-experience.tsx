@@ -1137,7 +1137,7 @@ function LocalCheck({
   });
   const environment = `TRACEYARD_ORIGIN=${window.location.origin}\nTRACEYARD_KEY=${key.data?.token ?? "<create a project key below>"}\n`,
     command =
-      "npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#53fe4069b5b9045a2cb6ee8b184b00d95f423ded -- traceyard run ." +
+      "npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#a23df5c114e7302e76418309206150983255a3c8 -- traceyard run ." +
       (caseId ? " --case " + caseId : "");
   return (
     <Modal title={caseId ? "Run this test locally" : "Run project checks locally"} close={close}>

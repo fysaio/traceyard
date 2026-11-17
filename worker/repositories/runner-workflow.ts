@@ -1,5 +1,5 @@
 // Reviewed agent revision; customer CI does not execute a moving platform branch.
-export const DEFAULT_RUNNER_REF = "53fe4069b5b9045a2cb6ee8b184b00d95f423ded";
+export const DEFAULT_RUNNER_REF = "a23df5c114e7302e76418309206150983255a3c8";
 export function runnerWorkflow(origin: string, runnerRef: string) {
   return `name: Traceyard
 run-name: Traceyard \${{ inputs.run_request }}
