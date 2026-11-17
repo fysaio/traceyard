@@ -708,11 +708,8 @@ describe("repository connection and execution evidence", () => {
       await invoke("/api/repositories"),
     );
     expect(listed.items[0]?.id).toBe(99);
-    expect(
-      (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
-    ).toBe(400);
     expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
-      503,
+      409,
     );
     async function webhook(body: unknown) {
       const text = JSON.stringify(body),
@@ -958,8 +955,7 @@ describe("repository connection and execution evidence", () => {
         .bind(id)
         .first(),
     ).toEqual({ status: "DISCOVERED", setup_pr_url: null });
-    expect((await invoke(`/api/projects/${id}/repository/setup`)).status).toBe(400);
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(503);
+    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
     expect(branches).toBe(0);
     expect(prs).toBe(0);
     expect(dispatches).toBe(0);

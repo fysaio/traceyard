@@ -20,6 +20,7 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM managed_repository_checks"),
     env.DB.prepare("DELETE FROM repository_test_results"),
+    env.DB.prepare("DELETE FROM github_check_dispatches"),
     env.DB.prepare("DELETE FROM repository_check_requests"),
     env.DB.prepare("DELETE FROM repository_test_cases"),
     env.DB.prepare("DELETE FROM repository_runner_configs"),

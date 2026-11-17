@@ -6,6 +6,7 @@ import { sha256Hex } from "../lib/crypto";
 import { getOwnedProject } from "../persistence/projects";
 import { notFound } from "../api/errors";
 import { syncRepositoryChecks } from "./check-sync";
+import { githubChecksAvailable, syncGitHubDispatches } from "./github-checks";
 import { managedChecksAvailable } from "./managed";
 export async function operationKey(file: string, name: string) {
   return "op_" + (await sha256Hex(file + "\0" + name)).slice(0, 32);
@@ -44,6 +45,7 @@ export async function projectCatalog(
 ): Promise<Catalog> {
   const project = await getOwnedProject(env.DB, userId, projectId);
   if (!project) throw notFound("Project not found.");
+  await syncGitHubDispatches(env, projectId);
   await syncRepositoryChecks(env, projectId);
   const [repository, runs, jobs, config, cases, managed] = await Promise.all([
     env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
@@ -178,6 +180,12 @@ export async function projectCatalog(
       : runnerConfigSchema.parse({}),
     warnings: scan?.warnings ?? [],
     filesScanned: scan?.filesScanned ?? 0,
-    executionAvailable: managedChecksAvailable(env),
+    executionAvailable:
+      managedChecksAvailable(env) || (!!repository?.repository_id && githubChecksAvailable(env)),
+    executionProvider: managedChecksAvailable(env)
+      ? "managed"
+      : repository?.repository_id && githubChecksAvailable(env)
+        ? "github"
+        : null,
   };
 }

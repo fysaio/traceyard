@@ -5,11 +5,11 @@
 1. Sign in with GitHub and grant the Traceyard GitHub App access to selected repositories.
 2. Choose **Connect repo**. Traceyard creates or reopens the repository's project and starts source discovery.
 3. Open the project. Discovered operations become available without waiting for installation, build or tests to pass.
-4. On a managed deployment, Traceyard downloads the selected commit into its own temporary workspace and runs supported checks. Later default-branch pushes refresh discovery and request another bounded check. **Check project** requests a check explicitly.
+4. Choose **Run checks**. On the first run, review the one-file workflow change and choose **Enable and run** inside Traceyard. Traceyard creates the setup PR and requests its merge without sending you to GitHub. Once GitHub confirms the workflow on the default branch, the check starts and reports here. Subsequent runs start directly. Default-branch pushes refresh discovery and request bounded checks after setup is enabled.
 
 Traceyard refreshes the signed-in personal account’s existing installation directly from GitHub. Installations created before the current deployment are recovered without a new installation webhook or reinstall. A failed GitHub lookup is shown as a refresh error rather than an empty install prompt.
 
-Connecting does not create a branch, write `.github/workflows/traceyard.yml`, open a setup PR or dispatch customer GitHub Actions. The retired setup and upgrade endpoints return an explanatory error. Previously installed Actions can still report into their existing projects; they are compatibility support, not a prerequisite for new connections. Remove an old Traceyard workflow separately if you no longer want it to run.
+Connecting and scanning do not write repository files. An explicit first-run setup action creates or updates only `.github/workflows/traceyard.yml` through a PR. Approval is bound to the displayed PR head and exact workflow contents; another changed file or a changed head prevents merging. Traceyard never bypasses repository rules. A required human review or failed prerequisite is shown as a blocked setup inside Traceyard; it cannot be silently overridden. Existing Traceyard workflows that target an old deployment are updated through the same in-app approval.
 
 Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.
 
@@ -22,7 +22,7 @@ Source discovery finds supported entry points and direct static calls. These are
 | Tests fail                             | Source operations and any activity recorded before the failure | Inspect the failed stage or recorded run; request a new attempt when ready                               |
 | One saved HTTP test fails              | Other operations and saved tests                               | Correct its input or application issue; run an independent test if its prerequisites work                |
 | Runner is interrupted or loses contact | Source operations and retained evidence                        | Outcome is unconfirmed; Traceyard closes expired checks without automatically repeating application work |
-| Managed execution is not configured    | Source discovery and browsing                                  | Operator deploys the managed execution service                                                           |
+| GitHub setup cannot merge              | Source discoveries and history                                 | Traceyard shows the blocking repository requirement; no check is claimed to have started                 |
 
 An unavailable database can prevent an operation that needs that database from executing. Traceyard cannot safely bypass application prerequisites. Browsing source is independent. A selected HTTP request test can start the selected application directly instead of requiring an unrelated root build, but the configured startup script must prepare everything that application needs.
 
@@ -34,8 +34,8 @@ This is configured once by the Traceyard operator. Individual developers install
 
 The current connection implementation supports personal GitHub accounts. Create/configure one GitHub App with:
 
-- Repository **Contents: read**, **Metadata: read**.
-- **Push** webhook events. GitHub sends installation lifecycle events automatically. Keep **Workflow run** and **Actions: read** only if retaining legacy Actions reporting/status recovery.
+- Repository **Contents: read/write**, **Pull requests: read/write**, **Workflows: read/write**, **Actions: read/write**, **Metadata: read**.
+- **Push** and **Workflow run** webhook events. GitHub sends installation lifecycle events automatically.
 - Public HTTPS webhook URL: `https://YOUR_TRACEYARD_HOST/api/github/webhook`.
 - A securely generated webhook secret. Keep the App private key in the Worker secret store.
 
@@ -59,11 +59,11 @@ A literal `\n`-separated PEM is accepted. Convert a downloaded PKCS#1 key locall
 openssl pkcs8 -topk8 -nocrypt -in downloaded-key.pem -out github-app-pkcs8.pem
 ```
 
-Never commit key files or environment secrets. `TRACEYARD_RUNNER_REF` is no longer needed for managed checks: the agent is baked into Traceyard's deployed image.
+Never commit key files or environment secrets. GitHub workflows use a pinned, reviewed agent revision (`TRACEYARD_RUNNER_REF`, or the checked-in default). Updating the workflow revision requires the same in-app approval. The managed agent is baked into its deployed image.
 
 ### Free Cloudflare deployment (default)
 
-The default deployment contains the web app, API, D1, Queues and discovery Workflows. It does **not** provision Containers, run arbitrary repository code in the cloud, or change your billing plan. Cloudflare Free quotas still apply. `Run locally` records checks on the developer's computer and sends their results to this hosted dashboard. A customer setup PR is never required.
+The default deployment contains the web app, API, D1, Queues and discovery Workflows. It does not provision Containers or change your billing plan. Project code runs on the repository owner's GitHub-hosted Actions runner. GitHub's included allowance and repository Actions policy apply; private-repository execution is not unlimited. GitHub OIDC authenticates the runner without a customer-entered Traceyard key. The setup PR is prepared and approved inside Traceyard. The local CLI remains optional.
 
 After reviewing the account/resource IDs and authenticating Wrangler:
 
@@ -101,9 +101,15 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 - The free GitHub discovery preview reads at most 16 eligible JavaScript/TypeScript files, each at most 16 KB; managed deployments allow up to 60 files of 64 KB. It exposes up to 100 operations and labels coverage limits. A downloaded agent scan can inspect up to 10,000 eligible files, with the same file/operation bounds.
 - Managed queue deadline: 10 minutes. Managed execution deadline: 10 minutes; each application command/request-test process is bounded to 180 seconds. VM entrypoint lifetime is at most 15 minutes if the controller fails.
 - At most 6 accepted checks per project per hour; default global concurrency is 2 (`MANAGED_CHECK_CONCURRENCY_LIMIT`, bounded 1–8). These are capacity limits, not a monthly spending guarantee. Pushes beyond the project allowance still update source discovery.
-- Each check uses a fresh workspace and frozen commit/settings. No persistent service or dependency cache is supplied yet. External services, private registry authentication and application secrets are not inferred or provisioned.
+- Each check uses a fresh workspace. GitHub settings/request fixtures are frozen at dispatch; code comes from the default-branch commit selected by GitHub when dispatch starts. Managed checks freeze both commit and settings. No persistent service or dependency cache is supplied yet. External services, private registry authentication and application secrets are not inferred or provisioned.
 - Supported Node HTTP activity is recorded automatically during tests. Mocked/in-process tests can pass without recording a trace. Continuous monitoring of an already deployed application requires that application's runtime integration; repository access alone does not instrument production.
 - Visual business-logic editing, automatic fixes/commits and arbitrary workflow replay are not implemented.
+
+## GitHub check recovery
+
+A durable request ID prevents an uncertain response from dispatching a second job. The generated workflow includes that request in its run name, so polling can recover a missed runner callback. Pending requests become unconfirmed after ten minutes without a matching runner. Active jobs have a ten-minute GitHub deadline and individual application commands have a three-minute deadline. Cancellation before runner binding prevents application commands from starting. Source discovery remains independent.
+
+The workflow is dispatch-only; default-branch push webhooks request checks through Traceyard, avoiding a second automatic workflow triggered by the setup merge. Frozen manifests are bound to one GitHub run/attempt and expire after 30 minutes. Dispatch records and check manifests are retained for 30 days. Application credentials, databases and external service prerequisites are not invented by repository access; missing prerequisites produce an actionable failed stage.
 
 ## Local CLI
 

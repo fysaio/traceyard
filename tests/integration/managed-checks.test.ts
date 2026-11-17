@@ -520,7 +520,7 @@ describe("Traceyard-managed repository checks", () => {
     expect(f.queued).toHaveLength(6);
     expect((await f.call(`/api/projects/${f.project}/catalog`)).status).toBe(200);
   });
-  it("keeps discovery usable when execution infrastructure is absent", async () => {
+  it("offers in-app GitHub setup when managed execution infrastructure is absent", async () => {
     const f = await fixture();
     delete f.configured.MANAGED_REPOSITORY_RUNNERS;
     expect(
@@ -529,13 +529,15 @@ describe("Traceyard-managed repository checks", () => {
           requestId: "run-one",
         })
       ).status,
-    ).toBe(503);
-    const catalog = await readSuccess<{ executionAvailable: boolean; operations: unknown[] }>(
-      await f.call(`/api/projects/${f.project}/catalog`),
-    );
-    expect(catalog.executionAvailable).toBe(false);
+    ).toBe(409);
+    const catalog = await readSuccess<{
+      executionAvailable: boolean;
+      executionProvider: string;
+      operations: unknown[];
+    }>(await f.call(`/api/projects/${f.project}/catalog`));
+    expect(catalog.executionAvailable).toBe(true);
+    expect(catalog.executionProvider).toBe("github");
     expect(catalog.operations.length).toBe(1);
-    expect((await f.call(`/api/projects/${f.project}/repository/setup`, "POST")).status).toBe(400);
   });
   it("a failed request can be retried explicitly without reusing or replaying its execution", async () => {
     const f = await fixture(),

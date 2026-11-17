@@ -60,6 +60,7 @@ export async function installationAccessToken(
   installationId: number,
   fetcher: typeof fetch = fetch,
   repositoryId?: number,
+  permissions: Record<string, string> = { contents: "read" },
 ): Promise<string> {
   const appToken = await githubAppToken(env);
   const headers = {
@@ -80,7 +81,7 @@ export async function installationAccessToken(
         ? {
             body: JSON.stringify({
               repository_ids: [repositoryId],
-              permissions: { contents: "read" },
+              permissions,
             }),
           }
         : {}),
@@ -104,6 +105,15 @@ export async function githubRequest<T>(
 ): Promise<T> {
   if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
   const token = await installationAccessToken(env, installationId, fetcher);
+  return requestWithToken<T>(token, path, init, fetcher);
+}
+async function requestWithToken<T>(
+  token: string,
+  path: string,
+  init: RequestInit,
+  fetcher: typeof fetch,
+): Promise<T> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
   const response = await fetcher("https://api.github.com" + path, {
     ...init,
     headers: {
@@ -124,6 +134,21 @@ export async function githubRequest<T>(
     );
   const body = await response.text();
   return (body.trim() ? JSON.parse(body) : null) as T;
+}
+export async function repositoryGitHubClient(
+  env: Env,
+  installationId: number,
+  repositoryId: number,
+  fetcher: typeof fetch = fetch,
+) {
+  const token = await installationAccessToken(env, installationId, fetcher, repositoryId, {
+    contents: "write",
+    pull_requests: "write",
+    workflows: "write",
+    actions: "write",
+  });
+  return <T>(path: string, init: RequestInit = {}) =>
+    requestWithToken<T>(token, path, init, fetcher);
 }
 export async function syncPersonalInstallation(
   env: Env,
