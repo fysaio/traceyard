@@ -1202,3 +1202,34 @@ html {
   border-radius: 20px;
   margin-top: 20px;
 }
+
+.flow-local-check {
+  display: grid;
+  gap: 24px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.flow-local-check h3 {
+  font-size: 17px;
+  margin-bottom: 8px;
+}
+.flow-local-check p {
+  color: var(--muted);
+}
+.flow-local-check .code {
+  margin: 14px 0;
+  border-radius: 18px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.flow-local-check summary {
+  cursor: pointer;
+  font-weight: 600;
+  border-radius: 14px;
+  padding: 12px 0;
+}
+.flow-local-check summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 5px;
+}

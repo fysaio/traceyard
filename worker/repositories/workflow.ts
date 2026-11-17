@@ -24,29 +24,31 @@ export class RepositoryDiscoveryWorkflow extends WorkflowEntrypoint<
     }>,
     step: WorkflowStep,
   ) {
-    const source = await step
-      .do(
-        "discover-source",
-        { timeout: "10 minutes", retries: { limit: 2, delay: "5 seconds" } },
-        async () => {
-          const repo = await this.env.DB.prepare(
-            "SELECT project_id,installation_id,full_name,default_branch FROM project_repositories WHERE project_id=? AND scan_id=?",
-          )
-            .bind(event.payload.projectId, event.payload.scanId)
-            .first<{
-              project_id: string;
-              installation_id: number;
-              full_name: string;
-              default_branch: string;
-            }>();
-          if (!repo?.installation_id) return;
-          await scanRepository(this.env, {
-            ...repo,
-            scan_id: event.payload.scanId,
-            ref: event.payload.commitSha,
-          });
+    const source = await (async () => {
+      const repo = await step.do("source-repository", async () =>
+        this.env.DB.prepare(
+          "SELECT project_id,installation_id,full_name,default_branch FROM project_repositories WHERE project_id=? AND scan_id=?",
+        )
+          .bind(event.payload.projectId, event.payload.scanId)
+          .first<{
+            project_id: string;
+            installation_id: number;
+            full_name: string;
+            default_branch: string;
+          }>(),
+      );
+      if (!repo?.installation_id) return;
+      await scanRepository(
+        this.env,
+        {
+          ...repo,
+          scan_id: event.payload.scanId,
+          ref: event.payload.commitSha,
         },
-      )
+        fetch,
+        step,
+      );
+    })()
       .then(() => ({ status: "fulfilled" }))
       .catch(() => ({ status: "rejected" }));
     const checks = event.payload.checks

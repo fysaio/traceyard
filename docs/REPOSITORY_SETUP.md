@@ -59,11 +59,11 @@ openssl pkcs8 -topk8 -nocrypt -in downloaded-key.pem -out github-app-pkcs8.pem
 
 Never commit key files or environment secrets. `TRACEYARD_RUNNER_REF` is no longer needed for managed checks: the agent is baked into Traceyard's deployed image.
 
-### Cloudflare deployment
+### Free Cloudflare deployment (default)
 
-`wrangler.managed.jsonc` adds the `RepositoryCheckRunner` Durable Object, container image and global execution admission setting to the existing Worker/D1/Queues/Workflows application. Ordinary `wrangler.jsonc` remains available for source/UI development without Docker. This separation makes execution availability explicit instead of offering a setup PR as a workaround.
+The default deployment contains the web app, API, D1, Queues and discovery Workflows. It does **not** provision Containers, run arbitrary repository code in the cloud, or change your billing plan. Cloudflare Free quotas still apply. `Run locally` records checks on the developer's computer and sends their results to this hosted dashboard. A customer setup PR is never required.
 
-Requirements: configured Cloudflare account with Containers enabled, Docker available for image building, existing application bindings/secrets, and a publicly reachable HTTPS application origin. Review account/resource IDs before remote commands.
+After reviewing the account/resource IDs and authenticating Wrangler:
 
 ```bash
 npm ci
@@ -71,27 +71,32 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
-Migration **0013** adds independent source-progress storage and managed check controls. Apply all migrations in order. `npm run deploy` builds using managed mode before Wrangler follows the Vite-generated deployment config. It creates/updates paid execution infrastructure; review the account and billing before running it. No remote migration or deployment has been performed by this code change.
+The default config bounds hosted discovery to 16 eligible JavaScript/TypeScript files of at most 16 KB each. Discovery processes one file per persisted step and labels incomplete coverage. Large repository tree parsing can still exceed free CPU limits; local discovery is the fallback. Failed rescans keep the previous successful index. Workflow error retention is at most 3 days, while application history is stored independently in D1.
 
-### Deploy without installing Docker on your laptop
+Configure the existing GitHub credentials once, from the operator's own Traceyard checkout containing `.dev.vars`:
 
-Cloudflare Workers Builds can build the image from the connected **Traceyard platform repository**. This is one-time operator setup, separate from repositories developers connect inside Traceyard.
+```bash
+npm run configure:cloudflare -- --origin https://YOUR_TRACEYARD_HOST --account YOUR_ACCOUNT_ID
+```
 
-1. In Cloudflare **Workers & Pages**, create/connect the Traceyard Worker to this repository, or open the existing Worker's **Settings → Builds**.
-2. Use the reviewed production branch and root directory `.`. Set **Build command** to `npm run build:managed` and **Deploy command** to `npm run db:migrate:remote && npx wrangler deploy`.
-3. Confirm the D1 database ID and execution queue in `wrangler.managed.jsonc` belong to this Cloudflare account. They must exist before deployment; the checked-in IDs are not portable account provisioning. Configure the required Worker secrets above. Store `PUBLIC_APP_ORIGIN` as a Worker secret too so Wrangler does not replace a dashboard-only plain variable. It must match the actual stable HTTPS address, GitHub callback and webhook settings.
-4. Complete a full production deploy and trigger a real repository check. A successful Worker upload or health check alone does not verify container provisioning. The non-production `wrangler versions upload` path does not publish the runner image.
+This script uploads only the required configuration names through Wrangler stdin, converts the App RSA private key to PKCS#8 in memory, and prints no credential values. It preserves an existing integration encryption key. It requires an active Wrangler login. Update the GitHub OAuth callback and App webhook to the stable URLs printed afterward. These are operator steps; Traceyard's customers do not repeat them.
 
-The operator must authenticate with their Cloudflare account. No Cloudflare key is required from Traceyard's users. Do not paste account tokens or App private keys into chat. See [Cloudflare's deployment guidance](https://developers.cloudflare.com/containers/guides/deploy/).
+### Optional hosted execution (paid, explicit opt-in)
 
-For local managed development, apply local migrations, set a public HTTPS callback origin reachable from the runner, and run `npm run dev:managed` with Docker running. Ordinary `npm run dev` supports discovery and UI work; it intentionally reports that hosted checks are unavailable. A working public tunnel is needed for GitHub webhooks and runner callbacks; a localhost-only origin cannot receive cloud callbacks.
+`wrangler.managed.jsonc` adds a Durable Object and a repository runner Container. This requires Cloudflare Workers Paid with Containers enabled, plus an image build or previously uploaded digest-pinned image. It is **not** part of the free deployment.
 
-See [managed execution](MANAGED_EXECUTION.md) for implementation and release checks.
+Only an operator who has chosen and provisioned that infrastructure should run:
+
+```bash
+npm run deploy:managed
+```
+
+Both deploy scripts build their selected mode first, then deploy the explicit generated config at `dist/worker/wrangler.json`; they do not reuse a different mode's prior build by accident. See [managed execution](MANAGED_EXECUTION.md) for its limits and release checks. Ordinary `npm run dev` stays Docker-free; `npm run dev:managed` is the separate local Container development mode.
 
 ## Current runtime support and limits
 
 - Node.js 22, npm lockfile installs, existing `build`/`test` scripts. A selected npm workspace may use the repository's shared lockfile if it contains that workspace. Other package managers/runtimes are not automatically executed.
-- Initial GitHub discovery reads at most 60 eligible JavaScript/TypeScript files, each at most 64 KB. It exposes up to 100 operations and labels coverage limits. A downloaded agent scan can inspect up to 10,000 eligible files, with the same file/operation bounds.
+- The free GitHub discovery preview reads at most 16 eligible JavaScript/TypeScript files, each at most 16 KB; managed deployments allow up to 60 files of 64 KB. It exposes up to 100 operations and labels coverage limits. A downloaded agent scan can inspect up to 10,000 eligible files, with the same file/operation bounds.
 - Managed queue deadline: 10 minutes. Managed execution deadline: 10 minutes; each application command/request-test process is bounded to 180 seconds. VM entrypoint lifetime is at most 15 minutes if the controller fails.
 - At most 6 accepted checks per project per hour; default global concurrency is 2 (`MANAGED_CHECK_CONCURRENCY_LIMIT`, bounded 1–8). These are capacity limits, not a monthly spending guarantee. Pushes beyond the project allowance still update source discovery.
 - Each check uses a fresh workspace and frozen commit/settings. No persistent service or dependency cache is supplied yet. External services, private registry authentication and application secrets are not inferred or provisioned.

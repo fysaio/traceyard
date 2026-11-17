@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:workers";
+import { env, type WorkflowStep } from "cloudflare:workers";
 import { createExecutionContext, introspectWorkflowInstance } from "cloudflare:test";
 import { createApp } from "../../worker/api/app";
 import { createSession, apiFetchWithGitHub, ORIGIN, readSuccess } from "./helpers";
@@ -62,6 +62,102 @@ const report = (id: string, phase: string, status: string, extra = {}) => ({
   ...extra,
 });
 describe("repository connection and execution evidence", () => {
+  it("bounds free discovery, isolates a failed file, and persists metadata without credentials or source", async () => {
+    const a = await account();
+    const pair = await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const pem =
+      "-----BEGIN PRIVATE KEY-----\n" +
+      btoa(
+        String.fromCharCode(
+          ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+        ),
+      ) +
+      "\n-----END PRIVATE KEY-----";
+    const configured = {
+      ...env,
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_PRIVATE_KEY: pem,
+      SOURCE_SCAN_FILE_LIMIT: "16",
+      SOURCE_SCAN_FILE_BYTES: "16000",
+    };
+    await env.DB.prepare(
+      "INSERT INTO project_repositories(project_id,full_name,default_branch,status,updated_at) VALUES(?,'repository-810/app','main','DISCOVERING',?)",
+    )
+      .bind(a.projectId, new Date().toISOString())
+      .run();
+    let requests = 0;
+    const fetcher: typeof fetch = async (input) => {
+      requests++;
+      const url = String(input);
+      if (url.endsWith("/access_tokens"))
+        return Response.json({ token: "never-persist-installation-token" });
+      if (url.includes("/commits/")) return Response.json({ sha: "a".repeat(40) });
+      if (url.includes("/git/trees/"))
+        return Response.json({
+          truncated: false,
+          tree: [
+            { path: "large.ts", type: "blob", size: 20000, sha: "large" },
+            ...Array.from({ length: 20 }, (_, i) => ({
+              path: `api/route-${i}.ts`,
+              type: "blob",
+              size: 100,
+              sha: String(i),
+            })),
+          ],
+        });
+      if (url.includes("/git/blobs/"))
+        return Response.json({
+          encoding: "base64",
+          content: btoa("// private-source-marker\napp.get('/health', () => loadHealth());"),
+        });
+      throw Error("Unexpected GitHub request");
+    };
+    const persisted = new Map<string, unknown>();
+    const step = {
+      do: async (name: string, _options: unknown, fn: () => Promise<unknown>) => {
+        if (persisted.has(name)) return persisted.get(name);
+        if (name === "source-file-1") throw Error("CPU limit simulated");
+        const result = await fn();
+        persisted.set(name, result);
+        return result;
+      },
+    } as unknown as WorkflowStep;
+    const repo = {
+      project_id: a.projectId,
+      installation_id: 7,
+      full_name: "repository-810/app",
+      default_branch: "main",
+    };
+    await scanRepository(configured, repo, fetcher, step);
+    const firstRequests = requests;
+    // Workflow replay must reuse persisted outputs rather than refetching completed source.
+    await scanRepository(configured, repo, fetcher, step);
+    expect(requests).toBe(firstRequests);
+    expect(requests).toBeLessThan(40);
+    const row = await env.DB.prepare(
+      "SELECT scan_json,status FROM project_repositories WHERE project_id=?",
+    )
+      .bind(a.projectId)
+      .first<{ scan_json: string; status: string }>();
+    expect(row?.status).toBe("DISCOVERED");
+    expect(JSON.parse(row!.scan_json)).toMatchObject({ filesScanned: 15, totalFiles: 16 });
+    expect(JSON.parse(row!.scan_json).operations).toHaveLength(15);
+    expect(JSON.parse(row!.scan_json).warnings.join(" ")).toContain("16 source files");
+    expect(JSON.parse(row!.scan_json).warnings.join(" ")).toContain("Could not analyse");
+    const state = JSON.stringify([...persisted]);
+    expect(state).not.toContain("never-persist-installation-token");
+    expect(state).not.toContain("private-source-marker");
+    expect(state).not.toContain("PRIVATE KEY");
+  });
   it("keeps repository state owner-scoped and exposes missing GitHub configuration honestly", async () => {
     const a = await account(),
       b = await account(811);

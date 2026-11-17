@@ -349,7 +349,8 @@ export function ProjectPage() {
   const [search, setSearch] = useState(""),
     [onlyFailed, setOnlyFailed] = useState(false),
     [connect, setConnect] = useState(false),
-    [settings, setSettings] = useState(false);
+    [settings, setSettings] = useState(false),
+    [localCheck, setLocalCheck] = useState(false);
   const run = useMutation({
     mutationFn: () =>
       integrationRequest<{ url: string }>(projectId, "repository/analyze", "POST", {
@@ -386,14 +387,18 @@ export function ProjectPage() {
               <Icon name="sliders" />
               Test settings
             </button>
-            {d.repository?.repository_id ? (
+            {d.repository ? (
               <button
                 className="btn primary"
-                disabled={run.isPending || busy || !d.executionAvailable}
-                onClick={() => run.mutate()}
+                disabled={run.isPending || (busy && !!d.executionAvailable)}
+                onClick={() => (d.executionAvailable ? run.mutate() : setLocalCheck(true))}
               >
                 <Icon name={busy ? "circle-notch" : "play"} />
-                {busy ? "Checks in progress" : "Check project"}
+                {!d.executionAvailable
+                  ? "Run locally"
+                  : busy
+                    ? "Checks in progress"
+                    : "Check project"}
               </button>
             ) : (
               <button className="btn primary" onClick={() => setConnect(true)}>
@@ -408,8 +413,8 @@ export function ProjectPage() {
       <SetupProgress catalog={d} refresh={() => void q.refetch()} />
       {d.executionAvailable === false && (
         <p className="flow-notice" role="status">
-          Checks are temporarily unavailable. You can still explore source operations and previous
-          results.
+          Checks run on your computer with this deployment. Results appear here as they arrive.
+          Choose Run locally to get started.
         </p>
       )}
       {latest && (
@@ -552,6 +557,7 @@ export function ProjectPage() {
       {settings && (
         <TestSettings projectId={projectId} config={d.config} close={() => setSettings(false)} />
       )}
+      {localCheck && <LocalCheck projectId={projectId} close={() => setLocalCheck(false)} />}
       {connect && (
         <ConnectRepository
           projectId={projectId}
@@ -698,7 +704,8 @@ export function OperationPage() {
   const [newTest, setNewTest] = useState(false),
     [settings, setSettings] = useState(false),
     [notice, setNotice] = useState(""),
-    [pendingDelete, setPendingDelete] = useState<SavedTestCase | null>(null);
+    [pendingDelete, setPendingDelete] = useState<SavedTestCase | null>(null),
+    [localCase, setLocalCase] = useState<string | null>(null);
   const test = useMutation({
     mutationFn: (caseId: string) => {
       if (testRequest.current.caseId !== caseId)
@@ -858,11 +865,15 @@ export function OperationPage() {
                   </button>
                   <button
                     className="btn primary"
-                    disabled={test.isPending || !d.executionAvailable}
-                    onClick={() => test.mutate(c.id)}
+                    disabled={test.isPending}
+                    onClick={() => (d.executionAvailable ? test.mutate(c.id) : setLocalCase(c.id))}
                   >
                     <Icon name="play" />
-                    {test.isPending ? "Requesting…" : "Run test"}
+                    {!d.executionAvailable
+                      ? "Run locally"
+                      : test.isPending
+                        ? "Requesting…"
+                        : "Run test"}
                   </button>
                 </div>
               </article>
@@ -871,10 +882,8 @@ export function OperationPage() {
         )}
         {!!d.cases.length && !d.executionAvailable && (
           <p className="flow-note">
-            Managed checks are unavailable right now. Your saved tests and discovered operations
-            remain available. For local execution, run{" "}
-            <code>node /path/to/traceyard/agent/cli.mjs run . --case {d.cases[0]?.id}</code> from
-            your application folder.
+            Run saved tests on your computer and view their results here. Test settings tell the
+            local runner how to start your application.
           </p>
         )}
       </section>
@@ -892,6 +901,9 @@ export function OperationPage() {
       )}
       {settings && (
         <TestSettings projectId={projectId} config={d.config} close={() => setSettings(false)} />
+      )}
+      {localCase && (
+        <LocalCheck projectId={projectId} caseId={localCase} close={() => setLocalCase(null)} />
       )}
       {pendingDelete && (
         <Modal title="Delete this saved test?" close={() => setPendingDelete(null)}>
@@ -914,6 +926,107 @@ export function OperationPage() {
         </Modal>
       )}
     </div>
+  );
+}
+function LocalCheck({
+  projectId,
+  caseId,
+  close,
+}: {
+  projectId: string;
+  caseId?: string;
+  close: () => void;
+}) {
+  const [copied, setCopied] = useState(false),
+    [copyError, setCopyError] = useState(false),
+    cache = useQueryClient();
+  const key = useMutation({
+    mutationFn: () =>
+      integrationRequest<{ token: string }>(projectId, "keys", "POST", {
+        name: "Local checks",
+        scopes: ["traces:write"],
+      }),
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: ["keys", projectId] });
+    },
+  });
+  const environment = `TRACEYARD_ORIGIN=${window.location.origin}\nTRACEYARD_KEY=${key.data?.token ?? "<create a project key below>"}\n`,
+    command =
+      "node /path/to/traceyard-agent/agent/cli.mjs run ." + (caseId ? " --case " + caseId : "");
+  return (
+    <Modal title={caseId ? "Run this test locally" : "Run project checks locally"} close={close}>
+      <div className="flow-local-check">
+        <p>
+          Your computer runs the code. Traceyard receives the discoveries and results. No GitHub
+          pull request is needed.
+        </p>
+        <details>
+          <summary>Install the runner once · Node.js 22.12+ and Git</summary>
+          <pre className="code">
+            {
+              "git clone --depth 1 --branch fix/repository-connection-flow https://github.com/fysaio/traceyard.git traceyard-agent\nnpm ci --omit=dev --ignore-scripts --prefix traceyard-agent"
+            }
+          </pre>
+        </details>
+        <div>
+          <h3>1. Connect this project</h3>
+          <p>
+            In your application's folder, add <code>.env.traceyard</code> to <code>.gitignore</code>
+            . Save these values in <code>.env.traceyard</code>.
+          </p>
+          <pre className="code">{environment}</pre>
+          {!key.data ? (
+            <button className="btn" disabled={key.isPending} onClick={() => key.mutate()}>
+              {key.isPending ? "Creating…" : "Create project key"}
+            </button>
+          ) : (
+            <>
+              <button
+                className="btn"
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(environment)
+                    .then(() => {
+                      setCopied(true);
+                      setCopyError(false);
+                    })
+                    .catch(() => setCopyError(true));
+                }}
+              >
+                {copied ? "Copied" : "Copy connection values"}
+              </button>
+              <p className="hint" role="status">
+                This key is shown once and expires in 90 days. Manage it in API keys & SDK.
+              </p>
+              {copyError && (
+                <p role="alert">
+                  Copy the values above manually; clipboard access was unavailable.
+                </p>
+              )}
+            </>
+          )}
+          <ErrorMessage error={key.error} />
+        </div>
+        <div>
+          <h3>2. Run from your application's folder</h3>
+          <p>
+            Replace <code>/path/to/traceyard-agent</code> with the folder you installed above.
+          </p>
+          <pre className="code">{command}</pre>
+          <p>
+            The runner installs locked npm dependencies and runs{" "}
+            {caseId
+              ? "this saved request against your application"
+              : "your existing build and tests"}
+            . Use your local test environment. Each command has a 3-minute limit.
+          </p>
+        </div>
+        <p>
+          Keep this project open to see progress. Only supported activity exercised by the test
+          appears as recorded runs.
+        </p>
+      </div>
+    </Modal>
   );
 }
 function TestSettings({
