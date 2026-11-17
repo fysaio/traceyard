@@ -73,6 +73,17 @@ npm run deploy
 
 Migration **0013** adds independent source-progress storage and managed check controls. Apply all migrations in order. `npm run deploy` builds using managed mode before Wrangler follows the Vite-generated deployment config. It creates/updates paid execution infrastructure; review the account and billing before running it. No remote migration or deployment has been performed by this code change.
 
+### Deploy without installing Docker on your laptop
+
+Cloudflare Workers Builds can build the image from the connected **Traceyard platform repository**. This is one-time operator setup, separate from repositories developers connect inside Traceyard.
+
+1. In Cloudflare **Workers & Pages**, create/connect the Traceyard Worker to this repository, or open the existing Worker's **Settings → Builds**.
+2. Use the reviewed production branch and root directory `.`. Set **Build command** to `npm run build:managed` and **Deploy command** to `npm run db:migrate:remote && npx wrangler deploy`.
+3. Confirm the D1 database ID and execution queue in `wrangler.managed.jsonc` belong to this Cloudflare account. They must exist before deployment; the checked-in IDs are not portable account provisioning. Configure the required Worker secrets above. Store `PUBLIC_APP_ORIGIN` as a Worker secret too so Wrangler does not replace a dashboard-only plain variable. It must match the actual stable HTTPS address, GitHub callback and webhook settings.
+4. Complete a full production deploy and trigger a real repository check. A successful Worker upload or health check alone does not verify container provisioning. The non-production `wrangler versions upload` path does not publish the runner image.
+
+The operator must authenticate with their Cloudflare account. No Cloudflare key is required from Traceyard's users. Do not paste account tokens or App private keys into chat. See [Cloudflare's deployment guidance](https://developers.cloudflare.com/containers/guides/deploy/).
+
 For local managed development, apply local migrations, set a public HTTPS callback origin reachable from the runner, and run `npm run dev:managed` with Docker running. Ordinary `npm run dev` supports discovery and UI work; it intentionally reports that hosted checks are unavailable. A working public tunnel is needed for GitHub webhooks and runner callbacks; a localhost-only origin cannot receive cloud callbacks.
 
 See [managed execution](MANAGED_EXECUTION.md) for implementation and release checks.

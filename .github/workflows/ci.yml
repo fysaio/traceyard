@@ -30,3 +30,19 @@ jobs:
         run: npm run build:managed
       - name: Lint
         run: npm run lint
+
+  runner-image:
+    name: Packaged runner smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build the managed runner image
+        run: docker build --file runner/Dockerfile --tag traceyard-runner:ci .
+      - name: Check actual runner processes without external network
+        run: >-
+          docker run --rm --network none --entrypoint node
+          --mount "type=bind,source=${{ github.workspace }}/scripts/verify-runner-image.mjs,target=/tmp/verify-runner-image.mjs,readonly"
+          traceyard-runner:ci /tmp/verify-runner-image.mjs

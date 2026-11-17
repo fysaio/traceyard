@@ -22,7 +22,7 @@ Legacy installed GitHub Actions report/status ingestion remains for existing his
 
 ## Validation and release boundary
 
-Automated coverage exercises actual CLI processes and measured HTTP spans, managed callback identity, frozen configuration, duplicate request races, failure retention, signed push handling and project isolation. It also checks ordinary Worker routes and the existing workflow engine. Test doubles stand in for container launch in integration tests. The final local run passed all 137 unit tests and 138 Worker integration tests. TypeScript, lint, ordinary production build and managed configuration build passed. Actual Cloudflare VM launch remains unverified.
+Automated coverage exercises actual CLI processes and measured HTTP spans, managed callback identity, frozen configuration, duplicate request races, failure retention, signed push handling and project isolation. It also checks ordinary Worker routes and the existing workflow engine. Test doubles stand in for Cloudflare container launch in integration tests. A separate CI job builds `runner/Dockerfile` and runs `scripts/verify-runner-image.mjs` inside the image as its non-root user, with external networking disabled. That job verifies actual successful/failed tests, installation failure, source reporting, command token isolation and measured HTTP span export using only a loopback fixture collector. Docker smoke tests do not establish Cloudflare provisioning or callback acceptance. The final local run passed all 137 unit tests and 138 Worker integration tests. TypeScript, lint, ordinary production build and managed configuration build passed. Actual Cloudflare VM launch remains unverified.
 
 Before enabling this flow for users:
 
