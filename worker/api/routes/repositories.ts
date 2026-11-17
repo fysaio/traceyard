@@ -628,7 +628,21 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     }
     if (b.operations) {
       const prior = repo.scan_json ? JSON.parse(repo.scan_json) : { operations: [] };
-      const combined = [...(prior.operations ?? []), ...b.operations];
+      const previous = new Map<string, { sourceFlow?: unknown }>(
+        (prior.operations ?? []).map((operation: { id: string; sourceFlow?: unknown }) => [
+          operation.id,
+          operation,
+        ]),
+      );
+      // Older pinned runners can enrich discovery without erasing newer static
+      // call relationships from the exact same immutable source revision.
+      const incoming = b.operations.map((operation) => ({
+        ...operation,
+        sourceFlow:
+          operation.sourceFlow ??
+          (b.sha && repo.commit_sha === b.sha ? previous.get(operation.id)?.sourceFlow : undefined),
+      }));
+      const combined = [...(prior.operations ?? []), ...incoming];
       const operations = [
         ...new Map(combined.map((operation) => [operation.id, operation])).values(),
       ].slice(0, 100);

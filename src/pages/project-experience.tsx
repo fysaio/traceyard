@@ -1,4 +1,5 @@
 import { ApiClientError } from "../lib/api";
+import { SourceFlowTree } from "../components/source-flow";
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -535,7 +536,7 @@ export function ProjectPage() {
                       ? `${o.failed} failed`
                       : o.runs
                         ? `${o.runs} recorded runs`
-                        : "Not yet observed"}
+                        : "Source available"}
                   </span>
                 </div>
                 <h3>{o.name}</h3>
@@ -566,6 +567,14 @@ export function ProjectPage() {
         runs={[...d.runs, ...(d.managedRuns ?? [])].sort((a, b) =>
           b.startedAt.localeCompare(a.startedAt),
         )}
+        emptyAction={
+          d.operations[0] && (
+            <Link className="btn" to={operationPath(projectId, d.operations[0].key)}>
+              Explore source flow
+              <Icon name="arrow-right" />
+            </Link>
+          )
+        }
       />
       <div className="flow-footer">
         <Link to={`/builder?project=${projectId}`}>
@@ -610,12 +619,14 @@ function RunList({
   title = "Recent runs",
   emptyTitle = "No application activity recorded yet",
   emptyDescription = "Source discovery lists possible operations. A recorded run appears when a test or your application actually exercises a supported operation.",
+  emptyAction,
 }: {
   projectId: string;
   runs: ApplicationRun[];
   title?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  emptyAction?: ReactNode;
 }) {
   const [selected, setSelected] = useState<string[]>([]),
     [failed, setFailed] = useState(false),
@@ -660,7 +671,11 @@ function RunList({
         </div>
       </div>
       {!rows.length ? (
-        <Empty icon="wave-square" title={failed ? "No failed application runs" : emptyTitle}>
+        <Empty
+          icon="wave-square"
+          title={failed ? "No failed application runs" : emptyTitle}
+          action={failed ? undefined : emptyAction}
+        >
           {failed ? "There are no failed runs in this history." : emptyDescription}
         </Empty>
       ) : (
@@ -798,7 +813,7 @@ export function OperationPage() {
           {o.evidence === "linked"
             ? "Source linked to runtime evidence"
             : o.evidence === "source"
-              ? "Discovered in source · Not yet recorded"
+              ? "Source flow · Runtime recording optional"
               : "Runtime evidence · Source not linked"}
         </span>
         <span>
@@ -809,8 +824,11 @@ export function OperationPage() {
         <section className="flow-surface flow-operation-map">
           <div className="flow-section-heading">
             <div>
-              <h2>Inside this operation</h2>
-              <p>Direct calls found in source. This does not establish execution order.</p>
+              <h2>Source flow</h2>
+              <p>
+                Possible calls read from code. This view is available without running the
+                application.
+              </p>
             </div>
           </div>
           <div className="flow-entry-node">
@@ -822,7 +840,9 @@ export function OperationPage() {
               <strong>{o.name}</strong>
             </div>
           </div>
-          {o.calls.length > 0 ? (
+          {o.sourceFlow?.steps.length ? (
+            <SourceFlowTree flow={o.sourceFlow} file={o.file} />
+          ) : o.calls.length > 0 ? (
             <div className="flow-call-grid">
               {o.calls.map((name, i) => (
                 <div className="flow-call" key={i}>
@@ -833,10 +853,14 @@ export function OperationPage() {
             </div>
           ) : (
             <p className="flow-muted flow-space">
-              Imported or dynamic calls were not resolved in this scan. Recorded steps below show
-              actual runtime evidence.
+              No function calls were resolved for this entry point. Imported and dynamic
+              implementations may be outside this scan.
             </p>
           )}
+          <p className="flow-note flow-space">
+            Call relationships are inferred from source; they do not establish execution order or
+            prove that a branch ran. Imported and dynamic implementations are not expanded.
+          </p>
         </section>
       )}
       <section className="flow-section">
@@ -1875,6 +1899,14 @@ export function ProjectCheckPage() {
         projectId={projectId}
         runs={catalog.data?.runs.filter((r) => r.checkId === d.job.id) ?? []}
         title="Runs recorded during this check"
+        emptyAction={
+          catalog.data?.operations[0] && (
+            <Link className="btn" to={operationPath(projectId, catalog.data.operations[0].key)}>
+              Explore source flow
+              <Icon name="arrow-right" />
+            </Link>
+          )
+        }
         emptyTitle={
           ["RUNNING", "QUEUED"].includes(displayStatus)
             ? "No application activity recorded so far"
@@ -1889,7 +1921,7 @@ export function ProjectCheckPage() {
                 ? "This check is waiting for an isolated runner. Your source operations are available now."
                 : d.job.status === "RUNNING"
                   ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
-                  : "No supported runtime activity was received from this check. Mocked or in-process tests may pass without producing traces. Run a saved HTTP request test to record a real request through your application."
+                  : "The checks passed without exporting supported runtime activity. Source flows remain available from the project’s operations. A recorded run requires an actual supported execution."
         }
       />
     </div>
