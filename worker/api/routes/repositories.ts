@@ -8,6 +8,7 @@ import {
   githubRequest,
   githubConfigured,
   installationOwned,
+  syncPersonalInstallation,
   verifyWebhook,
 } from "../../repositories/github";
 import { runnerPrincipal } from "../../repositories/runner-auth";
@@ -188,14 +189,13 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
   routes.get("/repositories", async (c) => {
     const auth = c.get("auth");
     if (!auth) throw forbidden("AUTHENTICATION_REQUIRED", "Sign in to connect a repository.");
-    const installations = await c.env.DB.prepare(
-      "SELECT g.id FROM github_installations g JOIN identities i ON i.provider='github' AND i.provider_subject=g.account_id WHERE i.user_id=? AND g.suspended=0",
-    )
-      .bind(auth.user.id)
-      .all<{ id: number }>();
+    const installation = githubConfigured(c.env)
+      ? await syncPersonalInstallation(c.env, auth.user.id, fetcher)
+      : null;
+    const installations = installation && !installation.suspended ? [installation] : [];
     const repos: (GitHubRepo & { installationId: number })[] = [];
     if (githubConfigured(c.env))
-      for (const i of installations.results) {
+      for (const i of installations) {
         for (let page = 1; page <= 5; page++) {
           const r = await githubRequest<{ repositories: GitHubRepo[] }>(
             c.env,
@@ -211,9 +211,9 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     return c.json(
       data(c, {
         configured: githubConfigured(c.env),
-        installationCount: installations.results.length,
-        manageUrl: installations.results[0]
-          ? `https://github.com/settings/installations/${installations.results[0].id}`
+        installationCount: installation ? 1 : 0,
+        manageUrl: installation
+          ? `https://github.com/settings/installations/${installation.id}`
           : null,
         installUrl: c.env.GITHUB_APP_SLUG
           ? "https://github.com/apps/" +

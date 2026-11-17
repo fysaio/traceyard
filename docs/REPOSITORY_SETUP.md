@@ -7,6 +7,8 @@
 3. Open the project. Discovered operations become available without waiting for installation, build or tests to pass.
 4. On a managed deployment, Traceyard downloads the selected commit into its own temporary workspace and runs supported checks. Later default-branch pushes refresh discovery and request another bounded check. **Check project** requests a check explicitly.
 
+Traceyard refreshes the signed-in personal account’s existing installation directly from GitHub. Installations created before the current deployment are recovered without a new installation webhook or reinstall. A failed GitHub lookup is shown as a refresh error rather than an empty install prompt.
+
 Connecting does not create a branch, write `.github/workflows/traceyard.yml`, open a setup PR or dispatch customer GitHub Actions. The retired setup and upgrade endpoints return an explanatory error. Previously installed Actions can still report into their existing projects; they are compatibility support, not a prerequisite for new connections. Remove an old Traceyard workflow separately if you no longer want it to run.
 
 Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.

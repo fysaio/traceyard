@@ -437,14 +437,16 @@ GITHUB_APP_WEBHOOK_SECRET=<matching webhook secret>
 `}</pre>
         <p className="section">
           Keep these values in the deployment’s secret store. The GitHub App is separate from the
-          OAuth app used for sign-in. Apply migrations through 0013 and deploy the managed Worker
-          configuration, including discovery and isolated runner bindings.
+          OAuth app used for sign-in. Apply migrations through 0013 and deploy the standard Worker
+          configuration for free hosting. Repository checks can run locally and send results here;
+          hosted execution is an optional separate deployment.
         </p>
         <h3 className="section">Then connect a repository</h3>
         <p>
           Install the app on selected personal repositories, return to Project, choose Connect repo
-          and refresh the list. Discovery starts in the background. Traceyard runs supported checks
-          in its own temporary workspace. No setup PR is required.
+          and refresh the list. Existing personal installations are detected automatically.
+          Discovery starts in the background. Choose Run locally to record checks from your
+          computer. No setup PR is required.
         </p>
         <p className="hint section">
           Detailed setup, permissions, supported runtimes and limits are in docs/REPOSITORY_SETUP.md
