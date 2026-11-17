@@ -39,6 +39,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build the managed runner image
         run: docker build --file runner/Dockerfile --tag traceyard-runner:ci .
       - name: Check actual runner processes without external network
@@ -46,3 +47,18 @@ jobs:
           docker run --rm --network none --entrypoint node
           --mount "type=bind,source=${{ github.workspace }}/scripts/verify-runner-image.mjs,target=/tmp/verify-runner-image.mjs,readonly"
           traceyard-runner:ci /tmp/verify-runner-image.mjs
+      - name: Export the tested image for deployment
+        run: |
+          docker save --output runner-image.tar traceyard-runner:ci
+          sha256sum runner-image.tar > runner-image.sha256
+          git rev-parse HEAD > source-revision.txt
+      - name: Retain the tested image for one day
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: traceyard-runner-image
+          path: |
+            runner-image.tar
+            runner-image.sha256
+            source-revision.txt
+          retention-days: 1
+          if-no-files-found: error
