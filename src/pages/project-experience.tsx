@@ -938,6 +938,7 @@ function LocalCheck({
   close: () => void;
 }) {
   const [copied, setCopied] = useState(false),
+    [commandCopied, setCommandCopied] = useState(false),
     [copyError, setCopyError] = useState(false),
     cache = useQueryClient();
   const key = useMutation({
@@ -952,7 +953,8 @@ function LocalCheck({
   });
   const environment = `TRACEYARD_ORIGIN=${window.location.origin}\nTRACEYARD_KEY=${key.data?.token ?? "<create a project key below>"}\n`,
     command =
-      "node /path/to/traceyard-agent/agent/cli.mjs run ." + (caseId ? " --case " + caseId : "");
+      "npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#53fe4069b5b9045a2cb6ee8b184b00d95f423ded -- traceyard run ." +
+      (caseId ? " --case " + caseId : "");
   return (
     <Modal title={caseId ? "Run this test locally" : "Run project checks locally"} close={close}>
       <div className="flow-local-check">
@@ -960,14 +962,6 @@ function LocalCheck({
           Your computer runs the code. Traceyard receives the discoveries and results. No GitHub
           pull request is needed.
         </p>
-        <details>
-          <summary>Install the runner once · Node.js 22.12+ and Git</summary>
-          <pre className="code">
-            {
-              "git clone --depth 1 --branch fix/repository-connection-flow https://github.com/fysaio/traceyard.git traceyard-agent\nnpm ci --omit=dev --ignore-scripts --prefix traceyard-agent"
-            }
-          </pre>
-        </details>
         <div>
           <h3>1. Connect this project</h3>
           <p>
@@ -1010,9 +1004,21 @@ function LocalCheck({
         <div>
           <h3>2. Run from your application's folder</h3>
           <p>
-            Replace <code>/path/to/traceyard-agent</code> with the folder you installed above.
+            Use Node.js 22.12+ and Git. This command downloads the pinned runner on first use; npm
+            caches it afterward.
           </p>
           <pre className="code">{command}</pre>
+          <button
+            className="btn"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(command)
+                .then(() => setCommandCopied(true))
+                .catch(() => setCopyError(true));
+            }}
+          >
+            {commandCopied ? "Copied" : "Copy run command"}
+          </button>
           <p>
             The runner installs locked npm dependencies and runs{" "}
             {caseId
