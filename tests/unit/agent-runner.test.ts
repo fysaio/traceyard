@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { createServer } from "node:http";
-import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -194,4 +194,31 @@ it.each([
     }
   },
   60000,
+);
+
+it.runIf(process.platform !== "win32")(
+  "runs through an npm-style symlink instead of exiting without scanning",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "traceyard-bin-"));
+    try {
+      await writeFile(join(root, "server.ts"), "app.get('/health', () => loadHealth());");
+      const shortcut = join(root, "traceyard");
+      await symlink(resolve("agent/cli.mjs"), shortcut);
+      const result = await new Promise<{ code: number | null; output: string }>((done, reject) => {
+        const child = spawn(process.execPath, [shortcut, "scan", root]);
+        let output = "";
+        child.stdout.on("data", (chunk) => (output += chunk));
+        child.stderr.on("data", (chunk) => (output += chunk));
+        child.on("error", reject);
+        child.on("close", (code) => done({ code, output }));
+      });
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.output)).toMatchObject({
+        filesScanned: 1,
+        operations: [{ name: "GET /health" }],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
 );
