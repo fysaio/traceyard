@@ -199,7 +199,7 @@ export function ProjectsPage() {
       <p className="flow-kicker">Your workspace</p>
       <PageHead
         title="Repositories"
-        description="Manage connected source. Run focused tests from Investigations; runtime recordings appear here."
+        description="Connect a GitHub repository to investigate its code."
         actions={
           <button className="btn primary" onClick={() => setConnect(true)}>
             <Icon name="plus" />
@@ -248,7 +248,7 @@ export function ProjectsPage() {
         >
           {search
             ? "Try its name or repository."
-            : "Connect your GitHub repositories to create your projects. Traceyard will discover operations, run checks, and let you choose whichever project you want to work on."}
+            : "Choose a repository from GitHub. Traceyard will index its code so you can start an investigation."}
         </Empty>
       ) : (
         <div className="flow-projects">
@@ -259,7 +259,9 @@ export function ProjectsPage() {
                   <Icon name={p.repository ? "code-branch" : "folder"} />
                 </span>
                 {p.lastCheck ? (
-                  <RunStatus value={p.lastCheck} />
+                  <span className="flow-check-status">
+                    Last check <RunStatus value={p.lastCheck} />
+                  </span>
                 ) : p.discoveryStatus === "SUCCEEDED" ? (
                   <span className="flow-muted">Source indexed</span>
                 ) : p.discoveryStatus ? (
@@ -272,12 +274,14 @@ export function ProjectsPage() {
                 <h2>{p.repository ?? p.name}</h2>
                 {p.repository && p.name !== p.repository && <p>{p.name}</p>}
               </div>
-              <div className="flow-project-health">
-                <span>
-                  {p.runs} runtime {p.runs === 1 ? "recording" : "recordings"}
-                </span>
-                {p.failed > 0 && <span className="flow-error">{p.failed} failed</span>}
-              </div>
+              {p.runs > 0 && (
+                <div className="flow-project-health">
+                  <span>
+                    {p.runs} runtime {p.runs === 1 ? "recording" : "recordings"}
+                  </span>
+                  {p.failed > 0 && <span className="flow-error">{p.failed} failed</span>}
+                </div>
+              )}
               <div className="flow-card-footer">
                 <span>{p.lastRunAt ? stamp(p.lastRunAt) : "No runtime recordings yet"}</span>
                 <Icon name="arrow-right" />
