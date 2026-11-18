@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { discoverFile } from "./discovery.mjs";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
+import { buildRecording } from "./recording.mjs";
 import { indexRepository } from "./repository-index.mjs";
 import { runInvestigationPlan, sanitizeDiagnostic } from "./test-evidence.mjs";
 import { createHash } from "node:crypto";
@@ -451,12 +452,36 @@ export async function main(args = process.argv.slice(2)) {
     };
     if (manifest.investigation) {
       const plan = manifest.investigation;
+      const capture =
+        plan.captureInteractions && !plan.replayRecording
+          ? await mkdtemp(join(tmpdir(), "traceyard-capture-"))
+          : null;
+      const captureFile = capture ? join(capture, "interactions.jsonl") : null;
       const focused = await runInvestigationPlan(
         workspaceRoot,
         repositoryIndex ?? (await indexRepository(workspaceRoot)),
         plan,
-        testEnv,
+        captureFile
+          ? {
+              ...testEnv,
+              TRACEYARD_CAPTURE_FILE: captureFile,
+              TRACEYARD_RECORDING_EXCLUDE_ORIGIN: origin,
+              NODE_OPTIONS:
+                testEnv.NODE_OPTIONS +
+                " --import " +
+                JSON.stringify(new URL("./record-fetch.mjs", import.meta.url).href),
+            }
+          : testEnv,
       );
+      if (captureFile && focused.command.testPath) {
+        const recording = await buildRecording(captureFile, sha, focused.command.testPath);
+        await send("investigations/" + encodeURIComponent(plan.investigationId) + "/recordings", {
+          requestId: plan.requestId,
+          runId: id,
+          manifest: recording,
+        });
+      }
+      if (capture) await rm(capture, { recursive: true, force: true });
       await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {
         ...focused,
         requestId: plan.requestId,
