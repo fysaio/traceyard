@@ -45,6 +45,15 @@ describe("immutable repository index", () => {
     await uploadRepositoryIndexFiles(env.DB, a.projectId, index.snapshotId, index.files);
     await completeRepositoryIndex(env.DB, a.projectId, index.snapshotId);
     const result = await getRepositoryIndex(env.DB, a.userId, a.projectId, "src/db.ts");
+    const choices = await getRepositoryIndex(
+      env.DB,
+      a.userId,
+      a.projectId,
+      undefined,
+      undefined,
+      true,
+    );
+    expect(choices?.files.map((f) => f.path)).toEqual(["tests/service.test.ts"]);
     expect(result?.relatedTests.map((t) => t.path)).toEqual(["tests/service.test.ts"]);
     expect(
       await getRepositoryIndex(env.DB, a.userId, a.projectId, undefined, "b".repeat(40)),
