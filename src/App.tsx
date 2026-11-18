@@ -539,7 +539,7 @@ function Execution() {
   return (
     <>
       <Link className="back" to="/executions">
-        ← Executions
+        ← Workflow runs
       </Link>
       <Heading
         title={r.workflow.name}
@@ -848,7 +848,7 @@ function Settings({ session }: { session: AuthSession }) {
   });
   return (
     <>
-      <Heading title="Settings" />
+      <h2>Account</h2>
       <section className="connected-panel">
         <h2>{session.user?.name || session.user?.login}</h2>
         <p>Signed in with GitHub as {session.user?.login}.</p>

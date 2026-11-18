@@ -352,3 +352,51 @@ test("a regular local user can open every workspace destination on desktop and m
   }
   expect(errors).toEqual([]);
 });
+
+test("a user creates a template workflow, publishes it, runs real input and reopens its persisted output", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120000);
+  await page.goto("/__acceptance/account");
+  await page.getByRole("button", { name: "Open local test account" }).click();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("link", { name: /^Workflows/ }).click();
+  await page.getByRole("tab", { name: "Templates", exact: true }).click();
+  await page.getByRole("link", { name: /Parallel processing/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Parallel processing", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Templates", exact: true }).click();
+  await expect(page).toHaveURL(/workflows\?tab=templates/);
+  await page.getByRole("link", { name: /Parallel processing/ }).click();
+  await page.getByRole("button", { name: "Use template", exact: true }).click();
+  await page.getByRole("button", { name: "Publish version", exact: true }).click();
+  await page.getByRole("button", { name: "Run v1", exact: true }).click();
+  await page
+    .getByLabel("JSON input", { exact: true })
+    .fill(
+      JSON.stringify({
+        customer: { name: "Acceptance customer" },
+        order: { id: "order-acceptance", total: 42 },
+      }),
+    );
+  await page.getByRole("button", { name: "Start execution", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Output is ready", exact: true })).toBeVisible({
+    timeout: 30000,
+  });
+  const output = page.locator(".result-output > pre");
+  await expect(output).toContainText("Acceptance customer");
+  await expect(output).toContainText("order-acceptance");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Output is ready", exact: true })).toBeVisible();
+  await expect(output).toContainText("order-acceptance");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const path = testInfo.outputPath(`persisted-workflow-result-${width}.png`);
+    await page.screenshot({ path, fullPage: true });
+    await testInfo.attach(`persisted-workflow-result-${width}`, { path, contentType: "image/png" });
+  }
+});
