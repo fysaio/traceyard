@@ -502,7 +502,25 @@ export async function handleMcp(c: Context<AppEnv>) {
     return c.json({ error: "origin_rejected" }, 403);
   if (incomingOrigin) c.header("Access-Control-Allow-Origin", incomingOrigin);
   c.header("Access-Control-Expose-Headers", "WWW-Authenticate, MCP-Protocol-Version");
-  const body = c.req.method === "POST" ? await readJsonBody(c) : undefined;
+  // This Worker serves independent JSON exchanges, with no server notification
+  // stream or retained transport session. A successful GET would advertise SSE
+  // and then immediately close in finally, causing clients to reconnect forever.
+  // Decline the optional stream explicitly, as required by Streamable HTTP.
+  if (c.req.method !== "POST") {
+    c.header("Allow", "POST, OPTIONS");
+    return c.json(
+      {
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: -32000,
+          message: "Method not allowed. Use POST for stateless MCP requests.",
+        },
+      },
+      405,
+    );
+  }
+  const body = await readJsonBody(c);
   const wire = body as
     { method?: string; params?: { name?: string; arguments?: { mode?: string } } } | undefined;
   const scope =
