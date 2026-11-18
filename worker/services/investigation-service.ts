@@ -98,7 +98,19 @@ export async function getInvestigation(
     .prepare("SELECT * FROM investigation_evidence WHERE investigation_id=? ORDER BY id LIMIT 100")
     .bind(id)
     .all<EvidenceRow>();
-  return view(row, evidence.results);
+  const attempts = await db
+    .prepare(
+      "SELECT id,request_id AS requestId,status,check_id AS checkId,created_at AS createdAt FROM investigation_attempts WHERE investigation_id=? ORDER BY created_at,id LIMIT 10",
+    )
+    .bind(id)
+    .all<{
+      id: string;
+      requestId: string;
+      status: string;
+      checkId: string | null;
+      createdAt: string;
+    }>();
+  return { ...view(row, evidence.results), attempts: attempts.results };
 }
 export async function listInvestigations(db: D1Database, userId: string, projectId: string) {
   await requireInvestigationProject(db, userId, projectId);

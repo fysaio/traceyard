@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { discoverFile } from "./discovery.mjs";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
 import { indexRepository } from "./repository-index.mjs";
+import { runTargetedTest, sanitizeDiagnostic } from "./test-evidence.mjs";
 import { createHash } from "node:crypto";
 
 export async function scanDirectory(root) {
@@ -158,7 +159,10 @@ export async function main(args = process.argv.slice(2)) {
   } catch {
     /* An uncommitted local directory is supported. */
   }
+  let cachedCredential = null,
+    credentialAt = 0;
   async function credential() {
+    if (cachedCredential && Date.now() - credentialAt < 60000) return cachedCredential;
     if (managedId) {
       if (!process.env.TRACEYARD_RUN_TOKEN) throw Error("The managed check credential is missing.");
       return process.env.TRACEYARD_RUN_TOKEN;
@@ -174,7 +178,9 @@ export async function main(args = process.argv.slice(2)) {
       signal: AbortSignal.timeout(10000),
     });
     if (!result.ok) throw Error("GitHub OIDC requires id-token: write in the workflow.");
-    return (await result.json()).value;
+    cachedCredential = (await result.json()).value;
+    credentialAt = Date.now();
+    return cachedCredential;
   }
   async function send(path, body) {
     const response = await fetch(origin + "/api/v1/" + path, {
@@ -218,7 +224,10 @@ export async function main(args = process.argv.slice(2)) {
     origin +
       "/api/v1/repository/configuration" +
       (process.env.TRACEYARD_RUN_REQUEST
-        ? "?request=" + encodeURIComponent(process.env.TRACEYARD_RUN_REQUEST)
+        ? "?request=" +
+          encodeURIComponent(process.env.TRACEYARD_RUN_REQUEST) +
+          "&run=" +
+          encodeURIComponent(id)
         : args.includes("--case")
           ? "?case=" +
             encodeURIComponent(args[args.indexOf("--case") + 1] ?? "") +
@@ -239,10 +248,11 @@ export async function main(args = process.argv.slice(2)) {
   root = await realpath(resolve(root, manifest.config.directory));
   if (relative(workspaceRoot, root).startsWith("..") || !(await lstat(root)).isDirectory())
     throw Error("The configured application directory is not inside this project.");
+  let repositoryIndex;
   try {
     console.log("Traceyard: discovering source entry points…");
     if (manifest.capabilities?.repositoryIndex) {
-      const index = await indexRepository(workspaceRoot);
+      const index = (repositoryIndex = await indexRepository(workspaceRoot));
       const snapshotId = createHash("sha256")
         .update((sha ?? "working-tree") + index.snapshotId)
         .digest("hex");
@@ -324,6 +334,8 @@ export async function main(args = process.argv.slice(2)) {
     delete env.TRACEYARD_KEY;
     delete env.TRACEYARD_RUN_TOKEN;
     delete env.NODE_OPTIONS;
+    delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     await report("install", "RUNNING", "Installing project dependencies.");
     let installRoot = root;
     try {
@@ -353,7 +365,7 @@ export async function main(args = process.argv.slice(2)) {
       "install",
     );
     await report("install", "SUCCEEDED", "Dependencies installed.");
-    if (pkg.scripts?.build && !manifest.cases.length) {
+    if (pkg.scripts?.build && !manifest.cases.length && !manifest.investigation) {
       await report("build", "RUNNING", "Running the existing build script.");
       await execute(
         process.platform === "win32" ? "npm.cmd" : "npm",
@@ -375,6 +387,7 @@ export async function main(args = process.argv.slice(2)) {
       );
     if (
       !manifest.cases.length &&
+      !manifest.investigation &&
       (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
     ) {
       await report("test", "SKIPPED", "No tests configured.");
@@ -409,6 +422,34 @@ export async function main(args = process.argv.slice(2)) {
       OTEL_NODE_RESOURCE_DETECTORS: "env,process",
       OTEL_EXPORTER_OTLP_TIMEOUT: "3000",
     };
+    if (manifest.investigation) {
+      const plan = manifest.investigation;
+      const focused = await runTargetedTest(
+        workspaceRoot,
+        repositoryIndex ?? (await indexRepository(workspaceRoot)),
+        plan,
+        testEnv,
+      );
+      await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {
+        ...focused,
+        requestId: plan.requestId,
+        runId: id,
+        commit: sha,
+      });
+      await report(
+        "test",
+        focused.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
+        focused.message.slice(0, 500),
+      );
+      await report(
+        "complete",
+        focused.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
+        "Focused investigation completed; inspect retained structured evidence.",
+      );
+      completed = true;
+      process.exitCode = focused.status === "SUCCEEDED" ? 0 : 1;
+      return;
+    }
     let testResults = [];
     if (manifest.cases.length) {
       if (!pkg.scripts?.[manifest.config.startScript])
@@ -492,6 +533,29 @@ export async function main(args = process.argv.slice(2)) {
     await report("complete", "SUCCEEDED", "Configured checks passed.");
     completed = true;
   } catch (error) {
+    if (!completed && manifest.investigation) {
+      const plan = manifest.investigation;
+      try {
+        await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {
+          requestId: plan.requestId,
+          runId: id,
+          commit: sha,
+          status: "BLOCKED",
+          command: { directory: manifest.config.directory, script: "", testPath: null },
+          counts: { passed: 0, failed: 0, skipped: 0 },
+          failures: [],
+          message: sanitizeDiagnostic(error.message, 2000),
+          durationMs: 0,
+          exitCode: 1,
+          truncated: false,
+          nodeVersion: process.version,
+        });
+      } catch {
+        console.warn(
+          "Structured investigation evidence could not be delivered; inspect runner logs.",
+        );
+      }
+    }
     if (!completed)
       try {
         if (currentPhase !== "complete") await report(currentPhase, "FAILED", error.message);
