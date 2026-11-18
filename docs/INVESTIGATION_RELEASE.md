@@ -22,6 +22,10 @@ Run `npm test`, `npm run build`, `npm run build:managed`, `npm run lint`, and `n
 
 Node ESM loader registration uses a `file:` URL converted from the resolved instrumentation path. A bare Windows drive-letter path is not an ESM specifier. CI runs the full unit/Worker suite and production build on Windows with Node 22.19.0, in addition to the Linux and container gates.
 
+## Local operator settings and tests
+
+Integration tests use `tests/wrangler.jsonc` with local-only resources and fixed fixture settings. They do not load credentials or runner pins from the operator's root `.dev.vars` or `.env`. Both Windows and Linux release CI create synthetic operator files before running the complete suite and production build, so a clean CI account cannot hide this environment difference. Keep the real local settings in place when running the release command.
+
 ## Cost accounting
 
 `npm run bench:investigation -- --output /tmp/investigation-fixture.json` reruns a controlled 12-file Vitest fixture. The retained local result is [investigation-fixture.json](benchmarks/investigation-fixture.json). That run reduced evidence from 7,638 to 1,484 bytes, executed one selected file instead of twelve, then verified the repaired assertion. No paid model or provider was called in that fixture. The measured duration excludes GitHub checkout and dependency installation. Values vary with environment; evidence bytes are not a token estimate.
