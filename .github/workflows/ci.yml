@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Unit and Worker integration tests
         run: npm test
+      - name: Reproduce investigation cost fixture
+        run: node scripts/bench-investigation.mjs
       - name: Isolated recorded replay acceptance
         run: node scripts/verify-isolated-replay.mjs
       - name: Production build and TypeScript
@@ -49,6 +51,11 @@ jobs:
           docker run --rm --network none --entrypoint node
           --mount "type=bind,source=${{ github.workspace }}/scripts/verify-runner-image.mjs,target=/tmp/verify-runner-image.mjs,readonly"
           traceyard-runner:ci /tmp/verify-runner-image.mjs
+      - name: Check replay bootstrap cannot run installation hooks
+        run: >-
+          docker run --rm --network none --entrypoint node
+          --mount "type=bind,source=${{ github.workspace }}/scripts/verify-replay-bootstrap.mjs,target=/tmp/verify-replay-bootstrap.mjs,readonly"
+          traceyard-runner:ci /tmp/verify-replay-bootstrap.mjs
       - name: Export the tested image for deployment
         run: |
           docker save --output runner-image.tar traceyard-runner:ci

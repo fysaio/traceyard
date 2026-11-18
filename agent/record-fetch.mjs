@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import http from "node:http";
 import https from "node:https";
@@ -10,8 +10,23 @@ const capture = process.env.TRACEYARD_CAPTURE_FILE,
   state = process.env.TRACEYARD_REPLAY_STATE;
 const manifest = replay ? JSON.parse(readFileSync(replay, "utf8")) : null,
   used = new Map();
+const exhausted = new Set();
 const write = (file, value) => {
   try {
+    if (!file || exhausted.has(file)) return;
+    let size = 0;
+    try {
+      size = statSync(file).size;
+    } catch {
+      /* First event. */
+    }
+    if (size > 240000) {
+      exhausted.add(file);
+      value =
+        file === state
+          ? { kind: "divergence", reason: "Replay event budget exceeded." }
+          : { kind: "omission", reason: "Capture exceeded its artifact budget." };
+    }
     if (file) appendFileSync(file, JSON.stringify(value) + "\n", { encoding: "utf8", mode: 0o600 });
   } catch {
     /* Recording must not alter the application result. */

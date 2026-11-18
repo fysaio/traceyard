@@ -2,16 +2,16 @@
 
 Add `https://YOUR_TRACEYARD_HOST/mcp` as a remote MCP server in a client that supports Streamable HTTP and OAuth browser authorization. Sign in with the existing GitHub account, select a project and approve the displayed scopes. No Traceyard server key or application provider key is pasted into the client.
 
-The endpoint uses the same investigations and evidence as the browser APIs. It is enabled only after the application revision and migrations through `0020_agent_authorization.sql` are deployed. Targeted execution additionally requires the compatible reviewed runner; installing MCP does not attach to an already-deployed application process.
+The endpoint uses the same investigations and evidence as the browser APIs. It is enabled only after the application revision and migrations through `0022_investigation_retention.sql` are deployed. Targeted execution additionally requires the compatible reviewed runner; installing MCP does not attach to an already-deployed application process.
 
 ## Tools
 
-| Tool          | Use                                                                                                                                                          |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `investigate` | Read indexed source or existing failure evidence. `mode: execute` requests a focused existing Vitest test; ambiguous matches return candidate paths.         |
-| `inspect`     | Read a finding, status, evidence range, exact-revision source excerpt, verification or recent investigations.                                                |
-| `verify`      | Run a retained failed reproducer against a candidate commit, with bounded related regressions and changed-test disclosure.                                   |
-| `recover`     | Resume/restart an owned failed Traceyard workflow when the connection grants `runs:recover`. Observation of arbitrary code is not a continuation checkpoint. |
+| Tool          | Use                                                                                                                                                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `investigate` | Read indexed source or existing failure evidence. `mode: execute` requests a focused existing Vitest test; ambiguous matches return candidate paths. Optional JSON capture enables `mode: replay` with an eligible recording reference. |
+| `inspect`     | Read a finding, status, evidence range, exact-revision source excerpt, verification, recording manifests or recent investigations.                                                                                                      |
+| `verify`      | Run a retained failed reproducer against a candidate commit, with bounded related regressions and changed-test disclosure.                                                                                                              |
+| `recover`     | Resume/restart an owned failed Traceyard workflow when the connection grants `runs:recover`. Observation of arbitrary code is not a continuation checkpoint.                                                                            |
 
 Start with a question such as “Use Traceyard to investigate the failing Today proposal test.” The coding agent should request relevant evidence, edit through its existing repository tools and verify the candidate. Tests execute in the configured repository environment, not in the MCP transport process.
 
@@ -28,3 +28,5 @@ No general token-savings percentage is claimed. Structured evidence avoids unbou
 ## Operator notes
 
 The existing public origin and GitHub sign-in configuration are reused. MCP client authorization is separate from GitHub repository installation access. Route `/mcp`, `/oauth/*` and `/.well-known/*` to the Worker rather than the SPA asset fallback. Discovery metadata is public; tools require a scoped token. Repository source, logs and model responses are untrusted data, not tool instructions.
+
+See [deployment and acceptance](INVESTIGATION_RELEASE.md) for the complete release gate and [the measured fixture](benchmarks/investigation-fixture.json) for evidence-size accounting.

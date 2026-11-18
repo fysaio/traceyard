@@ -20,6 +20,8 @@ if (!local) {
   // Only production dependencies and the agent should be baked into the image.
   await assert.rejects(access("/opt/traceyard/.dev.vars"));
   await assert.rejects(access("/opt/traceyard/worker"));
+  await assert.rejects(access("/opt/traceyard/node_modules/@modelcontextprotocol/sdk"));
+  await assert.rejects(access("/opt/traceyard/node_modules/react"));
 }
 
 for (const mode of ["success", "test-failure", "install-failure"]) {

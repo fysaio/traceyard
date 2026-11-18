@@ -1,6 +1,6 @@
 # Traceyard
 
-Traceyard is an open-source platform for executing, observing, debugging, and recovering workflows and AI agents.
+Traceyard helps developers investigate existing code and verify repairs using focused tests and retained evidence. Coding agents connect through MCP; the browser opens the same investigation.
 
 Coding agents can use the authenticated remote MCP endpoint to create shared investigations, read bounded source/failure evidence and verify a candidate repair. Connect with browser authorization and project selection; no copied server key is required. See [MCP connection](docs/MCP.md) and the ordered [implementation checklist](docs/INVESTIGATION_BUILD_PLAN.md). Application execution still needs an available repository environment; GitHub source access alone does not instrument a deployed process.
 
@@ -8,7 +8,9 @@ Create and publish a workflow, run it with JSON input, inspect each step and rec
 
 ## Product flow
 
-**Workflows → Execution → Step evidence → Recovery.** Workflows and agents are the landing workspace. Executions has a project-scoped, paginated ledger with status filters; Traces and Approvals are available directly in the navigation. A repository connection is not required to create a project and execute a workflow.
+**Question → Focused test → Finding → Verified repair.** Investigations are the landing workspace. Connect a GitHub repository, ask about a failure, inspect bounded evidence and verify the candidate commit. Connections shows repository access, execution availability and OAuth agent grants. Eligible JSON interactions can replay on the network-disabled Docker executor; see [supported replay](docs/REPLAY.md).
+
+The existing workflow engine remains available under Workflows. Executions has a project-scoped, paginated ledger with status filters; Traces and Approvals are available directly in the navigation. A repository connection is not required to create a project and execute a workflow.
 
 Studio publishes immutable workflow versions. Runs capture their input, model routes and HTTP destinations. Independent ready steps can run together; conditional paths are recorded explicitly. The execution inspector shows retained inputs, outputs, errors, attempts and events, with JSON export.
 

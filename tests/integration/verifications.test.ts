@@ -168,6 +168,22 @@ describe("repair verification", () => {
     expect(result.verdict).toBe("REVIEW_TEST_CHANGES");
     expect(result.metrics.agentTokens).toBeNull();
   });
+  it("keeps a passing result inconclusive when changed-file integrity is incomplete", async () => {
+    const a = await fixture(),
+      v = await createVerification(
+        configured,
+        a.userId,
+        a.projectId,
+        a.baseline.id,
+        "b".repeat(40),
+        undefined,
+        github(Array.from({ length: 300 }, (_, n) => `source-${n}.ts`)),
+      );
+    await complete(a, v.candidateId);
+    const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
+    expect(result.verdict).toBe("INCONCLUSIVE");
+    expect(result.summary).toContain("incomplete");
+  });
   it("rejects unsupported ancestry and reused requests with a different candidate", async () => {
     const a = await fixture();
     await expect(

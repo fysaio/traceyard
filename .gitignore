@@ -12,3 +12,6 @@ playwright-report/
 blob-report/
 docs/benchmarks/raw/
 *.tsbuildinfo
+
+# Trusted runner bootstrap output
+runner/package/agent/
