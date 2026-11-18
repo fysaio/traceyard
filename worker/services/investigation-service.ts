@@ -165,7 +165,7 @@ async function collect(
   db: D1Database,
   userId: string,
   projectId: string,
-  target: InvestigationTarget,
+  target: InvestigationTarget = { kind: "source" },
 ) {
   const evidence: Omit<InvestigationEvidence, "id">[] = [];
   const repo = await db
@@ -379,10 +379,10 @@ export async function createInvestigation(
           snapshot: snapshotOverride,
           evidence: [] as Omit<InvestigationEvidence, "id">[],
           finding: {
-            summary: "Candidate snapshot selected; execution has not completed.",
+            summary: "Selected revision snapshot; execution has not completed.",
             basis: "source" as const,
-            limitations: ["The candidate has not yet been executed."],
-            nextAction: "Execute the retained reproducer against the candidate.",
+            limitations: ["The selected revision has not yet been executed."],
+            nextAction: "Execute the selected test against this revision.",
           },
         }
       : await collect(db, userId, projectId, request.target),

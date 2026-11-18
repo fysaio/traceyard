@@ -1,9 +1,46 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { env } from "cloudflare:workers";
 import { apiFetch, createSession, ORIGIN, readSuccess } from "./helpers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
-import type { Investigation } from "../../shared/contracts/investigations";
+import {
+  beginInvestigation,
+  recordInvestigationReport,
+} from "../../worker/services/investigation-execution";
+import { getInvestigation } from "../../worker/services/investigation-service";
+import {
+  investigationRequestSchema,
+  type Investigation,
+} from "../../shared/contracts/investigations";
+import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
+
+let configured: Env;
+beforeAll(async () => {
+  const key = await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  );
+  configured = {
+    ...env,
+    GITHUB_APP_ID: "1",
+    GITHUB_APP_SLUG: "traceyard",
+    GITHUB_APP_WEBHOOK_SECRET: "fixture",
+    GITHUB_APP_PRIVATE_KEY:
+      "-----BEGIN PRIVATE KEY-----\n" +
+      btoa(
+        String.fromCharCode(
+          ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", key.privateKey)),
+        ),
+      ) +
+      "\n-----END PRIVATE KEY-----",
+  };
+});
 
 async function account(id = 990) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
@@ -14,6 +51,7 @@ async function account(id = 990) {
   });
   const session = await createUserSession(env.DB, user.id, new Request(ORIGIN));
   return {
+    userId: user.id,
     cookie: (await createSession()).cookie + "; ty_auth_session=" + session.token,
     projectId: (await getDefaultProjectId(env.DB, user.id))!,
   };
@@ -156,5 +194,302 @@ describe("shared investigations", () => {
         })
       ).status,
     ).toBe(400);
+  });
+});
+
+async function connectedSource(a: { projectId: string }, defaultCommit = "a".repeat(40)) {
+  const at = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(99,'990','investigator-990',?)",
+  )
+    .bind(at)
+    .run();
+  await env.DB.prepare(
+    "INSERT INTO project_repositories(project_id,repository_id,installation_id,full_name,default_branch,status,commit_sha,scan_json,updated_at) VALUES(?,99,99,'Example/app','main','DISCOVERED',?,?,?)",
+  )
+    .bind(
+      a.projectId,
+      defaultCommit,
+      JSON.stringify({
+        filesScanned: 1,
+        warnings: ["Partial source coverage"],
+        operations: [{ name: "GET /health", file: "api.ts", line: 5, calls: ["load"] }],
+      }),
+      at,
+    )
+    .run();
+}
+
+function mockGitHub(commitSha?: string, status = 200): typeof fetch {
+  return async (input) => {
+    const url = String(input);
+    const path = new URL(url).pathname;
+    if (path.endsWith("/access_tokens")) {
+      return Response.json({ token: "fixture-token" });
+    }
+    if (path.includes("/commits/")) {
+      if (status === 200) {
+        return Response.json({ sha: commitSha ?? "c".repeat(40) });
+      }
+      return new Response(JSON.stringify({ message: "Not Found" }), { status });
+    }
+    throw Error("Unexpected GitHub request: " + url);
+  };
+}
+
+describe("explicit commit selection", () => {
+  it("executes an explicit commit with an isolated snapshot without stale source evidence", async () => {
+    const a = await account(992);
+    await connectedSource(a);
+    const commitSha = "c".repeat(40);
+    const inv = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "execute",
+        question: "Execute test at specific commit",
+        commit: commitSha,
+        testPath: "tests/unit/api-client.test.ts",
+      }),
+      mockGitHub(commitSha),
+    );
+    expect(inv.snapshot.commit).toBe(commitSha);
+    expect(inv.snapshot.repository).toBe("Example/app");
+    expect(inv.evidence).toHaveLength(0);
+
+    const attempts = await env.DB.prepare(
+      "SELECT plan_json FROM investigation_attempts WHERE investigation_id=?",
+    )
+      .bind(inv.id)
+      .all<{ plan_json: string }>();
+    expect(attempts.results).toHaveLength(1);
+    const plan = JSON.parse(attempts.results[0]!.plan_json);
+    expect(plan.commit).toBe(commitSha);
+    expect(plan.testPath).toBe("tests/unit/api-client.test.ts");
+  });
+
+  it("rejects inaccessible or missing commits", async () => {
+    const a = await account(993);
+    await connectedSource(a);
+    const commitSha = "c".repeat(40);
+    await expect(
+      beginInvestigation(
+        configured,
+        a.userId,
+        a.projectId,
+        investigationRequestSchema.parse({
+          mode: "execute",
+          question: "Execute missing commit",
+          commit: commitSha,
+          testPath: "tests/unit/api-client.test.ts",
+        }),
+        mockGitHub(commitSha, 404),
+      ),
+    ).rejects.toMatchObject({ status: 404 });
+
+    await expect(
+      beginInvestigation(
+        configured,
+        a.userId,
+        a.projectId,
+        investigationRequestSchema.parse({
+          mode: "execute",
+          question: "Execute inaccessible commit",
+          commit: commitSha,
+          testPath: "tests/unit/api-client.test.ts",
+        }),
+        mockGitHub(commitSha, 403),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "COMMIT_INACCESSIBLE" });
+  });
+
+  it("rejects incompatible requests when commit is provided", async () => {
+    const a = await account(994);
+    await connectedSource(a);
+    const commitSha = "c".repeat(40);
+
+    await expect(
+      beginInvestigation(
+        configured,
+        a.userId,
+        a.projectId,
+        investigationRequestSchema.parse({
+          mode: "replay",
+          question: "Replay incompatible",
+          commit: commitSha,
+        }),
+        mockGitHub(commitSha),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "COMMIT_SELECTION_UNSUPPORTED" });
+
+    await expect(
+      beginInvestigation(
+        configured,
+        a.userId,
+        a.projectId,
+        investigationRequestSchema.parse({
+          mode: "analyze",
+          question: "Analyze with commit",
+          commit: commitSha,
+        }),
+        mockGitHub(commitSha),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "COMMIT_SELECTION_UNSUPPORTED" });
+
+    await expect(
+      beginInvestigation(
+        configured,
+        a.userId,
+        a.projectId,
+        investigationRequestSchema.parse({
+          mode: "execute",
+          question: "Check target with commit",
+          commit: commitSha,
+          target: { kind: "check", ref: "check-123" },
+        }),
+        mockGitHub(commitSha),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "COMMIT_SELECTION_UNSUPPORTED" });
+
+    expect(() =>
+      investigationRequestSchema.parse({
+        question: "Invalid commit format",
+        commit: "short-sha",
+      }),
+    ).toThrow();
+  });
+
+  it("preserves default behavior and indexed source when no commit is specified", async () => {
+    const a = await account(995);
+    await connectedSource(a, "a".repeat(40));
+    const inv = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "analyze",
+        question: "Analyze default branch",
+      }),
+    );
+    expect(inv.snapshot.commit).toBe("a".repeat(40));
+    expect(inv.evidence.length).toBeGreaterThan(0);
+    expect(inv.evidence[0]!.title).toContain("Indexed source operations");
+  });
+
+  it("retains immutable snapshot identity on repeated requests", async () => {
+    const a = await account(996);
+    await connectedSource(a);
+    const commitSha = "c".repeat(40);
+    const req = investigationRequestSchema.parse({
+      mode: "execute",
+      question: "Deduplicated request",
+      commit: commitSha,
+      requestKey: "test-req-001",
+      testPath: "tests/unit/api-client.test.ts",
+    });
+
+    const first = await beginInvestigation(configured, a.userId, a.projectId, req, mockGitHub(commitSha));
+    await env.DB.prepare("UPDATE project_repositories SET commit_sha=? WHERE project_id=?")
+      .bind("d".repeat(40), a.projectId)
+      .run();
+
+    const second = await beginInvestigation(configured, a.userId, a.projectId, req, mockGitHub(commitSha));
+    expect(second.id).toBe(first.id);
+    expect(second.snapshot.commit).toBe(commitSha);
+
+    const reloaded = await getInvestigation(env.DB, a.userId, a.projectId, first.id);
+    expect(reloaded.snapshot.commit).toBe(commitSha);
+  });
+
+  it("rejects execution report with commit mismatch", async () => {
+    const a = await account(997);
+    await connectedSource(a);
+    const commitSha = "c".repeat(40);
+    const inv = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "execute",
+        question: "Report mismatch test",
+        commit: commitSha,
+        testPath: "tests/unit/api-client.test.ts",
+      }),
+      mockGitHub(commitSha),
+    );
+
+    const attempt = (await getInvestigation(env.DB, a.userId, a.projectId, inv.id)).attempts![0]!;
+    await env.DB.prepare(
+      "UPDATE repository_check_requests SET runner_id='authorized-runner' WHERE id=?",
+    )
+      .bind(attempt.requestId)
+      .run();
+
+    const mismatchedReport: InvestigationReport = {
+      requestId: attempt.requestId,
+      runId: "authorized-runner",
+      commit: "d".repeat(40),
+      status: "SUCCEEDED",
+      command: { directory: ".", script: "test", testPath: "tests/unit/api-client.test.ts" },
+      counts: { passed: 1, failed: 0, skipped: 0 },
+      failures: [],
+      message: "One test passed",
+      durationMs: 150,
+      exitCode: 0,
+      truncated: false,
+      nodeVersion: "v22",
+    };
+
+    await expect(
+      recordInvestigationReport(env.DB, a.projectId, inv.id, mismatchedReport),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "INVESTIGATION_REVISION_MISMATCH",
+    });
+  });
+
+  it("preserves replay compatibility without commit selection", async () => {
+    const a = await account(998);
+    await connectedSource(a);
+    const prev = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "execute",
+        question: "Previous run for recording",
+        testPath: "tests/unit/api-client.test.ts",
+      }),
+    );
+    const attempt = (await getInvestigation(env.DB, a.userId, a.projectId, prev.id)).attempts![0]!;
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      kind: "json-fetch",
+      sourceCommit: "a".repeat(40),
+      testPath: "tests/unit/api-client.test.ts",
+      interactions: [],
+      environment: [],
+      omissions: [],
+      eligible: false,
+    });
+    await env.DB.prepare(
+      "INSERT INTO investigation_recordings(id,investigation_id,project_id,request_id,manifest_json,eligible,created_at) VALUES(?,?,?,?,?,0,?)",
+    )
+      .bind("rcd_" + "f".repeat(32), prev.id, a.projectId, attempt.requestId, manifest, new Date().toISOString())
+      .run();
+
+    await expect(
+      beginInvestigation(
+        configured,
+        a.userId,
+        a.projectId,
+        investigationRequestSchema.parse({
+          mode: "replay",
+          question: "Replay without commit",
+          recordingId: "rcd_" + "f".repeat(32),
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 409, code: "REPLAY_UNAVAILABLE" });
   });
 });
