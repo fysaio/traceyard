@@ -378,12 +378,12 @@ export function TemplateDetail({ projectId }: { projectId: string }) {
   if (!t)
     return (
       <p>
-        Template not found. <Link to="/?tab=templates">Return to templates</Link>
+        Template not found. <Link to="/workflows?tab=templates">Return to templates</Link>
       </p>
     );
   return (
     <>
-      <Link className="back" to="/?tab=templates">
+      <Link className="back" to="/workflows?tab=templates">
         <Icon name="arrow-left" /> Templates
       </Link>
       <div className="page-head">
