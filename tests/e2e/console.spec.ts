@@ -4,9 +4,13 @@ test("a fresh browser reads the backend auth state and never fabricates a worksp
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Understand every execution." })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Execute workflows. Recover when they break." }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Explore the sandbox" })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Workflows", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Workflows & agents", exact: true })).toHaveCount(
+    0,
+  );
 });
 
 test("an unreachable API shows a recoverable error instead of seeded workflows", async ({
