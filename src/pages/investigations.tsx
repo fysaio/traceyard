@@ -714,7 +714,7 @@ export function ConnectionsPage() {
   const [connect, setConnect] = useState(false),
     [setup, setSetup] = useState(false),
     [client, setClient] = useState<"chatgpt" | "antigravity" | "other">("chatgpt"),
-    [copied, setCopied] = useState(false),
+    [copied, setCopied] = useState(""),
     [copyError, setCopyError] = useState(""),
     [revokeTarget, setRevokeTarget] = useState<Grant | null>(null);
   const project = projects.find((p) => p.id === projectId),
@@ -724,7 +724,7 @@ export function ConnectionsPage() {
     void navigator.clipboard
       .writeText(value)
       .then(() => {
-        setCopied(true);
+        setCopied(value);
         setCopyError("");
       })
       .catch(() =>
@@ -882,7 +882,7 @@ export function ConnectionsPage() {
                 className={client === value ? "selected" : ""}
                 onClick={() => {
                   setClient(value);
-                  setCopied(false);
+                  setCopied("");
                   setCopyError("");
                 }}
               >
@@ -893,7 +893,7 @@ export function ConnectionsPage() {
           <div className="mcp-endpoint">
             <code>{endpoint}</code>
             <button className="btn" onClick={() => copy(endpoint)}>
-              {copied ? "Copied" : "Copy MCP URL"}
+              {copied === endpoint ? "Copied" : "Copy MCP URL"}
             </button>
           </div>
           {client === "chatgpt" ? (
@@ -915,7 +915,7 @@ export function ConnectionsPage() {
             <div>
               <p>Ask Antigravity to add the server without changing your existing connections.</p>
               <button className="btn" onClick={() => copy(antigravitySetup)}>
-                {copied ? "Copied" : "Copy Antigravity setup request"}
+                {copied === antigravitySetup ? "Copied" : "Copy Antigravity setup request"}
               </button>
               <ol className="setup-instructions">
                 <li>Paste the setup request into Antigravity.</li>
