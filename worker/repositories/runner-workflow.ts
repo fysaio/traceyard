@@ -24,6 +24,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Fetch Traceyard runner
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
