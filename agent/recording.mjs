@@ -35,6 +35,7 @@ export async function buildRecording(path, sourceCommit, testPath) {
     } else if (event.kind === "omission") manifest.omissions.push(event.reason);
   }
   manifest.environment = [...environment.values()].slice(0, 30);
+  if (!sourceCommit) manifest.omissions.push("The exact source revision is unknown.");
   if (!manifest.interactions.length)
     manifest.omissions.push("No eligible JSON fetch response was recorded.");
   while (Buffer.byteLength(JSON.stringify(manifest)) > 23000 && manifest.interactions.length) {

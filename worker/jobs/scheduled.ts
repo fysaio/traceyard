@@ -1,3 +1,4 @@
+import { maintainInvestigations } from "../services/investigation-maintenance";
 import { runIntegrationJobs } from "./integrations";
 import { reapManagedChecks } from "../repositories/managed";
 import { DomainError, serializeError } from "../../shared/domain/errors";
@@ -72,6 +73,7 @@ export async function runScheduledJobs(env: Env): Promise<ScheduledSummary> {
 
   summary.reconciledExecutionLeases = await reconcileExecutionLeases(env.DB);
   await reapManagedChecks(env);
+  await maintainInvestigations(env.DB);
   const reservations = await reconcileQuotaReservations(env.DB, isoFromNow(-STALE_CLAIM_MS));
   summary.committedQuotaReservations = reservations.committed;
   summary.releasedQuotaReservations = reservations.released;

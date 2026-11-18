@@ -3,6 +3,7 @@ declare global {
     GITHUB_CLIENT_ID?: string;
     GITHUB_CLIENT_SECRET?: string;
     PUBLIC_APP_ORIGIN?: string;
+    BUILD_REVISION?: string;
   }
 }
 

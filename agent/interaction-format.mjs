@@ -42,6 +42,7 @@ export async function interactionSignature(method, url, body) {
 }
 export function eligibleRecording(recording) {
   if (
+    !recording.sourceCommit ||
     !recording.interactions.length ||
     recording.omissions.length ||
     sensitive(recording.interactions)

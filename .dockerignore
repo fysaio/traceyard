@@ -5,3 +5,6 @@
 !agent/**
 !runner/
 !runner/Dockerfile
+!runner/package/
+!runner/package/package.json
+!runner/package/package-lock.json

@@ -336,3 +336,50 @@ describe("connected project experience", () => {
     ).toBe(400);
   });
 });
+
+it("refuses old executors before exposing a focused plan, rather than running an ordinary full suite", async () => {
+  const a = await setup();
+  const inv = await readSuccess<{ id: string }>(
+    await call(a, `/api/projects/${a.projectId}/investigations`, "POST", {
+      question: "Inspect an existing failure",
+    }),
+  );
+  const requestId = "req_" + "e".repeat(32);
+  await env.DB.prepare("UPDATE investigations SET status='EXECUTING' WHERE id=?")
+    .bind(inv.id)
+    .run();
+  await env.DB.prepare(
+    "INSERT INTO repository_check_requests(id,project_id,snapshot_json,created_at) VALUES(?,?,?,?)",
+  )
+    .bind(
+      requestId,
+      a.projectId,
+      JSON.stringify({
+        config: { directory: ".", startScript: "", port: 3000 },
+        cases: [],
+        investigation: {
+          investigationId: inv.id,
+          requestId,
+          question: "Inspect an existing failure",
+          commit: null,
+          timeoutMs: 120000,
+        },
+      }),
+      new Date().toISOString(),
+    )
+    .run();
+  const path = "/api/v1/repository/configuration?request=" + requestId + "&run=local-protocol";
+  expect((await call(a, path, "GET", undefined, a.token)).status).toBe(409);
+  const accepted = await apiFetch(path, {
+    headers: {
+      cookie: a.cookie,
+      Authorization: "Bearer " + a.token,
+      "X-Traceyard-Runner-Protocol": "2",
+    },
+  });
+  expect(accepted.status).toBe(200);
+  expect(
+    ((await accepted.json()) as { data: { investigation: { requestId: string } } }).data
+      .investigation.requestId,
+  ).toBe(requestId);
+});

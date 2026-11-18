@@ -307,6 +307,7 @@ export interface AnalyticsPayload {
 }
 
 export interface HealthPayload {
+  revision?: string | null;
   status: "ok" | "degraded";
   version: string;
   environment: "development" | "production";
