@@ -14,7 +14,13 @@ User authorization: implement each step on its own branch/PR, review and test it
 | 5    | feat/investigations-05-mcp          | Hosted authenticated MCP and bounded investigation tools                                   | Protocol client, authorization/revocation, project isolation and reconnect      | Merged PR #11; 343 tests, SDK OAuth/protocol/reconnect pass                               |
 | 6    | feat/investigations-06-replay       | Supported isolated interaction recording/replay and honest recovery capabilities           | No-network replay, divergence refusal, checkpoint provenance                    | Merged PR #12; real isolated replay CI passed                                             |
 | 7    | feat/investigations-07-web          | Investigation-first browser and unified connection status                                  | Fresh/returning journeys, errors, deep links and responsive interaction         | Merged PR #13; browser, replay and build CI passed                                       |
-| 8    | feat/investigations-08-acceptance   | Agent/browser end-to-end validation, reproducible cost benchmark, deployment documentation | Actual supported client journey, baseline comparison, exact deployment evidence | Implemented; 351 tests, benchmark and release gates; deployment requires Cloudflare login |
+| 8    | feat/investigations-08-acceptance   | Agent/browser end-to-end validation, reproducible cost benchmark, deployment documentation | Actual supported client journey, baseline comparison, exact deployment evidence | Merged PR #14; deployed `7cf9c40` after fixes #15–16; live focused test passed; live agent OAuth, repair verification and replay remain open |
+
+## Production acceptance checkpoint — 18 November 2026
+
+The operator deployed migrations through 0022 and the reviewed runner. GitHub sign-in, repository connection, source analysis and a real inferred focused test succeeded in the deployed app. The result retained seven passing assertions at the investigation's exact source revision. PR #17 enabled the reviewed repository workflow with explicit operator approval; PR #18 corrected four observed UI issues and awaits the next deployment. The complete suite now contains 352 tests, with Linux and Windows release gates covering synthetic operator environment files.
+
+See [the live acceptance record](LIVE_INVESTIGATION_ACCEPTANCE_2026-11-18.md) for the deployment, investigation and GitHub run references. Step 8 is not fully accepted until an external coding client authorizes MCP, uses the same investigation/evidence, verifies a retained failing reproducer against a candidate and exercises eligible isolated replay. Existing controlled CI evidence remains distinct from those pending live checks.
 
 ## Dependency review
 
