@@ -5,7 +5,62 @@ import type {
 import { redact } from "../../shared/contracts/traces";
 import { ApiError, conflict, notFound } from "../api/errors";
 import { dispatchRepositoryChecks } from "../repositories/checks";
-import { getInvestigation } from "./investigation-service";
+import { getInvestigation, createInvestigation } from "./investigation-service";
+import { getRecording } from "./recording-service";
+import type { InvestigationRequest } from "../../shared/contracts/investigations";
+export async function beginInvestigation(
+  env: Env,
+  userId: string,
+  projectId: string,
+  request: InvestigationRequest,
+  fetcher: typeof fetch = fetch,
+) {
+  const recording =
+    request.mode === "replay" && request.recordingId
+      ? await getRecording(env.DB, userId, projectId, request.recordingId)
+      : null;
+  if (request.mode === "replay" && (!recording?.eligible || !recording.manifest.sourceCommit))
+    throw conflict(
+      "REPLAY_UNAVAILABLE",
+      "Select a complete eligible recording with a known source revision.",
+    );
+  const repo = recording
+    ? await env.DB.prepare("SELECT full_name FROM project_repositories WHERE project_id=?")
+        .bind(projectId)
+        .first<{ full_name: string }>()
+    : null;
+  const inv = await createInvestigation(
+    env.DB,
+    userId,
+    projectId,
+    request,
+    recording
+      ? {
+          repository: repo?.full_name ?? null,
+          commit: recording.manifest.sourceCommit,
+          filesScanned: 0,
+          warnings: ["Replay uses retained JSON fetch interactions in an isolated runtime."],
+        }
+      : undefined,
+  );
+  return request.mode === "analyze"
+    ? inv
+    : startInvestigationExecution(
+        env,
+        userId,
+        projectId,
+        inv.id,
+        {
+          initial: true,
+          testPath: request.testPath ?? recording?.manifest.testPath,
+          captureInteractions: request.captureInteractions,
+          replayRecording: recording
+            ? { id: recording.id, manifest: recording.manifest }
+            : undefined,
+        },
+        fetcher,
+      );
+}
 import { randomId } from "../lib/crypto";
 import { nowIso } from "../lib/time";
 
@@ -14,7 +69,13 @@ export async function startInvestigationExecution(
   userId: string,
   projectId: string,
   id: string,
-  options: { testPath?: string; initial?: boolean; changedFiles?: string[] } = {},
+  options: {
+    testPath?: string;
+    initial?: boolean;
+    changedFiles?: string[];
+    captureInteractions?: boolean;
+    replayRecording?: InvestigationPlan["replayRecording"];
+  } = {},
   fetcher: typeof fetch = fetch,
 ) {
   const inv = await getInvestigation(env.DB, userId, projectId, id);
@@ -46,6 +107,8 @@ export async function startInvestigationExecution(
     question: inv.question,
     ...(options.testPath ? { testPath: options.testPath } : {}),
     ...(options.changedFiles ? { changedFiles: options.changedFiles, maxTestFiles: 3 } : {}),
+    ...(options.captureInteractions ? { captureInteractions: true } : {}),
+    ...(options.replayRecording ? { replayRecording: options.replayRecording } : {}),
     commit: inv.snapshot.commit,
     timeoutMs: 120000,
   };
@@ -142,6 +205,17 @@ export async function recordInvestigationReport(
     }>();
   if (!row) throw notFound("Investigation attempt not found.");
   const plan = JSON.parse(row.plan_json) as InvestigationPlan;
+  if (
+    plan.replayRecording &&
+    report.status === "SUCCEEDED" &&
+    (!report.replay ||
+      report.replay.recordingId !== plan.replayRecording.id ||
+      report.replay.diverged)
+  )
+    throw conflict(
+      "REPLAY_PROOF_REQUIRED",
+      "A replay cannot claim success without matching isolated replay evidence.",
+    );
   if (row.runner_id !== report.runId)
     throw conflict(
       "INVESTIGATION_RUNNER_MISMATCH",

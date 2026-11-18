@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { repositoryPathSchema } from "./repository-index";
+import { recordingManifestSchema } from "./recordings";
 export const investigationPlanSchema = z
   .object({
     investigationId: z.string().regex(/^inv_[a-f0-9]{32}$/),
@@ -8,6 +9,11 @@ export const investigationPlanSchema = z
     testPath: repositoryPathSchema.optional(),
     changedFiles: z.array(repositoryPathSchema).max(100).optional(),
     maxTestFiles: z.number().int().min(1).max(5).optional(),
+    captureInteractions: z.boolean().optional(),
+    replayRecording: z
+      .object({ id: z.string().regex(/^rcd_[a-f0-9]{32}$/), manifest: recordingManifestSchema })
+      .strict()
+      .optional(),
     commit: z
       .string()
       .regex(/^[a-f0-9]{40}$/)
@@ -50,7 +56,7 @@ export const investigationReportSchema = z
       )
       .max(8),
     message: z.string().max(2000),
-    durationMs: z.number().int().min(0).max(300000),
+    durationMs: z.number().int().min(0).max(600000),
     exitCode: z.number().int().nullable(),
     truncated: z.boolean(),
     nodeVersion: z.string().max(40),
@@ -69,9 +75,20 @@ export const investigationReportSchema = z
       .object({ omittedTests: z.number().int().min(0) })
       .strict()
       .optional(),
+    replay: z
+      .object({
+        recordingId: z.string().regex(/^rcd_[a-f0-9]{32}$/),
+        isolation: z.literal("docker-network-none"),
+        reusedRequests: z.number().int().min(0),
+        diverged: z.boolean(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((r, c) => {
+    if (r.status === "SUCCEEDED" && r.replay?.diverged)
+      c.addIssue({ code: "custom", message: "A divergent replay cannot establish success." });
     if (r.status === "SUCCEEDED" && (r.exitCode !== 0 || r.counts.failed || !r.counts.passed))
       c.addIssue({
         code: "custom",
