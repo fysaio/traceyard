@@ -35,6 +35,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: \${{ hashFiles('package-lock.json') != '' && 'package-lock.json' || '**/package-lock.json' }}
       - name: Install runner dependencies
         run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Prepare trusted runner
@@ -42,6 +44,12 @@ jobs:
       - name: Discover, build and test
         env:
           CI: 'true'
+          NPM_CONFIG_AUDIT: 'false'
+          NPM_CONFIG_FUND: 'false'
+          NPM_CONFIG_FETCH_TIMEOUT: '30000'
+          NPM_CONFIG_FETCH_RETRIES: '1'
+          WRANGLER_SEND_METRICS: 'false'
+          WRANGLER_SEND_ERROR_REPORTS: 'false'
           TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
           TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
         run: node .traceyard-runner/runner/package/agent/cli.mjs run .
