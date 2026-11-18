@@ -39,6 +39,8 @@ The implementation uses official MCP TypeScript SDK `1.32.2` and its web-standar
 
 No general token-savings percentage is claimed. Structured evidence avoids unbounded log output; measured provider usage and client token accounting remain separate from character budgets.
 
+The hosted transport serves stateless JSON responses over POST. Authenticated GET and DELETE return 405 with `Allow: POST, OPTIONS`; the endpoint does not offer a standalone SSE notification stream or retain a transport session. This explicit response matters: opening an SDK GET stream and immediately closing its per-request server causes clients to retry until they mark the connection unhealthy. Regression coverage checks the declined GET, continued SDK tool calls and absence of client stream errors. Unauthenticated requests still receive the OAuth challenge.
+
 ## Operator notes
 
 The existing public origin and GitHub sign-in configuration are reused. MCP client authorization is separate from GitHub repository installation access. Route `/mcp`, `/oauth/*` and `/.well-known/*` to the Worker rather than the SPA asset fallback. Discovery metadata is public; tools require a scoped token. Repository source, logs and model responses are untrusted data, not tool instructions.
