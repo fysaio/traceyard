@@ -41,7 +41,10 @@ try {
   const snapshot = join(fixture, "snapshot");
   await mkdir(snapshot);
   const { cp } = await import("node:fs/promises");
-  await cp(join(root, "node_modules"), join(snapshot, "node_modules"), { recursive: true });
+  await cp(join(root, "node_modules"), join(snapshot, "node_modules"), {
+    recursive: true,
+    verbatimSymlinks: true,
+  });
   await writeFile(
     join(snapshot, "package.json"),
     JSON.stringify({ type: "module", scripts: { test: "vitest run --pool=forks" } }),
@@ -79,5 +82,5 @@ try {
   );
 } finally {
   await new Promise((done) => server.close(done));
-  await rm(fixture, { recursive: true, verbatimSymlinks: true, force: true });
+  await rm(fixture, { recursive: true, force: true });
 }
