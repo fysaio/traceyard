@@ -298,7 +298,6 @@ describe("explicit commit selection", () => {
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
       const path = new URL(url).pathname;
-      const method = init?.method ?? "GET";
       const body = init?.body ? JSON.parse(String(init.body)) : {};
 
       if (path.endsWith("/access_tokens")) {
