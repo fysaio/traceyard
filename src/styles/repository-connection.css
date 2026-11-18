@@ -1,0 +1,199 @@
+.project-switcher .modal-connect-card {
+  padding: 24px 12px;
+  border: 0;
+  background: none;
+}
+.project-switcher .modal-connect-icon {
+  margin-bottom: 14px;
+  font-size: 24px;
+}
+.project-switcher .modal-connect-title {
+  font-size: 15px;
+}
+.project-switcher .modal-connect-card .hint {
+  margin: 8px auto 0;
+  max-width: 240px;
+}
+.project-switcher .project-menu-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 20px;
+}
+.project-switcher .project-menu-actions > .btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 13px;
+  gap: 8px;
+  white-space: nowrap !important;
+}
+.repository-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  width: 600px;
+  max-height: min(780px, calc(100dvh - 40px));
+  overflow: hidden;
+}
+.repository-dialog .dialog-heading {
+  flex-shrink: 0;
+  margin-bottom: 16px;
+}
+.repository-dialog .dialog-heading h2 {
+  font-size: 24px;
+  line-height: 1.2;
+}
+.repository-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+}
+.repository-intro {
+  flex-shrink: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+.repository-picker > .request-error {
+  margin: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--soft);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.repository-picker .repository-search {
+  flex-shrink: 0;
+  min-height: 44px;
+  border-radius: 16px;
+}
+.repository-picker .repository-choices {
+  min-height: 64px;
+  max-height: 40dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 3px;
+  margin: -3px;
+  scrollbar-width: thin;
+}
+.repository-picker .repository-choice {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 16px;
+  min-height: 64px;
+  padding: 16px;
+  gap: 12px;
+  border-radius: 20px;
+  transition:
+    background 150ms ease,
+    transform 100ms ease;
+}
+.repository-picker .repository-choice:hover:not(:disabled) {
+  background: var(--hover);
+}
+.repository-picker .repository-choice:active:not(:disabled) {
+  transform: scale(0.99);
+}
+.repository-picker .repository-choice:disabled {
+  cursor: wait;
+}
+.repository-picker .repository-choice:disabled:not([aria-busy="true"]) {
+  opacity: 0.55;
+}
+.repository-choice strong {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.repository-choice > span {
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.repository-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 140px;
+  text-align: center;
+}
+.repository-empty > i {
+  font-size: 28px;
+}
+.repository-empty h3 {
+  font-size: 18px;
+}
+.repository-empty p {
+  max-width: 350px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.repository-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.repository-actions .btn {
+  min-height: 44px;
+  padding: 11px 18px;
+  border-radius: 999px !important;
+  font-size: 13px;
+  white-space: nowrap !important;
+}
+.repository-local {
+  display: block;
+  flex-shrink: 0;
+  align-self: center;
+  min-height: 44px;
+  padding: 10px 8px;
+  text-align: center;
+  font-size: 13px;
+}
+.repository-picker .fa-circle-notch {
+  animation: preparation-spin 1s linear infinite;
+}
+@media (max-width: 600px) {
+  .repository-dialog[open] {
+    margin: auto;
+    max-height: calc(100dvh - 24px);
+    max-width: calc(100vw - 24px);
+    padding: 24px 20px;
+    border-radius: 28px;
+  }
+  .repository-dialog .dialog-heading h2 {
+    font-size: 22px;
+  }
+  .repository-picker {
+    gap: 16px;
+  }
+  .repository-picker .repository-choice {
+    gap: 8px;
+    padding: 14px 12px;
+  }
+}
+@media (max-height: 560px) {
+  .repository-dialog[open] {
+    overflow-y: auto;
+  }
+  .repository-picker {
+    flex-shrink: 0;
+  }
+  .repository-picker .repository-choices {
+    max-height: none;
+    overflow: visible;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .repository-picker .fa-circle-notch {
+    animation: none;
+  }
+  .repository-picker .repository-choice {
+    transition: none;
+  }
+}

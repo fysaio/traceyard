@@ -1,3 +1,4 @@
+import { nowIso } from "../lib/time";
 import { base64UrlEncode } from "../lib/crypto";
 import { badRequest, serviceUnavailable } from "../api/errors";
 declare global {
@@ -14,23 +15,15 @@ export function githubConfigured(env: Env) {
     env.GITHUB_APP_ID &&
     env.GITHUB_APP_SLUG &&
     env.GITHUB_APP_PRIVATE_KEY &&
-    env.GITHUB_APP_WEBHOOK_SECRET &&
-    /^[a-f0-9]{40}$/.test(env.TRACEYARD_RUNNER_REF ?? "")
+    env.GITHUB_APP_WEBHOOK_SECRET
   );
 }
-export async function githubRequest<T>(
-  env: Env,
-  installationId: number,
-  path: string,
-  init: RequestInit = {},
-  fetcher: typeof fetch = fetch,
-): Promise<T> {
+async function githubAppToken(env: Env): Promise<string> {
   if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY)
     throw serviceUnavailable(
       "GITHUB_APP_UNCONFIGURED",
       "Repository connection needs the Traceyard GitHub App configuration.",
     );
-  if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
   const encode = (v: unknown) => base64UrlEncode(new TextEncoder().encode(JSON.stringify(v))),
     now = Math.floor(Date.now() / 1000);
   const content =
@@ -60,7 +53,16 @@ export async function githubRequest<T>(
     key,
     new TextEncoder().encode(content),
   );
-  const appToken = content + "." + base64UrlEncode(new Uint8Array(signature));
+  return content + "." + base64UrlEncode(new Uint8Array(signature));
+}
+export async function installationAccessToken(
+  env: Env,
+  installationId: number,
+  fetcher: typeof fetch = fetch,
+  repositoryId?: number,
+  permissions: Record<string, string> = { contents: "read" },
+): Promise<string> {
+  const appToken = await githubAppToken(env);
   const headers = {
     Accept: "application/vnd.github+json",
     "User-Agent": "Traceyard",
@@ -70,7 +72,19 @@ export async function githubRequest<T>(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
     {
       method: "POST",
-      headers: { ...headers, Authorization: "Bearer " + appToken },
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + appToken,
+      },
+      ...(repositoryId
+        ? {
+            body: JSON.stringify({
+              repository_ids: [repositoryId],
+              permissions,
+            }),
+          }
+        : {}),
       signal: AbortSignal.timeout(10000),
     },
   );
@@ -80,13 +94,35 @@ export async function githubRequest<T>(
       "GitHub installation access could not be verified.",
     );
   const token = (await tokenResponse.json()) as { token: string };
+  return token.token;
+}
+export async function githubRequest<T>(
+  env: Env,
+  installationId: number,
+  path: string,
+  init: RequestInit = {},
+  fetcher: typeof fetch = fetch,
+): Promise<T> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
+  const token = await installationAccessToken(env, installationId, fetcher);
+  return requestWithToken<T>(token, path, init, fetcher);
+}
+async function requestWithToken<T>(
+  token: string,
+  path: string,
+  init: RequestInit,
+  fetcher: typeof fetch,
+): Promise<T> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw Error("Invalid GitHub API path.");
   const response = await fetcher("https://api.github.com" + path, {
     ...init,
     headers: {
-      ...headers,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Traceyard",
+      "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
       ...init.headers,
-      Authorization: "Bearer " + token.token,
+      Authorization: "Bearer " + token,
     },
     signal: AbortSignal.timeout(15000),
   });
@@ -98,6 +134,90 @@ export async function githubRequest<T>(
     );
   const body = await response.text();
   return (body.trim() ? JSON.parse(body) : null) as T;
+}
+export async function repositoryGitHubClient(
+  env: Env,
+  installationId: number,
+  repositoryId: number,
+  fetcher: typeof fetch = fetch,
+) {
+  const token = await installationAccessToken(env, installationId, fetcher, repositoryId, {
+    contents: "write",
+    pull_requests: "write",
+    workflows: "write",
+    actions: "write",
+  });
+  return <T>(path: string, init: RequestInit = {}) =>
+    requestWithToken<T>(token, path, init, fetcher);
+}
+export async function syncPersonalInstallation(
+  env: Env,
+  userId: string,
+  fetcher: typeof fetch = fetch,
+) {
+  const identity = await env.DB.prepare(
+    "SELECT provider_subject,provider_login FROM identities WHERE user_id=? AND provider='github'",
+  )
+    .bind(userId)
+    .first<{ provider_subject: string; provider_login: string }>();
+  if (!identity) return null;
+  const response = await fetcher(
+    `https://api.github.com/users/${encodeURIComponent(identity.provider_login)}/installation`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Traceyard",
+        "X-GitHub-Api-Version": "2022-11-28",
+        Authorization: "Bearer " + (await githubAppToken(env)),
+      },
+      signal: AbortSignal.timeout(15000),
+    },
+  );
+  if (response.status === 404) {
+    await env.DB.prepare(
+      "UPDATE github_installations SET suspended=1,updated_at=? WHERE account_id=?",
+    )
+      .bind(nowIso(), identity.provider_subject)
+      .run();
+    return null;
+  }
+  if (!response.ok)
+    throw serviceUnavailable(
+      "GITHUB_INSTALLATION_SYNC_FAILED",
+      "GitHub access could not be refreshed. Try again; you do not need to reinstall Traceyard.",
+    );
+  const installation = (await response.json()) as {
+    id: number;
+    app_id: number;
+    account?: { id: number; login: string; type: string };
+    suspended_at?: string | null;
+  };
+  // A renamed/reused GitHub login must never attach another account's installation.
+  if (
+    !Number.isSafeInteger(installation.id) ||
+    installation.id <= 0 ||
+    String(installation.app_id) !== env.GITHUB_APP_ID ||
+    installation.account?.type !== "User" ||
+    !Number.isSafeInteger(installation.account.id) ||
+    String(installation.account.id) !== identity.provider_subject ||
+    typeof installation.account.login !== "string" ||
+    !/^[A-Za-z0-9-]{1,39}$/.test(installation.account.login)
+  )
+    throw serviceUnavailable(
+      "GITHUB_INSTALLATION_IDENTITY_MISMATCH",
+      "GitHub installation ownership could not be verified. Refresh your GitHub sign-in, then retry.",
+    );
+  const suspended = installation.suspended_at ? 1 : 0;
+  const now = nowIso();
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE github_installations SET suspended=1,updated_at=? WHERE account_id=? AND id<>?",
+    ).bind(now, identity.provider_subject, installation.id),
+    env.DB.prepare(
+      "INSERT INTO github_installations(id,account_id,account_login,suspended,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET account_login=excluded.account_login,suspended=excluded.suspended,updated_at=excluded.updated_at WHERE github_installations.account_id=excluded.account_id",
+    ).bind(installation.id, identity.provider_subject, installation.account.login, suspended, now),
+  ]);
+  return { id: installation.id, suspended };
 }
 export async function installationOwned(db: D1Database, userId: string, id: number) {
   // Initial support is deliberately personal installations. Org/team delegation needs a membership model.

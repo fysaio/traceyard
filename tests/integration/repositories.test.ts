@@ -1,12 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { env } from "cloudflare:workers";
+import { env, type WorkflowStep } from "cloudflare:workers";
 import { createExecutionContext, introspectWorkflowInstance } from "cloudflare:test";
 import { createApp } from "../../worker/api/app";
 import { createSession, apiFetchWithGitHub, ORIGIN, readSuccess } from "./helpers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import { base64UrlEncode } from "../../worker/lib/crypto";
-import { prepareRepositoryChecks } from "../../worker/repositories/checks";
 import { scanRepository } from "../../worker/repositories/scan";
 async function account(id = 810) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
@@ -63,6 +62,239 @@ const report = (id: string, phase: string, status: string, extra = {}) => ({
   ...extra,
 });
 describe("repository connection and execution evidence", () => {
+  it("bounds free discovery, isolates a failed file, and persists metadata without credentials or source", async () => {
+    const a = await account();
+    const pair = await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    );
+    const pem =
+      "-----BEGIN PRIVATE KEY-----\n" +
+      btoa(
+        String.fromCharCode(
+          ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+        ),
+      ) +
+      "\n-----END PRIVATE KEY-----";
+    const configured = {
+      ...env,
+      GITHUB_APP_ID: "123",
+      GITHUB_APP_PRIVATE_KEY: pem,
+      SOURCE_SCAN_FILE_LIMIT: "16",
+      SOURCE_SCAN_FILE_BYTES: "16000",
+    };
+    await env.DB.prepare(
+      "INSERT INTO project_repositories(project_id,full_name,default_branch,status,updated_at) VALUES(?,'repository-810/app','main','DISCOVERING',?)",
+    )
+      .bind(a.projectId, new Date().toISOString())
+      .run();
+    let requests = 0;
+    const fetcher: typeof fetch = async (input) => {
+      requests++;
+      const url = String(input);
+      if (url.endsWith("/users/repository-810/installation"))
+        return Response.json({
+          id: 7,
+          app_id: 123,
+          account: { id: 810, login: "repository-810", type: "User" },
+          suspended_at: null,
+        });
+      if (url.endsWith("/users/repository-811/installation"))
+        return new Response(null, { status: 404 });
+      if (url.endsWith("/access_tokens"))
+        return Response.json({ token: "never-persist-installation-token" });
+      if (url.includes("/commits/")) return Response.json({ sha: "a".repeat(40) });
+      if (url.includes("/git/trees/"))
+        return Response.json({
+          truncated: false,
+          tree: [
+            { path: "large.ts", type: "blob", size: 20000, sha: "large" },
+            ...Array.from({ length: 20 }, (_, i) => ({
+              path: `api/route-${i}.ts`,
+              type: "blob",
+              size: 100,
+              sha: String(i),
+            })),
+          ],
+        });
+      if (url.includes("/git/blobs/"))
+        return Response.json({
+          encoding: "base64",
+          content: btoa("// private-source-marker\napp.get('/health', () => loadHealth());"),
+        });
+      throw Error("Unexpected GitHub request");
+    };
+    const persisted = new Map<string, unknown>();
+    const step = {
+      do: async (name: string, _options: unknown, fn: () => Promise<unknown>) => {
+        if (persisted.has(name)) return persisted.get(name);
+        if (name === "source-file-1") throw Error("CPU limit simulated");
+        const result = await fn();
+        persisted.set(name, result);
+        return result;
+      },
+    } as unknown as WorkflowStep;
+    const repo = {
+      project_id: a.projectId,
+      installation_id: 7,
+      full_name: "repository-810/app",
+      default_branch: "main",
+    };
+    await scanRepository(configured, repo, fetcher, step);
+    const firstRequests = requests;
+    // Workflow replay must reuse persisted outputs rather than refetching completed source.
+    await scanRepository(configured, repo, fetcher, step);
+    expect(requests).toBe(firstRequests);
+    expect(requests).toBeLessThan(40);
+    const row = await env.DB.prepare(
+      "SELECT scan_json,status FROM project_repositories WHERE project_id=?",
+    )
+      .bind(a.projectId)
+      .first<{ scan_json: string; status: string }>();
+    expect(row?.status).toBe("DISCOVERED");
+    expect(JSON.parse(row!.scan_json)).toMatchObject({ filesScanned: 15, totalFiles: 16 });
+    expect(JSON.parse(row!.scan_json).operations).toHaveLength(15);
+    expect(JSON.parse(row!.scan_json).warnings.join(" ")).toContain("16 source files");
+    expect(JSON.parse(row!.scan_json).warnings.join(" ")).toContain("Could not analyse");
+    const state = JSON.stringify([...persisted]);
+    expect(state).not.toContain("never-persist-installation-token");
+    expect(state).not.toContain("private-source-marker");
+    expect(state).not.toContain("PRIVATE KEY");
+  });
+  it.each([
+    "existing",
+    "reinstalled",
+    "missing",
+    "suspended",
+    "unavailable",
+    "foreign-account",
+    "wrong-app",
+  ])(
+    "refreshes %s GitHub installations without depending on an installation webhook",
+    async (mode) => {
+      const a = await account();
+      const pair = await crypto.subtle.generateKey(
+        {
+          name: "RSASSA-PKCS1-v1_5",
+          modulusLength: 2048,
+          publicExponent: new Uint8Array([1, 0, 1]),
+          hash: "SHA-256",
+        },
+        true,
+        ["sign", "verify"],
+      );
+      const configured = {
+        ...env,
+        GITHUB_APP_ID: "123",
+        GITHUB_APP_SLUG: "traceyard-test",
+        GITHUB_APP_WEBHOOK_SECRET: "test-only",
+        GITHUB_APP_PRIVATE_KEY:
+          "-----BEGIN PRIVATE KEY-----\n" +
+          btoa(
+            String.fromCharCode(
+              ...new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
+            ),
+          ) +
+          "\n-----END PRIVATE KEY-----",
+      };
+      if (mode === "reinstalled" || mode === "missing")
+        await env.DB.prepare(
+          "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(7,'810','repository-810',?)",
+        )
+          .bind(new Date().toISOString())
+          .run();
+      let lookup = 0,
+        repositoryReads = 0;
+      const fetcher: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/users/repository-810/installation")) {
+          lookup++;
+          const token = new Headers(init?.headers).get("Authorization")!.slice(7);
+          const [header, claims, signature] = token.split(".");
+          expect(JSON.parse(atob(claims!)).iss).toBe("123");
+          const bytes = Uint8Array.from(
+            atob(signature!.replace(/-/g, "+").replace(/_/g, "/")),
+            (c) => c.charCodeAt(0),
+          );
+          expect(
+            await crypto.subtle.verify(
+              "RSASSA-PKCS1-v1_5",
+              pair.publicKey,
+              bytes,
+              new TextEncoder().encode(header + "." + claims),
+            ),
+          ).toBe(true);
+          if (mode === "missing") return new Response(null, { status: 404 });
+          if (mode === "unavailable") return new Response(null, { status: 503 });
+          return Response.json({
+            id: 182604347,
+            app_id: mode === "wrong-app" ? 999 : 123,
+            account: {
+              id: mode === "foreign-account" ? 811 : 810,
+              login: "repository-810",
+              type: "User",
+            },
+            suspended_at: mode === "suspended" ? "2026-11-17T00:00:00Z" : null,
+          });
+        }
+        if (url.endsWith("/access_tokens"))
+          return Response.json({ token: "fixture-installation-token" });
+        if (url.includes("/installation/repositories")) {
+          repositoryReads++;
+          return Response.json({ repositories: [{ id: 99, full_name: "repository-810/somni" }] });
+        }
+        throw Error("Unexpected fixture URL");
+      };
+      const app = createApp({ githubFetch: fetcher });
+      const response = await app.fetch(
+        new Request(ORIGIN + "/api/repositories", { headers: { cookie: a.cookie } }),
+        configured,
+        createExecutionContext(),
+      );
+      expect(lookup).toBe(1);
+      if (["unavailable", "foreign-account", "wrong-app"].includes(mode)) {
+        expect(response.status).toBe(503);
+        expect(repositoryReads).toBe(0);
+        expect(await env.DB.prepare("SELECT id FROM github_installations").all()).toMatchObject({
+          results: [],
+        });
+        return;
+      }
+      const value = await readSuccess<{
+        installationCount: number;
+        manageUrl: string | null;
+        items: unknown[];
+      }>(response);
+      if (mode === "missing") {
+        expect(value).toMatchObject({ installationCount: 0, manageUrl: null, items: [] });
+        expect(
+          await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
+        ).toEqual({ suspended: 1 });
+        return;
+      }
+      expect(value).toMatchObject({
+        installationCount: 1,
+        manageUrl: "https://github.com/settings/installations/182604347",
+      });
+      expect(value.items).toHaveLength(mode === "suspended" ? 0 : 1);
+      expect(repositoryReads).toBe(mode === "suspended" ? 0 : 1);
+      expect(
+        await env.DB.prepare(
+          "SELECT account_id,suspended FROM github_installations WHERE id=182604347",
+        ).first(),
+      ).toEqual({ account_id: "810", suspended: mode === "suspended" ? 1 : 0 });
+      if (mode === "reinstalled")
+        expect(
+          await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
+        ).toEqual({ suspended: 1 });
+    },
+  );
   it("keeps repository state owner-scoped and exposes missing GitHub configuration honestly", async () => {
     const a = await account(),
       b = await account(811);
@@ -72,6 +304,8 @@ describe("repository connection and execution evidence", () => {
     expect((await call(b, "/api/projects/" + a.projectId + "/repository")).status).toBe(404);
     expect(await readSuccess(await call(a, "/api/repositories"))).toMatchObject({
       configured: false,
+      installationCount: 0,
+      manageUrl: null,
       items: [],
     });
     expect((await call(a, "/api/github/webhook", "POST", { action: "created" })).status).toBe(403);
@@ -402,6 +636,15 @@ describe("repository connection and execution evidence", () => {
     const source = "app.post('/interpret',async c=>model.generate(c));";
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
+      if (url.endsWith("/users/repository-810/installation"))
+        return Response.json({
+          id: 7,
+          app_id: 123,
+          account: { id: 810, login: "repository-810", type: "User" },
+          suspended_at: null,
+        });
+      if (url.endsWith("/users/repository-811/installation"))
+        return new Response(null, { status: 404 });
       if (url.endsWith("/access_tokens"))
         return Response.json({ token: "test-installation-token" });
       if (url.includes("/installation/repositories"))
@@ -465,24 +708,6 @@ describe("repository connection and execution evidence", () => {
       await invoke("/api/repositories"),
     );
     expect(listed.items[0]?.id).toBe(99);
-    expect(
-      (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
-    ).toBe(200);
-    expect(
-      (await invoke("/api/projects/" + a.projectId + "/repository/setup", "POST")).status,
-    ).toBe(200);
-    // Runtime dispatch requires actual installation evidence, rather than merely an open PR.
-    expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
-      409,
-    );
-    await env.DB.prepare(
-      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
-    )
-      .bind(a.projectId)
-      .run();
-    expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
-      202,
-    );
     expect((await invoke("/api/projects/" + a.projectId + "/repository/run", "POST")).status).toBe(
       409,
     );
@@ -548,7 +773,7 @@ describe("repository connection and execution evidence", () => {
       await env.DB.prepare("SELECT suspended FROM github_installations WHERE id=7").first(),
     ).toEqual({ suspended: 1 });
   });
-  it("creates one project per selected repository, starts background setup, and resumes partial PR setup without duplicate runs", async () => {
+  it("creates one project per repository and discovers source without modifying customer workflows", async () => {
     const a = await account(),
       other = await account(811);
     await env.DB.prepare(
@@ -590,14 +815,25 @@ describe("repository connection and execution evidence", () => {
     };
     let branch = false,
       file: string | null = null,
-      pr = false,
-      failUpload = true;
+      pr = false;
+    const failUpload = true;
     let branches = 0,
       prs = 0,
       dispatches = 0;
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input);
+      if (url.endsWith("/users/repository-810/installation"))
+        return Response.json({
+          id: 7,
+          app_id: 123,
+          account: { id: 810, login: "repository-810", type: "User" },
+          suspended_at: null,
+        });
+      if (url.endsWith("/users/repository-811/installation"))
+        return new Response(null, { status: 404 });
       if (url.endsWith("/access_tokens")) return Response.json({ token: "fixture-token" });
+      if (url.includes("/installation/repositories"))
+        return Response.json({ repositories: [{ id: 99, full_name: "repository-810/somni" }] });
       if (url.endsWith("/repositories/99"))
         return Response.json({
           id: 99,
@@ -649,14 +885,33 @@ describe("repository connection and execution evidence", () => {
     const app = createApp({ githubFetch: fetcher });
     const invoke = (path: string, method = "POST", body?: unknown, cookie = a.cookie) =>
       app.fetch(
-        new Request(ORIGIN + path, {
+        // Dev Tunnels rewrites Origin to its local HTTP target; Vite uses the
+        // forwarded HTTPS protocol when constructing the Worker request URL.
+        new Request("https://localhost:5173" + path, {
           method,
-          headers: { cookie, origin: ORIGIN, "content-type": "application/json" },
+          headers: {
+            cookie,
+            origin: "http://localhost:5173",
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/json",
+          },
           ...(body ? { body: JSON.stringify(body) } : {}),
         }),
         configured,
         createExecutionContext(),
       );
+    expect(await readSuccess(await invoke("/api/repositories", "GET"))).toMatchObject({
+      installationCount: 1,
+      manageUrl: "https://github.com/settings/installations/7",
+      items: [{ id: 99, name: "repository-810/somni", installationId: 7 }],
+    });
+    expect(
+      await readSuccess(await invoke("/api/repositories", "GET", undefined, other.cookie)),
+    ).toMatchObject({
+      installationCount: 0,
+      manageUrl: null,
+      items: [],
+    });
     const input = { repositoryId: 99, installationId: 7 };
     expect((await invoke("/api/repositories/connect", "POST", input, other.cookie)).status).toBe(
       404,
@@ -683,10 +938,6 @@ describe("repository connection and execution evidence", () => {
           .first<{ count: number }>()
       )?.count,
     ).toBe(2);
-    // A failed external setup does not discard successful source discovery.
-    await expect(prepareRepositoryChecks(configured, id, fetcher)).rejects.toThrow(
-      "GitHub returned 500",
-    );
     await scanRepository(
       configured,
       {
@@ -699,38 +950,15 @@ describe("repository connection and execution evidence", () => {
     );
     expect(
       await env.DB.prepare(
-        "SELECT status,check_setup_state FROM project_repositories WHERE project_id=?",
+        "SELECT status,setup_pr_url FROM project_repositories WHERE project_id=?",
       )
         .bind(id)
         .first(),
-    ).toEqual({ status: "DISCOVERED", check_setup_state: "FAILED" });
-    failUpload = false;
-    expect(await prepareRepositoryChecks(configured, id, fetcher)).toMatchObject({
-      state: "AWAITING_MERGE",
-    });
-    expect(await prepareRepositoryChecks(configured, id, fetcher)).toMatchObject({
-      state: "AWAITING_MERGE",
-    });
-    expect(branches).toBe(1);
-    expect(prs).toBe(1);
+    ).toEqual({ status: "DISCOVERED", setup_pr_url: null });
     expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
-    await env.DB.prepare(
-      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
-    )
-      .bind(id)
-      .run();
-    expect((await invoke(`/api/projects/${id}/repository/analyze`)).status).toBe(202);
-    expect(tasks).toHaveLength(2);
-    expect(tasks[1]?.params.checks).toBe(true);
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(202);
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
-    expect(dispatches).toBe(1);
-    // Even after the short click cooldown, a queued job holds the lease.
-    await env.DB.prepare("UPDATE project_repositories SET last_dispatch_at=? WHERE project_id=?")
-      .bind(new Date(Date.now() - 2 * 60000).toISOString(), id)
-      .run();
-    expect((await invoke(`/api/projects/${id}/repository/run`)).status).toBe(409);
-    expect(dispatches).toBe(1);
+    expect(branches).toBe(0);
+    expect(prs).toBe(0);
+    expect(dispatches).toBe(0);
   });
   it("finishes independent background setup stages and retains both failures without configured services", async () => {
     const a = await account();
@@ -766,7 +994,7 @@ describe("repository connection and execution evidence", () => {
       }>();
     expect(state?.status).toBe("FAILED");
     expect(state?.last_error).toContain("GitHub App configuration");
-    expect(state?.check_setup_state).toBe("FAILED");
-    expect(state?.check_setup_error).toContain("runner commit");
+    expect(state?.check_setup_state).toBe("NOT_STARTED");
+    expect(state?.check_setup_error).toBeNull();
   });
 });

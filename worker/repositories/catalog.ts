@@ -5,6 +5,9 @@ import type { DiscoveredOperation } from "../../agent/discovery.mjs";
 import { sha256Hex } from "../lib/crypto";
 import { getOwnedProject } from "../persistence/projects";
 import { notFound } from "../api/errors";
+import { syncRepositoryChecks } from "./check-sync";
+import { githubChecksAvailable, syncGitHubDispatches } from "./github-checks";
+import { managedChecksAvailable } from "./managed";
 export async function operationKey(file: string, name: string) {
   return "op_" + (await sha256Hex(file + "\0" + name)).slice(0, 32);
 }
@@ -42,6 +45,8 @@ export async function projectCatalog(
 ): Promise<Catalog> {
   const project = await getOwnedProject(env.DB, userId, projectId);
   if (!project) throw notFound("Project not found.");
+  await syncGitHubDispatches(env, projectId);
+  await syncRepositoryChecks(env, projectId);
   const [repository, runs, jobs, config, cases, managed] = await Promise.all([
     env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
       .bind(projectId)
@@ -66,8 +71,9 @@ export async function projectCatalog(
       .bind(projectId)
       .all<ApplicationRun>(),
   ]);
-  const scan = repository?.scan_json
-    ? (JSON.parse(repository.scan_json) as {
+  const sourceIndex = repository?.scan_json ?? repository?.scan_progress_json;
+  const scan = sourceIndex
+    ? (JSON.parse(sourceIndex) as {
         operations: DiscoveredOperation[];
         warnings: string[];
         filesScanned: number;
@@ -82,7 +88,11 @@ export async function projectCatalog(
     sourceMap.set(
       source.key,
       previous
-        ? { ...previous, calls: [...new Set([...previous.calls, ...source.calls])].slice(0, 12) }
+        ? {
+            ...previous,
+            calls: [...new Set([...previous.calls, ...source.calls])].slice(0, 12),
+            sourceFlow: undefined,
+          }
         : source,
     );
   }
@@ -120,6 +130,7 @@ export async function projectCatalog(
       file: o.file,
       line: o.line,
       calls: o.calls,
+      sourceFlow: o.sourceFlow,
       evidence: matches.length ? "linked" : "source",
       runtimeNames: [...new Set(matches.map((r) => r.name))],
       runs: matches.length,
@@ -174,5 +185,12 @@ export async function projectCatalog(
       : runnerConfigSchema.parse({}),
     warnings: scan?.warnings ?? [],
     filesScanned: scan?.filesScanned ?? 0,
+    executionAvailable:
+      managedChecksAvailable(env) || (!!repository?.repository_id && githubChecksAvailable(env)),
+    executionProvider: managedChecksAvailable(env)
+      ? "managed"
+      : repository?.repository_id && githubChecksAvailable(env)
+        ? "github"
+        : null,
   };
 }

@@ -6,7 +6,7 @@ import {
 import { randomId } from "../lib/crypto";
 import { nowIso, isoFromNow } from "../lib/time";
 import { decryptSecret } from "./secrets";
-import { badRequest, notFound, serviceUnavailable, tooManyRequests } from "../api/errors";
+import { ApiError, badRequest, notFound, serviceUnavailable, tooManyRequests } from "../api/errors";
 export async function readModelRoute(env: Env, projectId: string, id: string) {
   const row = await env.DB.prepare(
     "SELECT config_json FROM model_routes WHERE id=? AND project_id=?",
@@ -80,6 +80,8 @@ export async function callModel(
     .run();
   const attempts: ModelResult["attempts"] = [];
   let failure = "No model was available.";
+  let retryable = false;
+  let failureCode = "MODEL_REQUEST_REJECTED";
   for (const target of config.models) {
     const attemptStart = Date.now();
     let transient = false;
@@ -200,6 +202,8 @@ export async function callModel(
         ["TimeoutError", "AbortError", "TypeError"].includes(error.name)
       )
         transient = true;
+      retryable = transient;
+      if (error instanceof ApiError) failureCode = error.code;
       attempts.push({
         provider: target.provider,
         model: target.model,
@@ -214,5 +218,6 @@ export async function callModel(
   )
     .bind("FAILED", Date.now() - start, JSON.stringify(attempts), id)
     .run();
-  throw serviceUnavailable("MODEL_REQUEST_FAILED", failure);
+  if (retryable) throw serviceUnavailable("MODEL_REQUEST_FAILED", failure);
+  throw badRequest(failureCode, failure);
 }

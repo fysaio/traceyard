@@ -1,22 +1,21 @@
-export function runnerWorkflow(origin: string, branch: string, runnerRef: string) {
-  // JSON strings are valid YAML scalars; never interpolate repository text as shell code.
+// Reviewed agent revision; customer CI does not execute a moving platform branch.
+export const DEFAULT_RUNNER_REF = "a23df5c114e7302e76418309206150983255a3c8";
+export function runnerWorkflow(origin: string, runnerRef: string) {
   return `name: Traceyard
+run-name: Traceyard \${{ inputs.run_request }}
 on:
   workflow_dispatch:
     inputs:
       run_request:
-        description: Saved check request
-        required: false
+        description: Traceyard check request
+        required: true
         type: string
-  push:
-    branches: [${JSON.stringify(branch)}]
-    paths: [".github/workflows/traceyard.yml"]
 permissions:
   contents: read
   id-token: write
 concurrency:
-  group: traceyard-\${{ github.ref }}
-  cancel-in-progress: true
+  group: traceyard-\${{ github.repository_id }}
+  cancel-in-progress: false
 jobs:
   inspect:
     runs-on: ubuntu-latest
@@ -35,14 +34,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            .traceyard-runner/package-lock.json
       - name: Install runner dependencies
         run: npm ci --prefix .traceyard-runner --omit=dev --ignore-scripts --no-audit --no-fund
       - name: Discover, build and test
         env:
+          CI: 'true'
           TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
           TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
         run: node .traceyard-runner/agent/cli.mjs run .

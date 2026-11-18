@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { discoverFile } from "./discovery.mjs";
+import { summarizeCommandFailure } from "./failure-summary.mjs";
 
 export async function scanDirectory(root) {
   const operations = [],
@@ -56,14 +57,23 @@ export async function scanDirectory(root) {
   if (operations.length > 100) warnings.push("Dashboard discovery is limited to 100 operations.");
   return { operations: operations.slice(0, 100), filesScanned, warnings: warnings.slice(0, 20) };
 }
-function execute(program, args, options) {
+function execute(program, args, options, phase) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(program, args, {
       ...options,
-      stdio: "inherit",
+      stdio: ["inherit", "pipe", "pipe"],
       shell: process.platform === "win32",
       detached: process.platform !== "win32",
     });
+    let output = "";
+    const capture = (stream, destination) => {
+      stream.on("data", (chunk) => {
+        destination.write(chunk);
+        output = (output + chunk.toString()).slice(-131072);
+      });
+    };
+    capture(child.stdout, process.stdout);
+    capture(child.stderr, process.stderr);
     const timer = setTimeout(() => {
       try {
         if (process.platform === "win32") child.kill("SIGKILL");
@@ -71,22 +81,24 @@ function execute(program, args, options) {
       } catch {
         /* Already exited. */
       }
-      reject(new Error("Command exceeded the 180 second limit."));
+      reject(new Error(summarizeCommandFailure(output, phase, "180 second time limit")));
     }, 180000);
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
     });
-    child.on("exit", (code, signal) => {
-      clearTimeout(timer);
+    child.on("exit", () => {
       if (process.platform !== "win32")
         try {
           process.kill(-child.pid, "SIGTERM");
         } catch {
           /* Group already stopped. */
         }
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
       if (code === 0) resolveRun();
-      else reject(new Error(`Command failed (${signal ?? code}).`));
+      else reject(new Error(summarizeCommandFailure(output, phase, signal ?? code)));
     });
   });
 }
@@ -121,20 +133,34 @@ export async function main(args = process.argv.slice(2)) {
     throw Error("Use an HTTPS server origin, or localhost for local development.");
   const origin = url.origin,
     isActions = process.env.GITHUB_ACTIONS === "true";
-  const id = isActions
-    ? `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`
-    : "local-" + randomUUID();
-  let sha = null;
+  const managedId = process.env.TRACEYARD_MANAGED_RUN_ID;
+  if (
+    managedId &&
+    (!/^managed_[a-f0-9]{32}$/.test(managedId) ||
+      !/^[a-f0-9]{40}$/.test(process.env.TRACEYARD_COMMIT_SHA ?? ""))
+  )
+    throw Error("The managed runner snapshot is invalid.");
+  const id =
+    managedId ??
+    (isActions
+      ? `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`
+      : "local-" + randomUUID());
+  let sha = managedId ? process.env.TRACEYARD_COMMIT_SHA : null;
   try {
-    sha = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
+    if (!managedId)
+      sha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
   } catch {
     /* An uncommitted local directory is supported. */
   }
   async function credential() {
+    if (managedId) {
+      if (!process.env.TRACEYARD_RUN_TOKEN) throw Error("The managed check credential is missing.");
+      return process.env.TRACEYARD_RUN_TOKEN;
+    }
     if (!isActions) {
       if (!process.env.TRACEYARD_KEY) throw Error("Set TRACEYARD_KEY in the server environment.");
       return process.env.TRACEYARD_KEY;
@@ -184,7 +210,7 @@ export async function main(args = process.argv.slice(2)) {
         }
     });
   };
-  if (!isActions) await send("repository/register", { name: basename(root) });
+  if (!isActions && !managedId) await send("repository/register", { name: basename(root) });
   let completed = false;
   const manifestResponse = await fetch(
     origin +
@@ -264,33 +290,57 @@ export async function main(args = process.argv.slice(2)) {
     }
     const env = { ...process.env };
     delete env.TRACEYARD_KEY;
+    delete env.TRACEYARD_RUN_TOKEN;
     delete env.NODE_OPTIONS;
     await report("install", "RUNNING", "Installing project dependencies.");
-    let locked = true;
+    let installRoot = root;
     try {
-      await lstat(join(root, "package-lock.json"));
+      await lstat(join(installRoot, "package-lock.json"));
     } catch {
-      locked = false;
+      // npm workspaces install from their shared lockfile, while application
+      // commands still run in the selected directory.
+      try {
+        const lock = JSON.parse(await readFile(join(workspaceRoot, "package-lock.json"), "utf8"));
+        const workspace = relative(workspaceRoot, root).split("\\").join("/");
+        if (!workspace || !lock.packages?.[workspace]) throw Error("Not an npm workspace");
+        installRoot = workspaceRoot;
+      } catch {
+        await report(
+          "complete",
+          "SKIPPED",
+          "A package-lock.json is required in this application or its npm workspace root.",
+        );
+        completed = true;
+        return;
+      }
     }
-    if (!locked) {
-      await report(
-        "complete",
-        "SKIPPED",
-        "A package-lock.json is required for reproducible npm installs.",
-      );
-      completed = true;
-      return;
-    }
-    await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["ci"], { cwd: root, env });
+    await execute(
+      process.platform === "win32" ? "npm.cmd" : "npm",
+      ["ci"],
+      { cwd: installRoot, env },
+      "install",
+    );
     await report("install", "SUCCEEDED", "Dependencies installed.");
-    if (pkg.scripts?.build) {
+    if (pkg.scripts?.build && !manifest.cases.length) {
       await report("build", "RUNNING", "Running the existing build script.");
-      await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"], {
-        cwd: root,
-        env,
-      });
+      await execute(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        ["run", "build"],
+        {
+          cwd: root,
+          env,
+        },
+        "build",
+      );
       await report("build", "SUCCEEDED", "Build completed.");
-    } else await report("build", "SKIPPED", "No build script configured.");
+    } else
+      await report(
+        "build",
+        "SKIPPED",
+        manifest.cases.length
+          ? "Starting the selected application directly for its request test."
+          : "No build script configured.",
+      );
     if (
       !manifest.cases.length &&
       (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
@@ -306,12 +356,13 @@ export async function main(args = process.argv.slice(2)) {
       "Running the existing test script with supported Node.js tracing.",
     );
     const preload = fileURLToPath(new URL("./register.cjs", import.meta.url));
+    const esmPreload = new URL("./esm-register.mjs", import.meta.url).href;
     const key = await credential();
     const testEnv = {
       ...env,
       CI: "true",
       TRACEYARD_RUN_ID: id,
-      NODE_OPTIONS: `--require ${JSON.stringify(preload)}`,
+      NODE_OPTIONS: `--require ${JSON.stringify(preload)} --import ${JSON.stringify(esmPreload)}`,
       OTEL_SERVICE_NAME: basename(root),
       OTEL_RESOURCE_ATTRIBUTES: `traceyard.run.id=${id}`,
       OTEL_TRACES_EXPORTER: "otlp",
@@ -390,10 +441,15 @@ export async function main(args = process.argv.slice(2)) {
         return;
       }
     } else {
-      await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["test"], {
-        cwd: root,
-        env: testEnv,
-      });
+      await execute(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        ["test"],
+        {
+          cwd: root,
+          env: testEnv,
+        },
+        "test",
+      );
     }
     await report(
       "test",
@@ -416,7 +472,11 @@ export async function main(args = process.argv.slice(2)) {
     throw error;
   }
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+if (
+  process.argv[1] &&
+  (await realpath(process.argv[1]).catch(() => "")) ===
+    (await realpath(fileURLToPath(import.meta.url)))
+)
   main().catch((error) => {
     console.error(error.message);
     process.exitCode = 1;

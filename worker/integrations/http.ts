@@ -3,6 +3,7 @@ import { decryptSecret } from "./secrets";
 import { randomId } from "../lib/crypto";
 import { nowIso } from "../lib/time";
 import { notFound } from "../api/errors";
+import { DomainError } from "../../shared/domain/errors";
 export interface HttpConnection {
   id: string;
   name: string;
@@ -31,6 +32,7 @@ export async function callHttp(
   connection: HttpConnection,
   input: unknown,
   fetcher: typeof fetch = fetch,
+  effectScopeId: string = runId,
 ) {
   const credential = await env.DB.prepare(
     "SELECT secret_ciphertext FROM http_connections WHERE id=? AND project_id=?",
@@ -50,7 +52,7 @@ export async function callHttp(
   try {
     const headers: Record<string, string> = {
       Accept: "application/json",
-      "Idempotency-Key": runId + ":" + nodeId,
+      "Idempotency-Key": effectScopeId + ":" + nodeId,
     };
     if (credential.secret_ciphertext)
       headers.Authorization =
@@ -115,6 +117,21 @@ export async function callHttp(
     )
       .bind(status, Date.now() - start, message, id)
       .run();
-    throw new Error(message, { cause: error });
+    throw new DomainError({
+      errorClass:
+        status === null
+          ? "TRANSIENT_DEPENDENCY"
+          : status === 429 || status >= 500
+            ? "TRANSIENT_DEPENDENCY"
+            : "PERMANENT_APPLICATION",
+      code:
+        status === null
+          ? "HTTP_REQUEST_FAILED"
+          : status >= 400
+            ? "HTTP_" + status
+            : "HTTP_INVALID_RESPONSE",
+      message,
+      retryable: status === null || status === 429 || status >= 500,
+    });
   }
 }

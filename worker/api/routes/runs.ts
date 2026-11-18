@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import {
   eventListQuerySchema,
   launchRunRequestSchema,
+  retryRunRequestSchema,
   runListQuerySchema,
 } from "../../../shared/contracts/api";
 import { decodeRunCursor } from "../../../shared/domain/cursor";
@@ -153,7 +154,10 @@ runRoutes.post("/runs/:id/cancel", async (c) => {
 
 runRoutes.post("/runs/:id/retry", async (c) => {
   const { config, requestId } = getRequestContext(c);
+  const body = c.req.raw.body === null ? {} : await readJsonBody(c);
+  const options = parseWith(retryRunRequestSchema, body, "Invalid recovery options.");
   const result = await retryRun(c.env, {
+    mode: options.mode,
     session: c.get("session"),
     runId: c.req.param("id"),
     requestId,

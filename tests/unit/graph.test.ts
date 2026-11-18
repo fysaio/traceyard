@@ -6,6 +6,28 @@ import {
   INITIAL_GRAPH,
 } from "../../shared/workflow/graph";
 describe("executable graphs", () => {
+  it("rejects unbounded retry policies and retries on non-external steps", () => {
+    for (const maxAttempts of [0, 6]) {
+      expect(
+        graphSchema.safeParse({
+          ...INITIAL_GRAPH,
+          nodes: INITIAL_GRAPH.nodes.map((n) => ({
+            ...n,
+            config: { retry: { maxAttempts, baseDelayMs: 1000, backoff: "fixed" } },
+          })),
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      graphSchema.safeParse({
+        ...INITIAL_GRAPH,
+        nodes: INITIAL_GRAPH.nodes.map((n) => ({
+          ...n,
+          config: { retry: { maxAttempts: 2, baseDelayMs: 1000, backoff: "fixed" } },
+        })),
+      }).success,
+    ).toBe(false);
+  });
   it("validates a bounded graph and preserves dependency ordering", () => {
     const g = graphSchema.parse(INITIAL_GRAPH);
     expect(graphLayers(g).map((l) => l.map((n) => n.id))).toEqual([["input"], ["output"]]);

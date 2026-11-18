@@ -598,6 +598,54 @@ html {
   gap: 12px;
   margin-top: 16px;
 }
+.flow-source-tree {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  display: grid;
+  gap: 12px;
+}
+.flow-source-tree .flow-source-tree {
+  margin: 12px 0 0 18px;
+  padding-left: 16px;
+  border-left: 2px solid var(--line);
+}
+.flow-source-tree summary,
+.flow-source-leaf {
+  background: var(--soft);
+  padding: 16px 18px;
+  border-radius: 16px;
+}
+.flow-source-tree summary {
+  cursor: pointer;
+}
+.flow-source-tree summary:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 3px;
+}
+.flow-source-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.flow-source-call i {
+  color: var(--muted);
+}
+.flow-source-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.flow-source-tag {
+  color: var(--fg);
+}
 .flow-call {
   display: flex;
   align-items: center;
@@ -1201,4 +1249,35 @@ html {
   padding: 20px;
   border-radius: 20px;
   margin-top: 20px;
+}
+
+.flow-local-check {
+  display: grid;
+  gap: 24px;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.flow-local-check h3 {
+  font-size: 17px;
+  margin-bottom: 8px;
+}
+.flow-local-check p {
+  color: var(--muted);
+}
+.flow-local-check .code {
+  margin: 14px 0;
+  border-radius: 18px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.flow-local-check summary {
+  cursor: pointer;
+  font-weight: 600;
+  border-radius: 14px;
+  padding: 12px 0;
+}
+.flow-local-check summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 5px;
 }

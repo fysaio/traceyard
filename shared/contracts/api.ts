@@ -15,6 +15,7 @@ export const launchRunRequestSchema = z
   .object({
     workflowId: z.string().trim().min(1).max(80),
     projectId: z.string().trim().min(1).max(80).optional(),
+    parentRunId: z.string().trim().min(1).max(80).optional(),
     version: z.number().int().positive().optional(),
     input: z.unknown().refine((value) => value !== undefined, "Provide an input JSON value."),
     scenario: z.enum(FAILURE_SCENARIOS).default("success"),
@@ -22,6 +23,10 @@ export const launchRunRequestSchema = z
   .strict();
 
 export type LaunchRunRequest = z.infer<typeof launchRunRequestSchema>;
+
+export const retryRunRequestSchema = z
+  .object({ mode: z.enum(["restart", "resume"]).default("restart") })
+  .strict();
 
 export const runListQuerySchema = z
   .object({
@@ -116,6 +121,7 @@ export interface DispatchView {
 }
 
 export interface RunSummary {
+  projectId?: string;
   id: string;
   workflow: {
     id: string;
@@ -149,6 +155,7 @@ export interface AttemptView {
 }
 
 export interface StepView {
+  reusedFromRunId?: string | null;
   id: string;
   key: string;
   name: string;
@@ -166,6 +173,7 @@ export interface StepView {
 }
 
 export interface RunDetail extends RunSummary {
+  recoveryMode?: "restart" | "resume" | null;
   input: unknown;
   output: unknown;
   correlationId: string;
