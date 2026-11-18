@@ -7,7 +7,11 @@ import { redact } from "../../shared/contracts/traces";
 import { ApiError, badRequest, conflict, notFound } from "../api/errors";
 import { dispatchRepositoryChecks } from "../repositories/checks";
 import { githubRequest } from "../repositories/github";
-import { getInvestigation, createInvestigation } from "./investigation-service";
+import {
+  getInvestigation,
+  createInvestigation,
+  requireInvestigationProject,
+} from "./investigation-service";
 import { getRecording } from "./recording-service";
 import type { InvestigationRequest } from "../../shared/contracts/investigations";
 export async function beginInvestigation(
@@ -17,6 +21,21 @@ export async function beginInvestigation(
   request: InvestigationRequest,
   fetcher: typeof fetch = fetch,
 ) {
+  await requireInvestigationProject(env.DB, userId, projectId);
+  if (request.expectedRepository) {
+    const connected = await env.DB.prepare(
+      "SELECT full_name FROM project_repositories WHERE project_id=?",
+    )
+      .bind(projectId)
+      .first<{ full_name: string }>();
+    if (connected?.full_name.toLowerCase() !== request.expectedRepository.toLowerCase())
+      throw conflict(
+        "REPOSITORY_MISMATCH",
+        "This connection belongs to " +
+          (connected?.full_name ?? "a project without a repository") +
+          ". Select the intended project before investigating its code.",
+      );
+  }
   if (request.commit) {
     if (request.mode !== "execute" || request.target.kind !== "source") {
       throw badRequest(
@@ -64,18 +83,12 @@ export async function beginInvestigation(
       }
       throw error;
     }
-    const inv = await createInvestigation(
-      env.DB,
-      userId,
-      projectId,
-      request,
-      {
-        repository: repo.full_name,
-        commit: validatedCommit,
-        filesScanned: 0,
-        warnings: ["The selected revision will be indexed by its executor."],
-      },
-    );
+    const inv = await createInvestigation(env.DB, userId, projectId, request, {
+      repository: repo.full_name,
+      commit: validatedCommit,
+      filesScanned: 0,
+      warnings: ["The selected revision will be indexed by its executor."],
+    });
     return startInvestigationExecution(
       env,
       userId,

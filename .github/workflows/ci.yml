@@ -92,6 +92,14 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --config playwright.investigations.config.ts
+      - name: Retain browser journey evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-journey-evidence
+          path: test-results/
+          retention-days: 3
+          if-no-files-found: ignore
 
   windows:
     name: Windows tests and release build

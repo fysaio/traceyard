@@ -1,0 +1,51 @@
+name: Deploy Traceyard
+on:
+  workflow_run:
+    workflows: [Traceyard checks]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: traceyard-production-release
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      WRANGLER_SEND_ERROR_REPORTS: "false"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Check deployment credential
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo '::error::Add the account-scoped CLOUDFLARE_API_TOKEN repository Actions secret. See docs/PRODUCTION_RELEASE.md.'
+            exit 1
+          fi
+      - run: npm ci
+      - name: Deploy the exact revision that passed all checks
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "62771214bc8db1937b136f661cf05748"
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/deploy-investigations.mjs
+          --origin https://traceyard.pilotsaviour229.workers.dev
+          --validated-revision "${{ github.event.workflow_run.head_sha }}"

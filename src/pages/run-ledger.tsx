@@ -25,8 +25,11 @@ export function RunLedger({ projectId }: { projectId: string }) {
     <>
       <div className="page-head">
         <div>
-          <h1>Executions</h1>
-          <p>Inspect workflow steps and recover failed work.</p>
+          <h1>Workflow runs</h1>
+          <p>
+            Inspect workflow steps and recover failed work. Repository test results live in
+            Investigations.
+          </p>
         </div>
         <div className="actions">
           <button className="btn" disabled={runs.isFetching} onClick={() => void runs.refetch()}>
@@ -38,6 +41,9 @@ export function RunLedger({ projectId }: { projectId: string }) {
         </div>
       </div>
       <div className="content-toolbar">
+        <Link className="text-link" to="/investigations">
+          Repository test investigations <Icon name="arrow-right" />
+        </Link>
         <label>
           Status{" "}
           <select
@@ -107,7 +113,7 @@ export function RunLedger({ projectId }: { projectId: string }) {
           <p>
             {status
               ? "Choose another status to see more executions."
-              : "Create a workflow in Studio or start with a template. Every execution records its steps and results here."}
+              : "Create a workflow or choose a template. Its steps and recovery history will appear here. Tests run through your coding agent appear in Investigations."}
           </p>
           <Link className="btn primary" to="/workflows">
             Open workflows

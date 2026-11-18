@@ -142,6 +142,14 @@ describe("repair verification", () => {
     expect(again.id).toBe(v.id);
     await complete(a, v.candidateId);
     expect((await getVerification(env.DB, a.userId, a.projectId, v.id)).verdict).toBe("PASSED");
+    const reopened = await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id);
+    expect(reopened.verifications).toEqual([
+      expect.objectContaining({ id: v.id, baselineId: a.baseline.id, candidateId: v.candidateId }),
+    ]);
+    expect(reopened.execution?.status).toBe("FAILED");
+    const repaired = await getInvestigation(env.DB, a.userId, a.projectId, v.candidateId);
+    expect(repaired.execution?.status).toBe("SUCCEEDED");
+    expect(repaired.verifications?.[0]?.baselineId).toBe(a.baseline.id);
     expect(
       (await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id)).snapshot.commit,
     ).toBe("a".repeat(40));
