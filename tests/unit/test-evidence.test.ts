@@ -4,7 +4,12 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { analyzeRepositoryFiles, indexRepository } from "../../agent/repository-index.mjs";
-import { normalizeVitestReport, runTargetedTest, selectTest } from "../../agent/test-evidence.mjs";
+import {
+  normalizeVitestReport,
+  runTargetedTest,
+  runInvestigationPlan,
+  selectTest,
+} from "../../agent/test-evidence.mjs";
 import { investigationReportSchema } from "../../shared/contracts/investigation-execution";
 describe("focused investigation evidence", () => {
   it("keeps assertion evidence bounded and distinguishes initialization failures from success", () => {
@@ -92,6 +97,19 @@ describe("focused investigation evidence", () => {
       });
       expect(fixed.status, JSON.stringify(fixed)).toBe("SUCCEEDED");
       expect(fixed.counts.passed).toBe(1);
+      await writeFile(
+        join(root, "regression.test.js"),
+        `import {it,expect} from ${JSON.stringify(api)};import {sum} from './sum.js';it('adds other numbers',()=>expect(sum(2,3)).toBe(5));`,
+      );
+      const verified = await runInvestigationPlan(
+        root,
+        await indexRepository(root),
+        { ...plan, changedFiles: ["sum.js"], maxTestFiles: 2 },
+        { ...process.env, VITEST: "" },
+      );
+      expect(verified.status, JSON.stringify(verified)).toBe("SUCCEEDED");
+      expect(verified.checks).toHaveLength(2);
+      expect(verified.coverage?.omittedTests).toBe(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

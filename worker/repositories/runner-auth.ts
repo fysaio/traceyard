@@ -9,6 +9,19 @@ export function decodePart(value: string) {
     c.charCodeAt(0),
   );
 }
+export async function runnerRevision(
+  c: Context<AppEnv>,
+  who: { projectId: string; runId: string | null; sha: string | null },
+) {
+  if (!who.runId) return who.sha;
+  const request = await c.env.DB.prepare(
+    "SELECT snapshot_json FROM repository_check_requests WHERE project_id=? AND runner_id=? LIMIT 1",
+  )
+    .bind(who.projectId, who.runId)
+    .first<{ snapshot_json: string }>();
+  const requested = request ? JSON.parse(request.snapshot_json).investigation?.commit : null;
+  return typeof requested === "string" && /^[a-f0-9]{40}$/.test(requested) ? requested : who.sha;
+}
 export async function runnerPrincipal(c: Context<AppEnv>, fetcher: typeof fetch = fetch) {
   const token = c.req.header("authorization")?.replace(/^Bearer /, "") ?? "";
   if (/^tyr_[A-Za-z0-9_-]{43}$/.test(token)) {

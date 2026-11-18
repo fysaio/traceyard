@@ -3,6 +3,7 @@ import { join, resolve, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
+import { relatedTests } from "./repository-index.mjs";
 
 export function sanitizeDiagnostic(value, max = 1500) {
   return String(value)
@@ -243,4 +244,61 @@ export async function runTargetedTest(workspace, index, plan, env) {
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+export async function runInvestigationPlan(workspace, index, plan, env) {
+  const started = Date.now(),
+    selection = selectTest(index, plan.question, plan.testPath);
+  if (!selection.test) return runTargetedTest(workspace, index, plan, env);
+  const related = [
+    ...new Set(
+      (plan.changedFiles ?? []).flatMap((file) => relatedTests(index, file).map((t) => t.path)),
+    ),
+  ].filter((path) => path !== selection.test.path);
+  const selected = [selection.test.path, ...related.slice(0, (plan.maxTestFiles ?? 1) - 1)];
+  const results = [];
+  for (const path of selected) {
+    const remaining = plan.timeoutMs - (Date.now() - started);
+    if (remaining < 1000) break;
+    const result = await runTargetedTest(
+      workspace,
+      index,
+      { ...plan, testPath: path, timeoutMs: remaining },
+      env,
+    );
+    results.push(result);
+    if (result.status !== "SUCCEEDED") break;
+  }
+  const primary = results[0];
+  if (!primary) return runTargetedTest(workspace, index, plan, env);
+  const failed = results.some((r) => r.status === "FAILED"),
+    blocked = results.some((r) => r.status === "BLOCKED");
+  const counts = results.reduce(
+    (sum, r) => ({
+      passed: sum.passed + r.counts.passed,
+      failed: sum.failed + r.counts.failed,
+      skipped: sum.skipped + r.counts.skipped,
+    }),
+    { passed: 0, failed: 0, skipped: 0 },
+  );
+  const failures = results.flatMap((r) => r.failures),
+    omittedTests = 1 + related.length - results.length;
+  return {
+    ...primary,
+    status: failed ? "FAILED" : blocked ? "BLOCKED" : "SUCCEEDED",
+    counts,
+    failures: failures.slice(0, 8),
+    exitCode: failed ? 1 : blocked ? null : 0,
+    truncated: results.some((r) => r.truncated) || failures.length > 8,
+    durationMs: Date.now() - started,
+    message:
+      `${counts.passed} passed, ${counts.failed} failed across ${results.length} test file(s). ${omittedTests ? `${omittedTests} related test file(s) remain outside this attempt.` : "Selected coverage completed."} ${results.find((r) => r.status !== "SUCCEEDED")?.message ?? ""}`.slice(
+        0,
+        2000,
+      ),
+    checks: results.map((r) => ({
+      testPath: r.command.testPath ?? selection.test.path,
+      status: r.status,
+    })),
+    coverage: { omittedTests },
+  };
 }

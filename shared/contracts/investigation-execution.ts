@@ -6,6 +6,8 @@ export const investigationPlanSchema = z
     requestId: z.string().regex(/^req_[a-f0-9]{32}$/),
     question: z.string().min(3).max(1000),
     testPath: repositoryPathSchema.optional(),
+    changedFiles: z.array(repositoryPathSchema).max(100).optional(),
+    maxTestFiles: z.number().int().min(1).max(5).optional(),
     commit: z
       .string()
       .regex(/^[a-f0-9]{40}$/)
@@ -52,6 +54,21 @@ export const investigationReportSchema = z
     exitCode: z.number().int().nullable(),
     truncated: z.boolean(),
     nodeVersion: z.string().max(40),
+    checks: z
+      .array(
+        z
+          .object({
+            testPath: repositoryPathSchema,
+            status: z.enum(["SUCCEEDED", "FAILED", "BLOCKED"]),
+          })
+          .strict(),
+      )
+      .max(5)
+      .optional(),
+    coverage: z
+      .object({ omittedTests: z.number().int().min(0) })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((r, c) => {
