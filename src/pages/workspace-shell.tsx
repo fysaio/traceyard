@@ -271,6 +271,7 @@ export function WorkspaceShell({
         )}
         {menu === "connect" && (
           <ConnectRepository
+            destination="investigate"
             mode="github"
             close={() => setMenu(null)}
             connected={() => setMenu(null)}
