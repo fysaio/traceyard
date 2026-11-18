@@ -14,7 +14,7 @@ export async function startInvestigationExecution(
   userId: string,
   projectId: string,
   id: string,
-  options: { testPath?: string; initial?: boolean } = {},
+  options: { testPath?: string; initial?: boolean; changedFiles?: string[] } = {},
   fetcher: typeof fetch = fetch,
 ) {
   const inv = await getInvestigation(env.DB, userId, projectId, id);
@@ -45,6 +45,7 @@ export async function startInvestigationExecution(
     requestId,
     question: inv.question,
     ...(options.testPath ? { testPath: options.testPath } : {}),
+    ...(options.changedFiles ? { changedFiles: options.changedFiles, maxTestFiles: 3 } : {}),
     commit: inv.snapshot.commit,
     timeoutMs: 120000,
   };
@@ -146,7 +147,7 @@ export async function recordInvestigationReport(
       "INVESTIGATION_RUNNER_MISMATCH",
       "This report does not belong to the authorized runner.",
     );
-  if (plan.commit && plan.commit !== report.commit)
+  if (plan.commit && plan.commit !== report.commit && report.status !== "BLOCKED")
     throw conflict(
       "INVESTIGATION_REVISION_MISMATCH",
       "The executed revision differs from the investigation snapshot.",

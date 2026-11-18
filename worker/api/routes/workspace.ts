@@ -342,7 +342,13 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
       if (!bound)
         throw badRequest("REQUEST_ALREADY_BOUND", "This test request belongs to another run.");
       if (who.source === "github")
-        await bindGitHubDispatch(c.env, who.projectId, requestId, who.runId!, who.sha!);
+        await bindGitHubDispatch(
+          c.env,
+          who.projectId,
+          requestId,
+          who.runId!,
+          JSON.parse(row.snapshot_json).investigation?.commit ?? who.sha!,
+        );
       return c.json(
         data(c, { ...JSON.parse(row.snapshot_json), capabilities: { repositoryIndex: true } }),
       );

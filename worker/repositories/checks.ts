@@ -18,12 +18,21 @@ export async function dispatchRepositoryChecks(
       fetcher,
       savedRequestId,
     );
+  const saved = savedRequestId
+    ? await env.DB.prepare(
+        "SELECT snapshot_json FROM repository_check_requests WHERE id=? AND project_id=?",
+      )
+        .bind(savedRequestId, projectId)
+        .first<{ snapshot_json: string }>()
+    : null;
+  const commit = saved ? JSON.parse(saved.snapshot_json).investigation?.commit : undefined;
   return requestManagedCheck(
     env,
     projectId,
     requestKey ?? (savedRequestId ? "case:" + savedRequestId : randomId("manual")),
     fetcher,
     savedRequestId,
+    commit,
   );
 }
 export async function startInitialChecks(

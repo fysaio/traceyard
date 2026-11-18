@@ -344,9 +344,12 @@ export async function createInvestigation(
   userId: string,
   projectId: string,
   request: InvestigationRequest,
+  snapshotOverride?: SourceSnapshot,
 ) {
   await requireInvestigationProject(db, userId, projectId);
-  const hash = await sha256Hex(JSON.stringify(request));
+  const hash = await sha256Hex(
+    JSON.stringify({ request, snapshotOverride: snapshotOverride ?? null }),
+  );
   const previous = request.requestKey
     ? await db
         .prepare("SELECT id,request_hash FROM investigations WHERE project_id=? AND request_key=?")
@@ -361,7 +364,18 @@ export async function createInvestigation(
       );
     return getInvestigation(db, userId, projectId, previous.id);
   }
-  const result = await collect(db, userId, projectId, request.target),
+  const result = snapshotOverride
+      ? {
+          snapshot: snapshotOverride,
+          evidence: [] as Omit<InvestigationEvidence, "id">[],
+          finding: {
+            summary: "Candidate snapshot selected; execution has not completed.",
+            basis: "source" as const,
+            limitations: ["The candidate has not yet been executed."],
+            nextAction: "Execute the retained reproducer against the candidate.",
+          },
+        }
+      : await collect(db, userId, projectId, request.target),
     id = randomId("inv"),
     now = nowIso();
   const statements = [
