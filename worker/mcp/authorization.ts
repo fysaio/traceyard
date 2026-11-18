@@ -6,7 +6,7 @@ export const AGENT_SCOPES = ["investigations:read", "investigations:run", "runs:
 export interface AgentPrincipal {
   grantId: string;
   userId: string;
-  projectId: string;
+  projectId: string | null;
   clientId: string;
   scopes: string[];
   redirects: string[];
@@ -163,10 +163,10 @@ export async function approveConsent(
   db: D1Database,
   userId: string,
   token: string,
-  projectId: string,
+  projectId: string | null,
   approved: boolean,
 ) {
-  if (approved) {
+  if (approved && projectId !== null) {
     const project = await db
       .prepare("SELECT id FROM projects WHERE id=? AND owner_user_id=?")
       .bind(projectId, userId)
@@ -318,13 +318,13 @@ export async function getAgentPrincipal(
   if (!token) return null;
   const row = await db
     .prepare(
-      "SELECT g.id,g.owner_user_id,g.project_id,g.client_id,g.scopes_json,c.redirects_json FROM mcp_access_tokens t JOIN mcp_grants g ON g.id=t.grant_id JOIN projects p ON p.id=g.project_id AND p.owner_user_id=g.owner_user_id JOIN oauth_clients c ON c.id=g.client_id WHERE t.token_hash=? AND t.expires_at>? AND g.revoked_at IS NULL AND g.resource=?",
+      "SELECT g.id,g.owner_user_id,g.project_id,g.client_id,g.scopes_json,c.redirects_json FROM mcp_access_tokens t JOIN mcp_grants g ON g.id=t.grant_id LEFT JOIN projects p ON p.id=g.project_id AND p.owner_user_id=g.owner_user_id JOIN oauth_clients c ON c.id=g.client_id WHERE t.token_hash=? AND t.expires_at>? AND g.revoked_at IS NULL AND g.resource=? AND (g.project_id IS NULL OR p.id IS NOT NULL)",
     )
     .bind(await sha256Hex(token), nowIso(), origin + "/mcp")
     .first<{
       id: string;
       owner_user_id: string;
-      project_id: string;
+      project_id: string | null;
       client_id: string;
       scopes_json: string;
       redirects_json: string;
