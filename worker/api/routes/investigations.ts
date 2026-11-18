@@ -3,14 +3,13 @@ import { z } from "zod";
 import { investigationRequestSchema } from "../../../shared/contracts/investigations";
 import { ownedProject } from "../../integrations/access";
 import {
-  createInvestigation,
   getInvestigation,
   inspectEvidence,
   listInvestigations,
 } from "../../services/investigation-service";
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 import { parseWith } from "../errors";
-import { startInvestigationExecution } from "../../services/investigation-execution";
+import { beginInvestigation } from "../../services/investigation-execution";
 
 export const investigationRoutes = new Hono<AppEnv>();
 const payload = (c: Parameters<typeof getRequestContext>[0], data: unknown) => ({
@@ -28,19 +27,7 @@ investigationRoutes.post("/projects/:projectId/investigations", async (c) => {
     await readJsonBody(c),
     "Invalid investigation request.",
   );
-  const inv = await createInvestigation(c.env.DB, userId, projectId, body);
-  return c.json(
-    payload(
-      c,
-      body.mode === "execute"
-        ? await startInvestigationExecution(c.env, userId, projectId, inv.id, {
-            testPath: body.testPath,
-            initial: true,
-          })
-        : inv,
-    ),
-    201,
-  );
+  return c.json(payload(c, await beginInvestigation(c.env, userId, projectId, body)), 201);
 });
 investigationRoutes.get("/projects/:projectId/investigations/:id", async (c) => {
   const { userId, projectId } = await ownedProject(c);

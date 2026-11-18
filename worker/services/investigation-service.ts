@@ -110,7 +110,17 @@ export async function getInvestigation(
       checkId: string | null;
       createdAt: string;
     }>();
-  return { ...view(row, evidence.results), attempts: attempts.results };
+  const recordings = await db
+    .prepare(
+      "SELECT id,eligible,created_at AS createdAt FROM investigation_recordings WHERE investigation_id=? ORDER BY created_at DESC LIMIT 5",
+    )
+    .bind(id)
+    .all<{ id: string; eligible: number; createdAt: string }>();
+  return {
+    ...view(row, evidence.results),
+    attempts: attempts.results,
+    recordings: recordings.results.map((r) => ({ ...r, eligible: !!r.eligible })),
+  };
 }
 export async function listInvestigations(db: D1Database, userId: string, projectId: string) {
   await requireInvestigationProject(db, userId, projectId);

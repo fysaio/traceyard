@@ -1,0 +1,17 @@
+# Supported interaction replay
+
+An investigation with `mode: "execute", captureInteractions: true` records up to eight JSON `globalThis.fetch` request/response bodies and statuses exercised by its existing Vitest test. Capture is opt-in because application bodies may contain private business data. Headers, credential environment values, credential-bearing bodies and oversized/non-JSON responses are not retained. Environment records contain names and credential/URL types only. Any omitted interaction makes the recording ineligible. A recording is immutable and bound to the authorized attempt, source revision, test and project.
+
+Use `investigate` with `mode: "replay", recordingId: "rcd_..."` to repeat its original test, or `verify` to run the reproducer against a candidate commit. Verification automatically reuses an eligible recording from the exact failed baseline attempt. `inspect` with `section: "recording"` reads the manifest in bounded slices. The browser and API expose the same recording references.
+
+Replay requires a Linux executor with Docker. Traceyard prepares a small trusted Node image, filters environment/configuration files out of a disposable source copy, mounts that copy read-only, drops capabilities, and runs with `--network none`, no application secrets and a bounded writable temporary filesystem. Placeholder credentials satisfy application configuration checks; real credentials are not forwarded. Test writes affect only the disposable workspace. Image preparation may require an initial public Node image download; test execution has no network access. Missing Docker, an unmatched request, request count drift, native network use, unsupported output or timeout blocks replay. There is no live fallback. The machine-readable result records isolation type, recording identity, reuse count and divergence.
+
+This adapter models JSON fetch bodies and status codes. Response header dependent behavior, streaming, native tools, databases, browser requests and other network clients are outside its supported replay boundary. Tests that need those behaviors may block or fail and need ordinary execution. A passing selected test establishes that test's assertions against retained responses, not application-wide correctness or production recovery. Changed tests and omitted regression files remain visible during verification. Docker is the isolation boundary; monkey-patching fetch alone is not isolation.
+
+## Recovery is a different capability
+
+`recover` applies to Traceyard-owned workflow executions with retained step checkpoints. Resume can reuse completed steps; restart may repeat external actions. A receiver must implement idempotency for a guarantee about duplicate effects. An imported trace, log or JSON recording does not make arbitrary application code resumable. Traceyard must never offer a resume claim for those records.
+
+## Validation
+
+`npm test` includes actual HTTP capture and adapter replay, credential omission, changed-request rejection, migrated D1 ownership, immutable storage and replay proof requirements. `node scripts/verify-isolated-replay.mjs` is the Docker acceptance check in CI: it captures one actual response, reproduces a failing test, verifies a repair, rejects divergence, checks host-write isolation and asserts one total live request. It deliberately fails if Docker isolation is unavailable. Local environments without Docker can run the other tests but cannot establish container acceptance.
