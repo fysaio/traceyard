@@ -2,6 +2,8 @@
 
 Traceyard is an open-source platform for executing, observing, debugging, and recovering workflows and AI agents.
 
+Coding agents can use the authenticated remote MCP endpoint to create shared investigations, read bounded source/failure evidence and verify a candidate repair. Connect with browser authorization and project selection; no copied server key is required. See [MCP connection](docs/MCP.md) and the ordered [implementation checklist](docs/INVESTIGATION_BUILD_PLAN.md). Application execution still needs an available repository environment; GitHub source access alone does not instrument a deployed process.
+
 Create and publish a workflow, run it with JSON input, inspect each step and recover failed work. The browser, API, SDK and CLI use the same execution engine. Repository discovery and GitHub checks supply supporting source and test evidence; they are optional for running Traceyard workflows.
 
 ## Product flow

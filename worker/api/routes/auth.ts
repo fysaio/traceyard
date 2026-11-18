@@ -98,11 +98,18 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     const verifier = randomToken(32);
     const stateHash = await sha256Hex(state);
     const now = nowIso();
+    const requestedReturn = c.req.query("returnTo") ?? "";
+    const returnTo =
+      requestedReturn.startsWith("/oauth/authorize?") &&
+      requestedReturn.length <= 6000 &&
+      !/[\r\n]/.test(requestedReturn)
+        ? requestedReturn
+        : null;
     await c.env.DB.prepare(
-      `INSERT INTO github_oauth_states (state_hash, created_at, expires_at, consumed_at)
-       VALUES (?, ?, ?, NULL)`,
+      `INSERT INTO github_oauth_states (state_hash, created_at, expires_at, consumed_at,return_to)
+       VALUES (?, ?, ?, NULL,?)`,
     )
-      .bind(stateHash, now, isoFromNow(10 * 60 * 1000))
+      .bind(stateHash, now, isoFromNow(10 * 60 * 1000), returnTo)
       .run();
 
     const authorize = new URL("https://github.com/login/oauth/authorize");
@@ -154,10 +161,10 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     const consumed = await c.env.DB.prepare(
       `UPDATE github_oauth_states SET consumed_at = ?
         WHERE state_hash = ? AND consumed_at IS NULL AND expires_at > ?
-        RETURNING state_hash`,
+        RETURNING state_hash,return_to`,
     )
       .bind(nowIso(), await sha256Hex(state), nowIso())
-      .first<{ state_hash: string }>();
+      .first<{ state_hash: string; return_to: string | null }>();
     if (consumed === null) {
       throw badRequest(
         "INVALID_OAUTH_CALLBACK",
@@ -268,7 +275,11 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       ),
       { append: true },
     );
-    return c.redirect(`${config.origin}/`, 302);
+    return c.redirect(
+      config.origin +
+        (consumed.return_to?.startsWith("/oauth/authorize?") ? consumed.return_to : "/"),
+      302,
+    );
   });
 
   routes.post("/auth/logout", async (c) => {
