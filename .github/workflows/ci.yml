@@ -90,3 +90,25 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npx playwright test --config playwright.investigations.config.ts
+
+  windows:
+    name: Windows tests and release build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      WRANGLER_SEND_ERROR_REPORTS: "false"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22.19.0"
+          cache: npm
+      - run: npm ci
+      - name: Unit and Worker integration tests on Windows
+        run: npm test
+      - name: Windows production release build
+        run: npm run build

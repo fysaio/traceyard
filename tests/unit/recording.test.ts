@@ -66,7 +66,7 @@ it("captures a real JSON response without headers or credentials and blocks chan
         process.execPath,
         [
           "--import",
-          new URL("../../agent/record-fetch.mjs", import.meta.url).pathname,
+          new URL("../../agent/record-fetch.mjs", import.meta.url).href,
           "--input-type=module",
           "-e",
           source,
