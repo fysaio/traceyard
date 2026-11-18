@@ -22,6 +22,8 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - name: Reproduce local operator environment
+        run: node scripts/seed-ci-operator-env.mjs
       - name: Unit and Worker integration tests
         run: npm test
       - name: Reproduce investigation cost fixture
@@ -108,6 +110,8 @@ jobs:
           node-version: "22.19.0"
           cache: npm
       - run: npm ci
+      - name: Reproduce local operator environment
+        run: node scripts/seed-ci-operator-env.mjs
       - name: Unit and Worker integration tests on Windows
         run: npm test
       - name: Windows production release build
