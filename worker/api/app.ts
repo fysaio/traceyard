@@ -47,6 +47,7 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
 
   app.use("*", requestContextMiddleware());
   app.use("*", securityHeadersMiddleware());
+  app.route("/api", healthRoutes);
   app.use("/api/*", sameOriginMiddleware());
   app.use("/api/*", sessionMiddleware());
   app.use("/api/*", authSessionMiddleware());
@@ -86,7 +87,6 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
   app.route("/api", automationRoutes);
   app.route("/api", experimentRoutes);
   app.route("/api", developerRoutes);
-  app.route("/api", healthRoutes);
   app.route("/api", workflowRoutes);
   app.route("/api", runRoutes);
   app.route("/api", overviewRoutes);

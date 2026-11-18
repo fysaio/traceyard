@@ -53,7 +53,7 @@ function bounded(value: unknown, max = 16000): { content: unknown; truncated: bo
         truncated: true,
       };
 }
-function view(row: Row, evidence: EvidenceRow[]): Investigation {
+function view(row: Row, evidence: Omit<EvidenceRow, "content_json">[]): Investigation {
   const finding = JSON.parse(row.finding_json) as Investigation["finding"];
   const full = finding.summary;
   finding.summary = full.slice(0, row.output_chars);
@@ -96,9 +96,11 @@ export async function getInvestigation(
     .first<Row>();
   if (!row) throw notFound("Investigation not found.");
   const evidence = await db
-    .prepare("SELECT * FROM investigation_evidence WHERE investigation_id=? ORDER BY id LIMIT 100")
+    .prepare(
+      "SELECT id, kind, basis, title, truncated FROM investigation_evidence WHERE investigation_id=? ORDER BY id LIMIT 100",
+    )
     .bind(id)
-    .all<EvidenceRow>();
+    .all<Omit<EvidenceRow, "content_json">>();
   const attempts = await db
     .prepare(
       "SELECT id,request_id AS requestId,status,check_id AS checkId,created_at AS createdAt FROM investigation_attempts WHERE investigation_id=? ORDER BY created_at,id LIMIT 10",
@@ -165,6 +167,29 @@ export async function listInvestigations(db: D1Database, userId: string, project
     .all<Row>();
   return rows.results.map((r) => view(r, []));
 }
+export async function getInvestigationStatus(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  id: string,
+) {
+  const row = await db
+    .prepare(
+      `SELECT i.id, i.status, i.finding_json FROM investigations i
+      JOIN projects p ON p.id=i.project_id AND p.owner_user_id=i.owner_user_id
+      WHERE i.id=? AND i.project_id=? AND i.owner_user_id=?`,
+    )
+    .bind(id, projectId, userId)
+    .first<Pick<Row, "id" | "status" | "finding_json">>();
+  if (!row) throw notFound("Investigation not found.");
+  const finding = JSON.parse(row.finding_json) as Investigation["finding"];
+  return {
+    investigationId: row.id,
+    status: row.status,
+    summary: finding.summary.slice(0, 250),
+    nextPollAfterMs: row.status === "EXECUTING" ? 5000 : null,
+  };
+}
 export async function inspectEvidence(
   db: D1Database,
   userId: string,
@@ -174,10 +199,14 @@ export async function inspectEvidence(
   offset = 0,
   limit = 3000,
 ) {
-  await getInvestigation(db, userId, projectId, id);
   const row = await db
-    .prepare("SELECT * FROM investigation_evidence WHERE id=? AND investigation_id=?")
-    .bind(evidenceId, id)
+    .prepare(
+      `SELECT e.* FROM investigation_evidence e
+        JOIN investigations i ON i.id=e.investigation_id
+        JOIN projects p ON p.id=i.project_id AND p.owner_user_id=i.owner_user_id
+        WHERE e.id=? AND i.id=? AND i.project_id=? AND i.owner_user_id=?`,
+    )
+    .bind(evidenceId, id, projectId, userId)
     .first<EvidenceRow>();
   if (!row) throw notFound("Evidence not found.");
   const text = row.content_json,

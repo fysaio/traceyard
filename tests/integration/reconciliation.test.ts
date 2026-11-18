@@ -56,6 +56,24 @@ describe("scheduled reconciliation", () => {
     expect(dispatch?.status).toBe("PUBLISHED");
   });
 
+  it("gives the final eligible publication time to be consumed", async () => {
+    const { runId } = await seedRun({ session: await createSession() });
+    await env.DB.prepare(
+      "UPDATE execution_dispatches SET attempt_count=5, available_at=? WHERE run_id=?",
+    )
+      .bind(isoFromNow(-1000), runId)
+      .run();
+
+    const summary = await runScheduledJobs(env);
+
+    expect(summary.republished).toBe(1);
+    expect(summary.failedDispatches).toBe(0);
+    expect(await getDispatchByRunId(env.DB, runId)).toMatchObject({
+      status: "PUBLISHED",
+      attempt_count: 6,
+    });
+  });
+
   it("fails a run whose dispatch exhausted its attempts", async () => {
     const session = await createSession();
     const { runId } = await seedRun({ session });

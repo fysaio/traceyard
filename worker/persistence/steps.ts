@@ -263,18 +263,3 @@ export async function failStepAttempt(
 
   await db.batch(statements);
 }
-
-export async function setStepInput(
-  db: D1Database,
-  runId: string,
-  stepKey: string,
-  inputJson: string,
-): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE execution_steps SET input_json = ?, updated_at = ?
-        WHERE run_id = ? AND step_key = ? AND status IN ('PENDING', 'RUNNING')`,
-    )
-    .bind(inputJson, nowIso(), runId, stepKey)
-    .run();
-}
