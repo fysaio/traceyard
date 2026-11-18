@@ -17,6 +17,10 @@ export const investigationRequestSchema = z
       .regex(/^rcd_[a-f0-9]{32}$/)
       .optional(),
     testPath: repositoryPathSchema.optional(),
+    commit: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
     question: z.string().trim().min(3).max(1000),
     target: investigationTargetSchema.default({ kind: "source" }),
     requestKey: z

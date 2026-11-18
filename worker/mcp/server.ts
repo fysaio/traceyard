@@ -195,6 +195,10 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
         recordingId: z.string().max(100).optional(),
         target: investigationTargetSchema.optional(),
         testPath: repositoryPathSchema.optional(),
+        commit: z
+          .string()
+          .regex(/^[a-f0-9]{40}$/)
+          .optional(),
         requestKey: z
           .string()
           .regex(/^[A-Za-z0-9._-]{8,128}$/)
