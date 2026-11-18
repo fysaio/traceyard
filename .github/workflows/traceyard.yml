@@ -1,0 +1,44 @@
+name: Traceyard
+run-name: Traceyard ${{ inputs.run_request }}
+on:
+  workflow_dispatch:
+    inputs:
+      run_request:
+        description: Traceyard check request
+        required: true
+        type: string
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: traceyard-${{ github.repository_id }}
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fetch Traceyard runner
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: fysaio/traceyard
+          ref: 6bfde2973ff92f322b6d575e60a3212e2474bbcc
+          path: .traceyard-runner
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install runner dependencies
+        run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Prepare trusted runner
+        run: node .traceyard-runner/runner/prepare.mjs
+      - name: Discover, build and test
+        env:
+          CI: 'true'
+          TRACEYARD_ORIGIN: "https://traceyard.pilotsaviour229.workers.dev"
+          TRACEYARD_RUN_REQUEST: ${{ inputs.run_request }}
+        run: node .traceyard-runner/runner/package/agent/cli.mjs run .
