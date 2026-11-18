@@ -104,56 +104,62 @@ function client(token: string) {
   return { c, transport };
 }
 describe("authenticated remote MCP", () => {
-  it("declines optional GET streams and keeps the official client's POST tools usable", async () => {
+  it("keeps authenticated GET open while POST tools and reconnect remain usable", async () => {
     const a = await connect();
-    for (const method of ["GET", "DELETE"]) {
-      const response = await apiFetch("/mcp", {
-        method,
-        headers: { Authorization: "Bearer " + a.token.access_token, Accept: "text/event-stream" },
-      });
-      expect(response.status).toBe(405);
-      expect(response.headers.get("allow")).toBe("POST, OPTIONS");
-      expect(response.headers.get("content-type")).not.toContain("text/event-stream");
-    }
-    let gets = 0;
-    let resolveGet!: (status: number) => void;
-    const backgroundGet = new Promise<number>((resolve) => {
-      resolveGet = resolve;
-    });
-    const errors: Error[] = [];
-    const sdk = new Client({ name: "stateless-transport", version: "1" });
-    sdk.onerror = (error) => errors.push(error);
+    const headers = {
+      Authorization: "Bearer " + a.token.access_token,
+      Accept: "text/event-stream",
+    };
+    const stream = await apiFetch("/mcp", { headers });
+    expect(stream.status).toBe(200);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    expect(stream.headers.get("cache-control")).toContain("no-transform");
+    const reader = stream.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(new TextDecoder().decode(first.value)).toContain(": connected");
     try {
-      await sdk.connect(
-        new StreamableHTTPClientTransport(new URL(ORIGIN + "/mcp"), {
-          requestInit: { headers: { Authorization: "Bearer " + a.token.access_token } },
-          fetch: async (input, init) => {
-            const response = await SELF.fetch(String(input), init as RequestInit);
-            if (init?.method === "GET") {
-              gets++;
-              resolveGet(response.status);
-            }
-            return response;
+      const errors: Error[] = [];
+      const remote = client(a.token.access_token);
+      remote.c.onerror = (error) => errors.push(error);
+      try {
+        await remote.c.connect(remote.transport);
+        expect((await remote.c.listTools()).tools).toHaveLength(4);
+        const finding = await remote.c.callTool({
+          name: "investigate",
+          arguments: {
+            question: "Inspect streaming transport evidence",
+            mode: "analyze",
+            outputChars: 1000,
           },
-        }),
-      );
-      expect(await backgroundGet).toBe(405);
-      expect((await sdk.listTools()).tools).toHaveLength(4);
-      const finding = await sdk.callTool({
-        name: "investigate",
-        arguments: {
-          question: "Inspect stateless transport evidence",
-          mode: "analyze",
-          outputChars: 1000,
-        },
-      });
-      expect(finding.isError).not.toBe(true);
-      expect((await sdk.listTools()).tools).toHaveLength(4);
-      expect(gets).toBe(1);
-      expect(errors).toEqual([]);
+        });
+        expect(finding.isError).not.toBe(true);
+        expect((await remote.c.listTools()).tools).toHaveLength(4);
+        expect(errors).toEqual([]);
+      } finally {
+        await remote.c.close();
+      }
     } finally {
-      await sdk.close();
+      await reader.cancel();
     }
+    // A fresh stream works after disconnect; there is no per-process session.
+    const reopened = await apiFetch("/mcp", { headers });
+    expect(reopened.status).toBe(200);
+    await reopened.body!.cancel();
+    expect(
+      (await apiFetch("/mcp", { headers: { ...headers, Origin: "https://attacker.example" } }))
+        .status,
+    ).toBe(403);
+    expect(
+      (
+        await apiFetch("/mcp", {
+          headers: { Authorization: headers.Authorization, Accept: "application/json" },
+        })
+      ).status,
+    ).toBe(406);
+    const deleted = await apiFetch("/mcp", { method: "DELETE", headers });
+    expect(deleted.status).toBe(405);
+    expect(deleted.headers.get("allow")).toBe("GET, POST, OPTIONS");
     expect((await apiFetch("/mcp", { headers: { Accept: "text/event-stream" } })).status).toBe(401);
   });
   it("keeps consent browser-compatible while rejecting untrusted origins and invalid projects", async () => {

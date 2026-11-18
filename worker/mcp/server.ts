@@ -25,9 +25,12 @@ import { ApiError, notFound, badRequest } from "../api/errors";
 import {
   agentOrigin,
   authenticateAgent,
+  getAgentPrincipal,
   requireAgentScope,
   type AgentPrincipal,
 } from "./authorization";
+
+import { agentKeepAliveStream } from "./keep-alive";
 
 const budget = z.number().int().min(1000).max(12000).default(4000);
 function result(value: Record<string, unknown>, limit = 4000) {
@@ -502,20 +505,34 @@ export async function handleMcp(c: Context<AppEnv>) {
     return c.json({ error: "origin_rejected" }, 403);
   if (incomingOrigin) c.header("Access-Control-Allow-Origin", incomingOrigin);
   c.header("Access-Control-Expose-Headers", "WWW-Authenticate, MCP-Protocol-Version");
-  // This Worker serves independent JSON exchanges, with no server notification
-  // stream or retained transport session. A successful GET would advertise SSE
-  // and then immediately close in finally, causing clients to reconnect forever.
-  // Decline the optional stream explicitly, as required by Streamable HTTP.
+  // Antigravity treats the spec-permitted 405 for an optional GET as fatal.
+  // Keep a real, comment-only stream open independently of POST's SDK lifecycle.
+  // No session or server notification capability is advertised by this stream.
+  if (c.req.method === "GET") {
+    if (
+      !c.req
+        .header("accept")
+        ?.split(",")
+        .some((type) => type.trim().split(";")[0] === "text/event-stream")
+    )
+      return c.json({ error: "not_acceptable" }, 406);
+    c.header("Content-Type", "text/event-stream");
+    c.header("Cache-Control", "no-cache, no-transform");
+    c.header("X-Accel-Buffering", "no");
+    return c.body(
+      agentKeepAliveStream(
+        c.req.raw.signal,
+        async () => (await getAgentPrincipal(c.env.DB, origin, c.req.raw)) !== null,
+      ),
+    );
+  }
   if (c.req.method !== "POST") {
-    c.header("Allow", "POST, OPTIONS");
+    c.header("Allow", "GET, POST, OPTIONS");
     return c.json(
       {
         jsonrpc: "2.0",
         id: null,
-        error: {
-          code: -32000,
-          message: "Method not allowed. Use POST for stateless MCP requests.",
-        },
+        error: { code: -32000, message: "Method not allowed. Use POST for MCP requests." },
       },
       405,
     );
