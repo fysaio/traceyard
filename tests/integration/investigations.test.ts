@@ -13,6 +13,7 @@ import {
   type Investigation,
 } from "../../shared/contracts/investigations";
 import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
+import { DEFAULT_RUNNER_REF, runnerWorkflow } from "../../worker/repositories/runner-workflow";
 
 let configured: Env;
 beforeAll(async () => {
@@ -28,6 +29,7 @@ beforeAll(async () => {
   );
   configured = {
     ...env,
+    PUBLIC_APP_ORIGIN: "https://traceyard.example",
     GITHUB_APP_ID: "1",
     GITHUB_APP_SLUG: "traceyard",
     GITHUB_APP_WEBHOOK_SECRET: "fixture",
@@ -197,18 +199,29 @@ describe("shared investigations", () => {
   });
 });
 
-async function connectedSource(a: { projectId: string }, defaultCommit = "a".repeat(40)) {
+async function connectedSource(a: { projectId: string; userId?: string }, defaultCommit = "a".repeat(40)) {
   const at = new Date().toISOString();
+  const identity = a.userId
+    ? await env.DB.prepare(
+        "SELECT provider_subject,provider_login FROM identities WHERE user_id=? AND provider='github'",
+      )
+        .bind(a.userId)
+        .first<{ provider_subject: string; provider_login: string }>()
+    : null;
+  const accountId = identity?.provider_subject ?? "990";
+  const login = identity?.provider_login ?? "investigator-990";
+  const installId = Number(accountId) || 99;
   await env.DB.prepare(
-    "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(99,'990','investigator-990',?)",
+    "INSERT INTO github_installations(id,account_id,account_login,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id,account_login=excluded.account_login,updated_at=excluded.updated_at",
   )
-    .bind(at)
+    .bind(installId, accountId, login, at)
     .run();
   await env.DB.prepare(
-    "INSERT INTO project_repositories(project_id,repository_id,installation_id,full_name,default_branch,status,commit_sha,scan_json,updated_at) VALUES(?,99,99,'Example/app','main','DISCOVERED',?,?,?)",
+    "INSERT INTO project_repositories(project_id,repository_id,installation_id,full_name,default_branch,status,commit_sha,scan_json,updated_at) VALUES(?,99,?, 'Example/app','main','DISCOVERED',?,?,?)",
   )
     .bind(
       a.projectId,
+      installId,
       defaultCommit,
       JSON.stringify({
         filesScanned: 1,
@@ -267,6 +280,95 @@ describe("explicit commit selection", () => {
     const plan = JSON.parse(attempts.results[0]!.plan_json);
     expect(plan.commit).toBe(commitSha);
     expect(plan.testPath).toBe("tests/unit/api-client.test.ts");
+  });
+
+  it("dispatches workflow to default branch with explicit commit in runner manifest", async () => {
+    const a = await account(999);
+    await connectedSource(a);
+    await env.DB.prepare(
+      "UPDATE project_repositories SET runner_enabled=1,check_setup_state='READY' WHERE project_id=?",
+    )
+      .bind(a.projectId)
+      .run();
+
+    const commitSha = "d".repeat(40);
+    const dispatches: { path: string; body: { ref: string; inputs: { run_request: string } } }[] = [];
+    const workflow = runnerWorkflow(configured.PUBLIC_APP_ORIGIN!, DEFAULT_RUNNER_REF);
+
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      const path = new URL(url).pathname;
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+
+      if (path.endsWith("/access_tokens")) {
+        return Response.json({ token: "fixture-token" });
+      }
+      if (path.includes("/commits/")) {
+        return Response.json({ sha: commitSha });
+      }
+      if (path.endsWith("/contents/.github/workflows/traceyard.yml")) {
+        return Response.json({
+          content: btoa(workflow),
+          sha: "w".repeat(40),
+        });
+      }
+      if (path.endsWith("/dispatches")) {
+        dispatches.push({ path, body });
+        return new Response(null, { status: 204 });
+      }
+      throw Error("Unexpected GitHub request: " + url);
+    };
+
+    const inv = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "execute",
+        question: "Execute test at explicit commit",
+        commit: commitSha,
+        testPath: "tests/unit/api-client.test.ts",
+      }),
+      fetcher,
+    );
+
+    expect(inv.status).toBe("EXECUTING");
+    expect(inv.snapshot.commit).toBe(commitSha);
+
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0]!.body.ref).toBe("main");
+    const runRequestId = dispatches[0]!.body.inputs.run_request;
+    expect(typeof runRequestId).toBe("string");
+
+    const savedReq = await env.DB.prepare(
+      "SELECT snapshot_json FROM repository_check_requests WHERE id=?",
+    )
+      .bind(runRequestId)
+      .first<{ snapshot_json: string }>();
+    expect(savedReq).not.toBeNull();
+    const snapshotObj = JSON.parse(savedReq!.snapshot_json);
+    expect(snapshotObj.investigation.commit).toBe(commitSha);
+    expect(snapshotObj.investigation.testPath).toBe("tests/unit/api-client.test.ts");
+
+    const attempt = await env.DB.prepare(
+      "SELECT status,check_id,request_id FROM investigation_attempts WHERE investigation_id=?",
+    )
+      .bind(inv.id)
+      .first<{ status: string; check_id: string; request_id: string }>();
+    expect(attempt).not.toBeNull();
+    expect(attempt!.status).toBe("QUEUED");
+    expect(attempt!.check_id).toMatch(/^ci_/);
+    expect(attempt!.request_id).toBe(runRequestId);
+
+    const checkDispatch = await env.DB.prepare(
+      "SELECT state,snapshot_request_id FROM github_check_dispatches WHERE id=?",
+    )
+      .bind(attempt!.check_id)
+      .first<{ state: string; snapshot_request_id: string }>();
+    expect(checkDispatch).not.toBeNull();
+    expect(checkDispatch!.state).toBe("QUEUED");
+    expect(checkDispatch!.snapshot_request_id).toBe(runRequestId);
   });
 
   it("rejects inaccessible or missing commits", async () => {
@@ -491,5 +593,58 @@ describe("explicit commit selection", () => {
         }),
       ),
     ).rejects.toMatchObject({ status: 409, code: "REPLAY_UNAVAILABLE" });
+  });
+
+  it("executes an eligible replay without commit selection", async () => {
+    const a = await account(1001);
+    await connectedSource(a);
+    const prev = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "execute",
+        question: "Previous run for recording",
+        testPath: "tests/unit/api-client.test.ts",
+      }),
+    );
+    const attempt = (await getInvestigation(env.DB, a.userId, a.projectId, prev.id)).attempts![0]!;
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      kind: "json-fetch",
+      sourceCommit: "a".repeat(40),
+      testPath: "tests/unit/api-client.test.ts",
+      interactions: [],
+      environment: [],
+      omissions: [],
+      eligible: true,
+    });
+    await env.DB.prepare(
+      "INSERT INTO investigation_recordings(id,investigation_id,project_id,request_id,manifest_json,eligible,created_at) VALUES(?,?,?,?,?,1,?)",
+    )
+      .bind("rcd_" + "e".repeat(32), prev.id, a.projectId, attempt.requestId, manifest, new Date().toISOString())
+      .run();
+
+    const replayInv = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "replay",
+        question: "Replay eligible recording",
+        recordingId: "rcd_" + "e".repeat(32),
+      }),
+    );
+    expect(replayInv.snapshot.commit).toBe("a".repeat(40));
+    expect(replayInv.snapshot.repository).toBe("Example/app");
+    const attemptRow = await env.DB.prepare(
+      "SELECT plan_json FROM investigation_attempts WHERE investigation_id=?",
+    )
+      .bind(replayInv.id)
+      .first<{ plan_json: string }>();
+    expect(attemptRow).not.toBeNull();
+    const plan = JSON.parse(attemptRow!.plan_json);
+    expect(plan.replayRecording?.id).toBe("rcd_" + "e".repeat(32));
+    expect(plan.commit).toBe("a".repeat(40));
   });
 });
