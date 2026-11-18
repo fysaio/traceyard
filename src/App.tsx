@@ -1,3 +1,4 @@
+import { Welcome } from "./components/welcome";
 import { InvestigationsPage, InvestigationPage, ConnectionsPage } from "./pages/investigations";
 import {
   ProjectsPage,
@@ -25,7 +26,7 @@ import { Compare } from "./pages/compare";
 import { Studio } from "./pages/studio";
 import { RunLedger } from "./pages/run-ledger";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
-import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, readAllEvents, newIdempotencyKey, type AuthSession } from "./lib/api";
 import type { WorkflowSummary } from "../shared/contracts/api";
@@ -131,51 +132,6 @@ export function App() {
     );
   if (!session.data.user) return <Welcome session={session.data} />;
   return <Workspace session={session.data} />;
-}
-function Welcome({ session }: { session: AuthSession }) {
-  const [searchParams] = useSearchParams();
-  const signIn = searchParams.get("signIn");
-  return (
-    <div className="entry">
-      <Link to="/" className="brand">
-        Traceyard.
-      </Link>
-      <main>
-        <div className="entry-mark">
-          <Icon name="diagram-project" />
-        </div>
-        <h1>Find the failure. Verify the fix.</h1>
-        <p>
-          Debug existing code with focused tests and retained evidence. Use your coding agent or
-          open the same investigation here.
-        </p>
-        {(signIn === "retry" || signIn === "cancelled") && (
-          <p role="alert">
-            {signIn === "cancelled"
-              ? "Sign-in was cancelled. Continue with GitHub when you’re ready."
-              : "That sign-in link expired or could not be verified. Continue with GitHub to try again."}
-          </p>
-        )}
-        <div className="entry-actions">
-          {session.githubSignInAvailable ? (
-            <a className="btn primary" href="/api/auth/github/start">
-              <i className="fa-brands fa-github" aria-hidden="true" /> Continue with GitHub
-            </a>
-          ) : (
-            <>
-              <button className="btn primary" disabled>
-                <i className="fa-brands fa-github" aria-hidden="true" /> GitHub sign-in unavailable
-              </button>
-              <p className="hint">
-                The server needs its GitHub OAuth configuration before you can sign in.
-              </p>
-            </>
-          )}
-        </div>
-        <span className="entry-foot">Open source. Self-hostable.</span>
-      </main>
-    </div>
-  );
 }
 function Workspace({ session }: { session: AuthSession }) {
   return (
