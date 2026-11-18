@@ -105,8 +105,8 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
     <>
       <div className="page-head">
         <div>
-          <h1>Workflow builder</h1>
-          <p>Create workflows that Traceyard executes.</p>
+          <h1>Workflows & agents</h1>
+          <p>Build executable workflows, inspect every step and recover failed work.</p>
         </div>
         <button className="btn primary" onClick={() => setMenu("create")}>
           <Icon name="plus" />

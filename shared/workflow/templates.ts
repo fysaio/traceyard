@@ -148,7 +148,7 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     id: "recovery",
     name: "Failure recovery",
     description:
-      "Inspect retained state when JSON validation fails, then retry the captured version.",
+      "Parse JSON and inspect retained state when validation fails. Recovery preserves completed steps and the captured version.",
     icon: "flask",
     graph: linear(node("json", "parse", "Parse JSON", {})),
     input: '{"message":"Hello"}',

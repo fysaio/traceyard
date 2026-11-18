@@ -31,6 +31,14 @@ export const graphNodeSchema = z
         equals: z.unknown().optional(),
         thenTarget: identifier.optional(),
         elseTarget: identifier.optional(),
+        retry: z
+          .object({
+            maxAttempts: z.number().int().min(1).max(5),
+            baseDelayMs: z.number().int().min(100).max(30000),
+            backoff: z.enum(["fixed", "exponential"]),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .default({}),
@@ -84,6 +92,8 @@ export function graphErrors(graph: WorkflowGraph): string[] {
       errors.push(`${n.name} needs exactly one incoming connection.`);
   }
   for (const node of graph.nodes) {
+    if (node.config.retry && !["http", "model"].includes(node.type))
+      errors.push(`Retry policies are supported on HTTP and model steps, not ${node.name}.`);
     if (node.type === "condition") {
       const targets = graph.edges.filter(([a]) => a === node.id).map(([, b]) => b);
       if (!Object.hasOwn(node.config, "equals"))
@@ -123,6 +133,12 @@ export function graphLayers(graph: WorkflowGraph): GraphNode[][] {
     layers.push(ready);
     ready.forEach((n) => done.add(n.id));
   }
+}
+export function graphStepPolicy(node: GraphNode) {
+  return {
+    timeoutMs: node.type === "model" ? 120000 : node.type === "http" ? 30000 : 10000,
+    retry: node.config.retry ?? { maxAttempts: 1, baseDelayMs: 0, backoff: "fixed" as const },
+  };
 }
 export function evaluateGraphNode(node: GraphNode, input: unknown, sources: unknown[]): unknown {
   if (node.type === "input") return input;

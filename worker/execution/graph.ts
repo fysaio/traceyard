@@ -5,7 +5,13 @@ import { modelRouteSchema } from "../../shared/contracts/gateway";
 import { awaitApproval } from "../integrations/approvals";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { WorkflowStep } from "cloudflare:workers";
-import { graphSchema, graphLayers, evaluateGraphNode } from "../../shared/workflow/graph";
+import {
+  graphSchema,
+  graphLayers,
+  graphStepPolicy,
+  evaluateGraphNode,
+} from "../../shared/workflow/graph";
+import { ApiError } from "../api/errors";
 import { DomainError, serializeError } from "../../shared/domain/errors";
 import { sha256Hex } from "../lib/crypto";
 import { getRunRow, getSteps } from "../persistence/runs";
@@ -60,6 +66,18 @@ export async function executeGraph(
           const rows = await getSteps(db, run.id),
             record = rows.find((s) => s.step_key === node.id);
           if (!record) throw new Error("Step record missing.");
+          // A resumed execution reuses persisted outputs before approvals or
+          // external actions are entered. No new attempt is manufactured.
+          if (record.status === "SUCCEEDED") {
+            if (record.output_json === null) throw new Error("Completed step output is missing.");
+            const value: unknown = JSON.parse(record.output_json);
+            results.set(node.id, value);
+            if (node.type === "condition")
+              blocked.add(
+                node.id + ":" + (value === true ? node.config.elseTarget : node.config.thenTarget),
+              );
+            return;
+          }
           let approval: unknown;
           if (node.type === "approval") {
             await step.do(node.id + "-approval-start", async () => {
@@ -104,8 +122,13 @@ export async function executeGraph(
           const output = await step.do(
             node.id,
             {
-              retries: { limit: 0, delay: 0, backoff: "constant" },
-              timeout: node.type === "model" ? 120000 : node.type === "http" ? 30000 : 10000,
+              retries: {
+                limit: graphStepPolicy(node).retry.maxAttempts - 1,
+                delay: graphStepPolicy(node).retry.baseDelayMs,
+                backoff:
+                  graphStepPolicy(node).retry.backoff === "fixed" ? "constant" : "exponential",
+              },
+              timeout: graphStepPolicy(node).timeoutMs,
             },
             async (ctx) => {
               // Approval claimed its attempt before waiting. Completion reuses
@@ -175,6 +198,8 @@ export async function executeGraph(
                     node.id,
                     JSON.parse(connection.connection_json) as HttpConnection,
                     incoming[0],
+                    fetch,
+                    run.effect_scope_id ?? run.id,
                   );
                 } else value = evaluateGraphNode(node, input, incoming);
                 const json = JSON.stringify(value);
@@ -194,12 +219,17 @@ export async function executeGraph(
                 return json;
               } catch (error) {
                 const failure = serializeError(
-                  new DomainError({
-                    errorClass: "VALIDATION",
-                    code: "GRAPH_STEP_FAILED",
-                    message: error instanceof Error ? error.message : "Step failed.",
-                    retryable: false,
-                  }),
+                  error instanceof DomainError
+                    ? error
+                    : new DomainError({
+                        errorClass:
+                          error instanceof ApiError && error.status >= 500
+                            ? "TRANSIENT_DEPENDENCY"
+                            : "VALIDATION",
+                        code: error instanceof ApiError ? error.code : "GRAPH_STEP_FAILED",
+                        message: error instanceof Error ? error.message : "Step failed.",
+                        retryable: error instanceof ApiError && error.status >= 500,
+                      }),
                   { stepKey: node.id, attempt: ctx.attempt },
                 );
                 await failStepAttempt(db, {
@@ -209,8 +239,16 @@ export async function executeGraph(
                   stepName: node.name,
                   attemptNumber: ctx.attempt,
                   error: failure,
-                  isFinalAttempt: true,
+                  isFinalAttempt:
+                    !failure.retryable || ctx.attempt >= graphStepPolicy(node).retry.maxAttempts,
                 });
+                if (failure.retryable)
+                  throw new DomainError({
+                    errorClass: failure.class,
+                    code: failure.code,
+                    message: failure.message,
+                    retryable: true,
+                  });
                 throw new NonRetryableError(failure.message);
               }
             },
@@ -248,7 +286,12 @@ export async function executeGraph(
       await finalizeRunCancelled(db, run.id);
       return { runId: run.id, status: "CANCELLED" as const };
     }
-    const failure = serializeError(error);
+    const failedStep = (await getSteps(db, run.id)).find(
+      (s) => s.status === "FAILED" && s.error_json,
+    );
+    const failure = failedStep?.error_json
+      ? (JSON.parse(failedStep.error_json) as ReturnType<typeof serializeError>)
+      : serializeError(error);
     await finalizeRunFailure(db, run.id, JSON.stringify(failure), failure.class, failure.message);
     return { runId: run.id, status: "FAILED" as const };
   }

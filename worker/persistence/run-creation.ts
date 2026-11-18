@@ -1,6 +1,7 @@
 import { nowIso } from "../lib/time";
 
 export interface NewStepDefinition {
+  checkpoint?: { runId: string; inputJson: string | null; outputJson: string };
   id: string;
   key: string;
   name: string;
@@ -12,6 +13,8 @@ export interface NewRunBundle {
   httpConnections?: { nodeId: string; json: string }[];
   modelRoutes?: { nodeId: string; routeId: string; routeJson: string }[];
   run: {
+    recoveryMode?: "restart" | "resume";
+    effectScopeId?: string;
     id: string;
     projectId: string;
     workflowId: string;
@@ -73,8 +76,9 @@ export async function insertRunBundle(db: D1Database, bundle: NewRunBundle): Pro
         `INSERT INTO runs (
            id, project_id, workflow_id, workflow_version, status, trigger_source, scenario,
            visibility, owner_session_hash, owner_user_id, owner_ip_hash, parent_run_id, retry_of_run_id,
-           idempotency_key, input_hash, input_json, correlation_id, created_at, updated_at, expires_at
-         ) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           idempotency_key, input_hash, input_json, correlation_id, created_at, updated_at, expires_at,
+           recovery_mode, effect_scope_id
+         ) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         bundle.run.id,
@@ -96,6 +100,8 @@ export async function insertRunBundle(db: D1Database, bundle: NewRunBundle): Pro
         bundle.run.createdAt,
         bundle.run.createdAt,
         bundle.run.expiresAt,
+        bundle.run.recoveryMode ?? null,
+        bundle.run.effectScopeId ?? bundle.run.id,
       ),
   ];
 
@@ -119,12 +125,35 @@ export async function insertRunBundle(db: D1Database, bundle: NewRunBundle): Pro
         .prepare(
           `INSERT INTO execution_steps (
              id, run_id, step_key, name, ordinal, status, max_attempts,
-             attempt_count, updated_at
-           ) VALUES (?, ?, ?, ?, ?, 'PENDING', ?, 0, ?)`,
+             attempt_count, updated_at, input_json, output_json, reused_from_run_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
         )
-        .bind(step.id, bundle.run.id, step.key, step.name, step.ordinal, step.maxAttempts, now),
+        .bind(
+          step.id,
+          bundle.run.id,
+          step.key,
+          step.name,
+          step.ordinal,
+          step.checkpoint ? "SUCCEEDED" : "PENDING",
+          step.maxAttempts,
+          now,
+          step.checkpoint?.inputJson ?? null,
+          step.checkpoint?.outputJson ?? null,
+          step.checkpoint?.runId ?? null,
+        ),
     );
   }
+  if (bundle.steps.some((s) => s.checkpoint))
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO execution_events (run_id,type,level,message,step_key,data_json,dedupe_key,created_at)
+     SELECT run_id,'step.reused','info',name || ': reused completed output; no action executed.',step_key,
+       json_object('sourceRunId',reused_from_run_id),run_id || ':' || step_key || ':reused',?
+     FROM execution_steps WHERE run_id=? AND reused_from_run_id IS NOT NULL`,
+        )
+        .bind(now, bundle.run.id),
+    );
 
   statements.push(
     db
