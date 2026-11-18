@@ -1,3 +1,4 @@
+import { InvestigationsPage, InvestigationPage, ConnectionsPage } from "./pages/investigations";
 import {
   ProjectsPage,
   ProjectPage,
@@ -141,10 +142,10 @@ function Welcome({ session }: { session: AuthSession }) {
         <div className="entry-mark">
           <Icon name="diagram-project" />
         </div>
-        <h1>Execute workflows. Recover when they break.</h1>
+        <h1>Find the failure. Verify the fix.</h1>
         <p>
-          An open-source platform for executing, observing, debugging and recovering workflows and
-          AI agents.
+          Debug existing code with focused tests and retained evidence. Use your coding agent or
+          open the same investigation here.
         </p>
         <div className="entry-actions">
           {session.githubSignInAvailable ? (
@@ -176,11 +177,16 @@ function Workspace({ session }: { session: AuthSession }) {
             path="/"
             element={
               <Navigate
-                to={"/workflows" + (projectId ? "?project=" + encodeURIComponent(projectId) : "")}
+                to={
+                  "/investigations" + (projectId ? "?project=" + encodeURIComponent(projectId) : "")
+                }
                 replace
               />
             }
           />
+          <Route path="/investigations" element={<InvestigationsPage key={projectId} />} />
+          <Route path="/investigations/:id" element={<InvestigationPage key={projectId} />} />
+          <Route path="/connections" element={<ConnectionsPage key={projectId} />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:selectedProject" element={<ProjectPage key={projectId} />} />
           <Route
@@ -240,7 +246,7 @@ function Workspace({ session }: { session: AuthSession }) {
             path="*"
             element={
               <Empty title="Page not found">
-                <Link to="/">Return to workflows</Link>
+                <Link to="/">Return to investigations</Link>
               </Empty>
             }
           />

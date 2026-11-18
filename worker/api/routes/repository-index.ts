@@ -23,6 +23,7 @@ export function repositoryIndexRoutes(fetcher: typeof fetch = fetch) {
     const q = parseWith(
       z
         .object({
+          kind: z.literal("tests").optional(),
           path: repositoryPathSchema.optional(),
           commit: z
             .string()
@@ -34,7 +35,14 @@ export function repositoryIndexRoutes(fetcher: typeof fetch = fetch) {
       "Invalid index query.",
     );
     return c.json({
-      data: await getRepositoryIndex(c.env.DB, userId, projectId, q.path, q.commit),
+      data: await getRepositoryIndex(
+        c.env.DB,
+        userId,
+        projectId,
+        q.path,
+        q.commit,
+        q.kind === "tests",
+      ),
       meta: { requestId: getRequestContext(c).requestId },
     });
   });

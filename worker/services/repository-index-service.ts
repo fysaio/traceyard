@@ -119,6 +119,7 @@ export async function getRepositoryIndex(
   projectId: string,
   path?: string,
   commit?: string,
+  testsOnly = false,
 ) {
   if (!(await getOwnedProject(db, userId, projectId))) throw notFound("Project not found.");
   const row = await db
@@ -131,9 +132,9 @@ export async function getRepositoryIndex(
   const manifest = repositoryIndexManifestSchema.parse(JSON.parse(row.manifest_json));
   const files = await db
     .prepare(
-      "SELECT metadata_json FROM repository_index_files WHERE project_id=? AND snapshot_id=? AND (? IS NULL OR path=?) ORDER BY path LIMIT 101",
+      "SELECT metadata_json FROM repository_index_files WHERE project_id=? AND snapshot_id=? AND (? IS NULL OR path=?) AND (?=0 OR json_extract(metadata_json,'$.isTest')=1) ORDER BY path LIMIT 101",
     )
-    .bind(projectId, row.snapshot_id, path ?? null, path ?? null)
+    .bind(projectId, row.snapshot_id, path ?? null, path ?? null, Number(testsOnly))
     .all<{ metadata_json: string }>();
   const tests = path
     ? await db
