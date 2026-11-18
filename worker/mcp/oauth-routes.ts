@@ -54,7 +54,7 @@ function tokenFailure(c: Parameters<typeof readJsonBody>[0], error: unknown) {
 export function oauthRoutes() {
   const app = new Hono<AppEnv>();
   app.use("/oauth/*", async (c, next) => {
-    if (c.req.path !== "/oauth/authorize") {
+    if (!["/oauth/authorize", "/oauth/connections"].includes(c.req.path)) {
       c.header("Access-Control-Allow-Origin", "*");
       c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
       c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -121,12 +121,11 @@ export function oauthRoutes() {
       return c.html(
         page(
           "Connect your coding agent",
-          `<p>Sign in to choose which repository this agent can investigate.</p><a class="button" href="/api/auth/github/start?returnTo=${encodeURIComponent(back)}">Continue with GitHub</a>`,
+          `<p>Sign in to connect. You can choose a project later.</p><a class="button" href="/api/auth/github/start?returnTo=${encodeURIComponent(back)}">Continue with GitHub</a>`,
         ),
       );
     }
-    const projects = await listOwnedProjects(c.env.DB, auth.user.id),
-      csrf = await createConsent(c.env.DB, auth.user.id, request);
+    const csrf = await createConsent(c.env.DB, auth.user.id, request);
     const client = await c.env.DB.prepare("SELECT name FROM oauth_clients WHERE id=?")
       .bind(request.clientId)
       .first<{ name: string }>();
@@ -136,7 +135,11 @@ export function oauthRoutes() {
     return c.html(
       page(
         "Connect your coding agent",
-        `<p><strong>${escape(client?.name ?? "Coding agent")}</strong> wants to connect to one Traceyard project.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="consent" value="${escape(csrf)}"><label for="project">Traceyard project</label><select id="project" name="project" aria-describedby="project-help" required><option value="" disabled selected>Choose a project…</option>${projects.map((p) => `<option value="${escape(p.id)}">${escape(p.repository ?? p.name)}</option>`).join("")}</select><p id="project-help" class="muted">These are your existing Traceyard projects. Choose the codebase you want this agent to debug. Access is limited to your selection.</p><p>For the selected project, this connection can:</p><ul>${request.scopes.map((scope) => `<li>${escape(scope === "investigations:read" ? "Read investigation findings and retained evidence" : scope === "investigations:run" ? "Run supported repository tests and verify candidate repairs" : "Recover supported real workflow executions")}</li>`).join("")}</ul><p class="muted">Revoke this connection from the project’s Connections page at any time. After connecting, finish authentication in your coding agent.</p><div class="actions"><button name="decision" value="approve" ${projects.length ? "" : "disabled"}>Connect agent</button><button class="secondary" name="decision" value="deny" formnovalidate>Cancel</button></div></form>${projects.length ? "" : '<p><a href="/projects">Connect a repository first</a>, then reopen this request.</p>'}`,
+        `<p>Connect <strong>${escape(client?.name ?? "Coding agent")}</strong> to Traceyard. You can give it access to a project when you’re ready.</p>
+        <form method="post" action="/oauth/authorize">
+          <input type="hidden" name="consent" value="${escape(csrf)}">
+          <div class="actions"><button name="decision" value="approve">Connect agent</button><button class="secondary" name="decision" value="deny">Cancel</button></div>
+        </form>`,
       ),
     );
   });
@@ -148,7 +151,7 @@ export function oauthRoutes() {
         c.env.DB,
         auth.user.id,
         body.get("consent") ?? "",
-        body.get("project") ?? "",
+        body.get("project") || null,
         body.get("decision") === "approve",
       );
     const url = new URL(destination);
@@ -175,20 +178,127 @@ export function oauthRoutes() {
       .run();
     return c.json({});
   });
-  app.get("/api/projects/:projectId/agent-connections", async (c) => {
-    const { projectId } = await ownedProject(c);
-    const rows = await c.env.DB.prepare(
-      "SELECT g.id,c.name,g.scopes_json,g.created_at,g.revoked_at FROM mcp_grants g JOIN oauth_clients c ON c.id=g.client_id WHERE g.project_id=? ORDER BY g.created_at DESC LIMIT 50",
+  app.get("/oauth/connections", async (c) => {
+    const auth = c.get("auth");
+    const requested = c.req.query("connection");
+    if (!auth)
+      return c.html(
+        page(
+          "Manage coding agents",
+          `<p>Sign in to manage your coding agents.</p><a class="button" href="/api/auth/github/start?returnTo=${encodeURIComponent(
+            requested && /^grant_[a-f0-9]{32}$/.test(requested)
+              ? "/oauth/connections?connection=" + requested
+              : "/oauth/connections",
+          )}">Continue with GitHub</a>`,
+        ),
+        401,
+      );
+    const connections = await c.env.DB.prepare(
+      "SELECT g.id,c.name,g.scopes_json FROM mcp_grants g JOIN oauth_clients c ON c.id=g.client_id WHERE g.owner_user_id=? AND g.project_id IS NULL AND g.revoked_at IS NULL ORDER BY g.created_at DESC",
     )
-      .bind(projectId)
+      .bind(auth.user.id)
+      .all<{ id: string; name: string; scopes_json: string }>();
+    const projects = await listOwnedProjects(c.env.DB, auth.user.id);
+    const permissions = await c.env.DB.prepare(
+      "SELECT a.grant_id,a.project_id FROM mcp_project_permissions a JOIN mcp_grants g ON g.id=a.grant_id WHERE g.owner_user_id=? AND g.revoked_at IS NULL",
+    )
+      .bind(auth.user.id)
+      .all<{ grant_id: string; project_id: string }>();
+    const body = connections.results
+      .filter((connection) => !requested || requested === connection.id)
+      .map((connection) => {
+        const allowed = new Set(
+          permissions.results.filter((p) => p.grant_id === connection.id).map((p) => p.project_id),
+        );
+        const scopes = JSON.parse(connection.scopes_json) as string[];
+        const actions = [
+          scopes.includes("investigations:read") && "read investigation evidence",
+          scopes.includes("investigations:run") && "run supported tests and verify repairs",
+          scopes.includes("runs:recover") && "recover workflows",
+        ]
+          .filter(Boolean)
+          .join(", ");
+        const rows = projects
+          .map(
+            (project) => `<form class="project-access" method="post" action="/oauth/connections">
+        <input type="hidden" name="connection" value="${escape(connection.id)}">
+        <input type="hidden" name="project" value="${escape(project.id)}">
+        <p>${escape(project.repository ?? project.name)}</p>
+        <button name="decision" value="${allowed.has(project.id) ? "remove" : "allow"}">${allowed.has(project.id) ? "Remove access" : "Allow access"}</button>
+      </form>`,
+          )
+          .join("");
+        return `<section class="connection"><h2>${escape(connection.name)}</h2><p>For each project you allow, this agent can ${escape(actions)}.</p>
+        ${rows || "<p>No projects yet.</p>"}
+        <form method="post" action="/oauth/connections"><input type="hidden" name="connection" value="${escape(connection.id)}"><button class="secondary" name="decision" value="disconnect">Disconnect agent</button></form></section>`;
+      })
+      .join("");
+    return c.html(
+      page(
+        "Manage coding agents",
+        `${body || "<p>No matching connection.</p>"}<p><a href="/projects">Connect a repository</a> · <a href="/oauth/connections">All agents</a></p>`,
+      ),
+    );
+  });
+  app.post("/oauth/connections", async (c) => {
+    const auth = c.get("auth");
+    if (!auth) throw badRequest("SIGN_IN_REQUIRED", "Sign in to manage your coding agents.");
+    const fields = await form(c);
+    const grant = fields.get("connection") ?? "";
+    const project = fields.get("project") ?? "";
+    const owner = auth.user.id;
+    const decision = fields.get("decision");
+    const activeConnection =
+      "SELECT id FROM mcp_grants WHERE id=? AND owner_user_id=? AND project_id IS NULL AND revoked_at IS NULL";
+    if (decision === "allow") {
+      await c.env.DB.prepare(
+        `INSERT OR IGNORE INTO mcp_project_permissions(grant_id,project_id)
+        SELECT g.id,p.id FROM (${activeConnection}) g CROSS JOIN projects p WHERE p.id=? AND p.owner_user_id=?`,
+      )
+        .bind(grant, owner, project, owner)
+        .run();
+    } else if (decision === "remove") {
+      await c.env.DB.prepare(
+        `DELETE FROM mcp_project_permissions WHERE grant_id IN (${activeConnection}) AND project_id=?`,
+      )
+        .bind(grant, owner, project)
+        .run();
+    } else if (decision === "disconnect") {
+      await c.env.DB.prepare(
+        "UPDATE mcp_grants SET revoked_at=? WHERE id=? AND owner_user_id=? AND project_id IS NULL AND revoked_at IS NULL",
+      )
+        .bind(nowIso(), grant, owner)
+        .run();
+    } else {
+      throw badRequest("INVALID_DECISION", "Choose an access action.");
+    }
+    return c.redirect(
+      decision === "disconnect"
+        ? "/oauth/connections"
+        : "/oauth/connections?connection=" + encodeURIComponent(grant),
+      303,
+    );
+  });
+  app.get("/api/projects/:projectId/agent-connections", async (c) => {
+    const { projectId, userId } = await ownedProject(c);
+    const rows = await c.env.DB.prepare(
+      "SELECT g.id,c.name,g.scopes_json,g.created_at,g.revoked_at FROM mcp_grants g JOIN oauth_clients c ON c.id=g.client_id WHERE g.owner_user_id=? AND (g.project_id=? OR (g.project_id IS NULL AND g.revoked_at IS NULL AND EXISTS(SELECT 1 FROM mcp_project_permissions a WHERE a.grant_id=g.id AND a.project_id=?))) ORDER BY g.created_at DESC LIMIT 50",
+    )
+      .bind(userId, projectId, projectId)
       .all();
     return c.json({ data: { items: rows.results } });
   });
   app.post("/api/projects/:projectId/agent-connections/:id/revoke", async (c) => {
-    const { projectId } = await ownedProject(c);
-    await c.env.DB.prepare("UPDATE mcp_grants SET revoked_at=? WHERE id=? AND project_id=?")
-      .bind(nowIso(), c.req.param("id"), projectId)
-      .run();
+    const { projectId, userId } = await ownedProject(c);
+    const grant = c.req.param("id");
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        "UPDATE mcp_grants SET revoked_at=? WHERE id=? AND project_id=? AND owner_user_id=?",
+      ).bind(nowIso(), grant, projectId, userId),
+      c.env.DB.prepare(
+        "DELETE FROM mcp_project_permissions WHERE grant_id=? AND project_id=? AND EXISTS(SELECT 1 FROM mcp_grants g WHERE g.id=? AND g.owner_user_id=? AND g.project_id IS NULL)",
+      ).bind(grant, projectId, grant, userId),
+    ]);
     return c.json({ data: { revoked: true } });
   });
   return app;

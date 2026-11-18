@@ -41,25 +41,17 @@ async function openConsent(page: Page) {
   });
   const consent = await page.goto("/oauth/authorize?" + query);
   expect(consent?.headers()["referrer-policy"]).toBe("same-origin");
-  await expect(page.getByLabel("Traceyard project")).toHaveValue("");
-  await expect(page.getByText(/These are your existing Traceyard projects/)).toBeVisible();
+  await expect(page.getByLabel("Traceyard project")).toHaveCount(0);
+  await expect(page.getByText(/give it access to a project when you’re ready/)).toBeVisible();
   return { project, client, verifier, callback, metadata };
 }
 
-test("native consent form preserves Origin, selects one project and completes MCP authentication", async ({
+test("MCP connects first and grants project access later in the browser", async ({
   page,
   baseURL,
 }) => {
   test.setTimeout(150000);
   const { project, client, verifier, callback, metadata } = await openConsent(page);
-  let submissions = 0;
-  page.on("request", (r) => {
-    if (r.method() === "POST" && new URL(r.url()).pathname === "/oauth/authorize") submissions++;
-  });
-  await page.getByRole("button", { name: "Connect agent", exact: true }).click();
-  await expect(page.getByLabel("Traceyard project")).toHaveValue("");
-  expect(submissions).toBe(0);
-  await page.getByLabel("Traceyard project").selectOption(project.id);
   const [post] = await Promise.all([
     page.waitForRequest(
       (r) => r.method() === "POST" && new URL(r.url()).pathname === "/oauth/authorize",
@@ -122,6 +114,20 @@ test("native consent form preserves Origin, selects one project and completes MC
       "verify",
       "recover",
     ]);
+    const first = await sdk.callTool({
+      name: "investigate",
+      arguments: { mode: "analyze", question: "Inspect browser authorization evidence" },
+    });
+    expect(first.isError).toBe(true);
+    const pending = first.structuredContent as { status: string; browserUrl: string };
+    expect(pending.status).toBe("PROJECT_ACCESS_REQUIRED");
+    const access = new URL(pending.browserUrl);
+    expect(access.origin).toBe(new URL(metadata.resource).origin);
+    // The acceptance worker advertises a synthetic public origin.
+    await page.goto(access.pathname + access.search);
+    const row = page.locator("form").filter({ hasText: "OAuth browser selection" });
+    await row.getByRole("button", { name: "Allow access" }).click();
+    await expect(row.getByRole("button", { name: "Remove access" })).toBeVisible();
     const finding = await sdk.callTool({
       name: "investigate",
       arguments: {
@@ -177,6 +183,8 @@ test("native consent form preserves Origin, selects one project and completes MC
         )
       ).status(),
     ).toBe(200);
+    await page.getByRole("button", { name: "Disconnect agent" }).click();
+    await expect(page.getByText("No matching connection.")).toBeVisible();
     expect((await reader.read()).done).toBe(true);
     const denied = await fetch(baseURL + "/mcp", {
       headers: { Authorization: "Bearer " + token.access_token, Accept: "text/event-stream" },
@@ -194,16 +202,10 @@ test("cancel returns to the agent without requiring a project or creating access
   baseURL,
 }) => {
   await openConsent(page);
-  const projects = await (await page.request.get(baseURL + "/api/projects")).json();
   const grants = async () => {
-    const ids: string[] = [];
-    for (const project of projects.data.items) {
-      const response = await page.request.get(
-        `${baseURL}/api/projects/${project.id}/agent-connections`,
-      );
-      ids.push(...(await response.json()).data.items.map((g: { id: string }) => g.id));
-    }
-    return ids.sort();
+    const response = await page.request.get(baseURL + "/oauth/connections");
+    expect(response.status()).toBe(200);
+    return (await response.text()).match(/name="connection" value="grant_[a-f0-9]+"/g) ?? [];
   };
   const before = await grants();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();

@@ -63,6 +63,9 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
     return c.body(null, 204);
   });
   app.all("/mcp", handleMcp);
+  app.use("/oauth/connections", sameOriginMiddleware());
+  app.use("/oauth/connections", sessionMiddleware());
+  app.use("/oauth/connections", authSessionMiddleware());
   app.route("/", oauthRoutes());
 
   app.route("/api", createAuthRoutes(options.githubFetch));

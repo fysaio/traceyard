@@ -719,7 +719,7 @@ export function ConnectionsPage() {
     [revokeTarget, setRevokeTarget] = useState<Grant | null>(null);
   const project = projects.find((p) => p.id === projectId),
     endpoint = window.location.origin + "/mcp";
-  const antigravitySetup = `Add a remote MCP server named traceyard to my Antigravity global MCP configuration. Use serverUrl ${endpoint}. Preserve every existing server and setting. The configuration is at ~/.gemini/config/mcp_config.json (under USERPROFILE on Windows). Save the configuration, then tell me how to reload the server and click Authenticate in Customizations > Installed > MCP Servers. During Traceyard consent I should choose ${project?.repository ?? project?.name ?? "my project"}. Let me complete browser consent and any authorization-code entry myself.`;
+  const antigravitySetup = `Add a remote MCP server named traceyard to my Antigravity global MCP configuration. Use serverUrl ${endpoint}. Preserve every existing server and setting. The configuration is at ~/.gemini/config/mcp_config.json (under USERPROFILE on Windows). Save the configuration, then tell me how to reload the server and click Authenticate in Customizations > Installed > MCP Servers. Traceyard connects the account first. When I need a repository, show the Traceyard link where I can allow access to that project. Let me complete browser consent and any authorization-code entry myself.`;
   const copy = (value: string) => {
     void navigator.clipboard
       .writeText(value)
@@ -906,9 +906,9 @@ export function ConnectionsPage() {
                 <strong>OAuth</strong>. Create and install the plugin.
               </li>
               <li>
-                Complete browser authorization and choose{" "}
-                <strong>{project?.repository ?? project?.name}</strong>. In Work, select{" "}
-                <strong>@Traceyard</strong> and ask it to inspect the connected project.
+                Finish connecting in your browser. In Work, select <strong>@Traceyard</strong> and
+                ask it to inspect your repo. It will give you a link to allow project access when
+                needed.
               </li>
             </ol>
           ) : client === "antigravity" ? (
@@ -924,9 +924,8 @@ export function ConnectionsPage() {
                   <strong>Authenticate</strong> for Traceyard.
                 </li>
                 <li>
-                  Complete browser authorization for{" "}
-                  <strong>{project?.repository ?? project?.name}</strong>. If asked, paste the
-                  callback code into Antigravity.
+                  Finish connecting in your browser. Choose a project when you first need access. If
+                  asked, paste the callback code into Antigravity.
                 </li>
               </ol>
               <details className="disclosure">
@@ -938,8 +937,8 @@ export function ConnectionsPage() {
             <ol className="setup-instructions">
               <li>Add a remote HTTP MCP server using the URL above.</li>
               <li>
-                Choose OAuth and complete browser authorization for{" "}
-                <strong>{project?.repository ?? project?.name}</strong>.
+                Choose OAuth and finish connecting in your browser. Choose a project when you first
+                need access.
               </li>
               <li>
                 Ask your agent to use Traceyard’s <code>inspect</code> tool with{" "}
@@ -956,6 +955,7 @@ export function ConnectionsPage() {
       <section className="connected-panel section">
         <div className="section-head">
           <h2>Authorized agents</h2>
+          <a href="/oauth/connections">Manage agent access</a>
           <button
             className="btn"
             disabled={grants.isFetching}
@@ -1007,7 +1007,10 @@ export function ConnectionsPage() {
             </article>
           ))
         ) : (
-          <p>No agents authorized yet. Complete the connection above, then refresh this status.</p>
+          <p>
+            No agents authorized yet. Connect your agent, then allow access to this project when you
+            need it.
+          </p>
         )}
       </section>
       <details className="disclosure section">
