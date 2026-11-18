@@ -115,7 +115,7 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 
 ## Runner update for existing deployments
 
-The reviewed runner revision is `a23df5c114e7302e76418309206150983255a3c8`. It avoids a redundant Node ESM loader inside Vitest's own transformed module runtime while retaining ordinary application ESM hooks and supported Node HTTP recording. The three-minute command deadline and ten-minute job limit are unchanged. Regression fixtures exercise real HTTP recording for passing and failing Vitest suites.
+The reviewed runner revision is `6d78bf1f941ef65c4180bf20a8b37703a6451149`. It contains protocol-2 focused investigations, the minimal hosted dependency package, opt-in JSON recording and isolated replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [investigation release](INVESTIGATION_RELEASE.md).
 
 An existing deployment can select this immutable revision through its operator-controlled `TRACEYARD_RUNNER_REF` setting. The repository workflow must use the same revision; Traceyard validates the exact generated workflow before dispatch. Application test fixes and runner updates are separate changes. Mock-only tests do not establish observed application activity, and batch exporters may lose the final spans of a worker that is forcibly stopped.
 
@@ -137,7 +137,7 @@ TRACEYARD_KEY=<project-scoped API key>
 With Node.js 22.12+ and Git, run this from that repository (no separate Traceyard checkout required):
 
 ```bash
-npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#a23df5c114e7302e76418309206150983255a3c8 -- traceyard run .
+npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#6d78bf1f941ef65c4180bf20a8b37703a6451149 -- traceyard run .
 ```
 
 The command installs an immutable reviewed runner revision into npm's cache. In Traceyard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing Traceyard checkout instead:

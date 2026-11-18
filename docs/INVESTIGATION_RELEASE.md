@@ -32,6 +32,8 @@ Focused execution currently supports npm projects with an unambiguous direct Vit
 
 A protocol header prevents old runners from treating focused plans as ordinary full-suite requests. Review execution setup in Connections to update a repository workflow. Investigation cancellation closes the durable record and requests the same external cancellation used by repository checks. An unconfirmed external cancellation remains explicitly uncertain. Hosted work that produces no complete report within fifteen minutes becomes blocked without automatic duplicate execution. Thirty-day inactive investigations and their artifacts expire; latest complete source indexes are preserved. OAuth transient records also expire.
 
+Reviewed bootstrap: [`6d78bf1f941ef65c4180bf20a8b37703a6451149`](https://github.com/fysaio/traceyard/commit/6d78bf1f941ef65c4180bf20a8b37703a6451149). The shared runner version pins hosted setup and the optional local command to this immutable source.
+
 ## Production rollout
 
 Code merge and production deployment are separate. This workspace has no authenticated Cloudflare session. Production deployment and live private-repository/OAuth acceptance therefore require the existing operator's authenticated Cloudflare environment. No new GitHub/provider secrets should be pasted into chat.
