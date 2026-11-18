@@ -18,12 +18,41 @@ if (
 )
   throw Error("Use --origin https://YOUR_TRACEYARD_HOST");
 const git = (...a) => execFileSync("git", a, { cwd: root, encoding: "utf8" }).trim();
+const revision = git("rev-parse", "HEAD");
+const validated = args.includes("--validated-revision")
+  ? args[args.indexOf("--validated-revision") + 1]
+  : null;
 if (
-  git("branch", "--show-current") !== "main" ||
+  validated &&
+  (process.env.GITHUB_ACTIONS !== "true" ||
+    process.env.GITHUB_EVENT_NAME !== "workflow_run" ||
+    validated !== revision)
+)
+  throw Error(
+    "A validated revision must match this checkout in a completed GitHub CI release workflow.",
+  );
+if (
+  (!validated && git("branch", "--show-current") !== "main") ||
   git("status", "--porcelain", "--untracked-files=no")
 )
   throw Error("Deploy a clean main checkout after its CI gates pass.");
-const revision = git("rev-parse", "HEAD");
+if (validated) {
+  const response = await fetch(
+    `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/git/ref/heads/main`,
+    {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    },
+  );
+  if (!response.ok) throw Error("Could not confirm the current main revision before deployment.");
+  if ((await response.json()).object?.sha !== revision)
+    throw Error(
+      "A newer main revision exists. Release its completed checks instead of deploying stale code.",
+    );
+}
 const runner = (await readFile(resolve(root, "shared/repository/runner-version.ts"), "utf8")).match(
   /REVIEWED_RUNNER_REVISION = "([a-f0-9]{40})"/,
 )?.[1];
@@ -44,7 +73,7 @@ const execute = (command, parameters, input) =>
     );
   });
 const cf = (...a) => execute(process.execPath, [wrangler, ...a]);
-await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["test"]);
+if (!validated) await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["test"]);
 await execute(process.platform === "win32" ? "npm.cmd" : "npm", ["run", "build"]);
 await cf(
   "d1",

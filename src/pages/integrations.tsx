@@ -1,6 +1,7 @@
 import { ProjectActivity } from "./project-overview";
 import { ProjectLink as Link } from "../components/project-link";
 import { useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../lib/api";
@@ -26,10 +27,11 @@ export function ErrorNotice({ error }: { error: unknown }) {
   ) : null;
 }
 function Title({ title, children }: { title: string; children?: ReactNode }) {
+  const Heading = useLocation().pathname.startsWith("/settings/") ? "h2" : "h1";
   return (
     <div className="page-head">
       <div>
-        <h1>{title}</h1>
+        <Heading>{title}</Heading>
         {children && <p>{children}</p>}
       </div>
     </div>
@@ -92,7 +94,9 @@ export function Gateway({ projectId: p }: { projectId: string }) {
     });
   return (
     <>
-      <Title title="Gateway">Connect a provider, create a route, then use it in Studio.</Title>
+      <Title title="Model gateway">
+        Connect a provider and choose how workflow model requests are routed.
+      </Title>
       <Wait loading={data.isPending} error={data.error} />
       <div className="integration-columns">
         <section className="connected-panel">
@@ -571,7 +575,7 @@ export function Approvals({ projectId: p }: { projectId: string }) {
 export function Traces({ projectId: p }: { projectId: string }) {
   return (
     <>
-      <Title title="Application runs">
+      <Title title="Runtime traces">
         Recorded executions from this project, with their steps and failures.
       </Title>
       <ProjectActivity projectId={p} />
@@ -600,7 +604,7 @@ export function Developer({ projectId: p }: { projectId: string }) {
   const origin = window.location.origin;
   return (
     <>
-      <Title title="Developer">
+      <Title title="API keys & SDK">
         Connect a server, send traces, or launch an execution over HTTP.
       </Title>
       <section className="connected-panel">
@@ -778,7 +782,7 @@ export function Automations({ projectId: p }: { projectId: string }) {
     });
   return (
     <>
-      <Title title="Automations">
+      <Title title="Schedules & webhooks">
         Schedule published workflows and deliver completion events to your systems.
       </Title>
       <Wait loading={q.isPending} error={q.error} />
@@ -1035,7 +1039,7 @@ export function Experiments({ projectId: p }: { projectId: string }) {
     <>
       <div className="page-head">
         <div>
-          <h1>Laboratory</h1>
+          <h1>Workflow experiments</h1>
           <p>Run a repeatable check against a published workflow and inspect the evidence.</p>
         </div>
         <button className="btn primary" onClick={() => setShow(!show)}>

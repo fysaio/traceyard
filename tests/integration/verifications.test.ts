@@ -4,7 +4,10 @@ import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persi
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import { createInvestigation, getInvestigation } from "../../worker/services/investigation-service";
 import { createVerification, getVerification } from "../../worker/services/verification-service";
-import { recordInvestigationReport } from "../../worker/services/investigation-execution";
+import {
+  recordInvestigationReport,
+  startInvestigationExecution,
+} from "../../worker/services/investigation-execution";
 import { investigationRequestSchema } from "../../shared/contracts/investigations";
 import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
 import { ORIGIN } from "./helpers";
@@ -115,6 +118,24 @@ async function complete(a: Awaited<ReturnType<typeof fixture>>, candidateId: str
   });
 }
 describe("repair verification", () => {
+  it("does not present an older report as the result of a blocked retry", async () => {
+    const a = await fixture();
+    expect(
+      (await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id)).execution?.status,
+    ).toBe("FAILED");
+    const retry = await startInvestigationExecution(
+      configured,
+      a.userId,
+      a.projectId,
+      a.baseline.id,
+      {},
+      github(["sum.ts"]),
+    );
+    expect(retry.status).toBe("BLOCKED");
+    expect(retry.attempts).toHaveLength(2);
+    expect(retry.execution).toBeUndefined();
+    expect(retry.evidence.length).toBeGreaterThan(0);
+  });
   it("pins a candidate and preserves the original failure, with idempotent requests", async () => {
     const a = await fixture(),
       v = await createVerification(
@@ -142,6 +163,14 @@ describe("repair verification", () => {
     expect(again.id).toBe(v.id);
     await complete(a, v.candidateId);
     expect((await getVerification(env.DB, a.userId, a.projectId, v.id)).verdict).toBe("PASSED");
+    const reopened = await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id);
+    expect(reopened.verifications).toEqual([
+      expect.objectContaining({ id: v.id, baselineId: a.baseline.id, candidateId: v.candidateId }),
+    ]);
+    expect(reopened.execution?.status).toBe("FAILED");
+    const repaired = await getInvestigation(env.DB, a.userId, a.projectId, v.candidateId);
+    expect(repaired.execution?.status).toBe("SUCCEEDED");
+    expect(repaired.verifications?.[0]?.baselineId).toBe(a.baseline.id);
     expect(
       (await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id)).snapshot.commit,
     ).toBe("a".repeat(40));

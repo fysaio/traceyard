@@ -139,3 +139,264 @@ test("local account opens a real persisted investigation and returns to the same
     page.getByText("Inspect retained repository evidence", { exact: true }),
   ).toBeVisible();
 });
+
+test("reopening a baseline restores its repair verdict and readable execution evidence", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/session", (r) =>
+    r.fulfill(
+      json({
+        user: { id: "usr_browser", login: "browser", name: "Browser", avatarUrl: null },
+        sessions: [],
+        githubSignInAvailable: true,
+      }),
+    ),
+  );
+  await page.route("**/api/projects", (r) =>
+    r.fulfill(json({ items: [{ id: "prj_browser", name: "Browser", repository: "example/app" }] })),
+  );
+  await page.route("**/api/projects/prj_browser/investigations/inv_browser", (r) =>
+    r.fulfill(
+      json({
+        ...inv,
+        execution: {
+          status: "FAILED",
+          commit: snapshot.commit,
+          command: { directory: ".", script: "test", testPath: "tests/checkout.test.ts" },
+          counts: { passed: 4, failed: 1, skipped: 0 },
+          durationMs: 1200,
+          exitCode: 1,
+          failures: [
+            {
+              file: "tests/checkout.test.ts",
+              name: "checkout retries",
+              message: "Expected 42, received 41",
+            },
+          ],
+        },
+        verifications: [
+          {
+            id: "ver_browser",
+            baselineId: inv.id,
+            candidateId: "inv_candidate",
+            candidateCommit: "b".repeat(40),
+            createdAt: "2026-11-18",
+          },
+        ],
+      }),
+    ),
+  );
+  await page.route("**/api/projects/prj_browser/verifications/ver_browser", (r) =>
+    r.fulfill(
+      json({
+        id: "ver_browser",
+        baselineId: inv.id,
+        candidateId: "inv_candidate",
+        candidateCommit: "b".repeat(40),
+        verdict: "PASSED",
+        changedTests: [],
+        limitations: ["Only the selected checks executed."],
+        summary: "The retained reproducer passes against the candidate.",
+        metrics: {},
+      }),
+    ),
+  );
+  await page.goto("/investigations/inv_browser?project=prj_browser");
+  await expect(page.getByText("Repair verified", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Test execution result" })).toContainText(
+    "tests/checkout.test.ts",
+  );
+  await expect(page.getByText("Expected 42, received 41", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open candidate evidence" })).toHaveAttribute(
+    "href",
+    "/investigations/inv_candidate?project=prj_browser",
+  );
+  await page.reload();
+  await expect(page.getByText("Repair verified", { exact: true })).toBeVisible();
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+});
+
+test("incomplete execution setup blocks test launch while source analysis remains available", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/session", (r) =>
+    r.fulfill(
+      json({
+        user: { id: "usr_browser", login: "browser", name: "Browser" },
+        sessions: [],
+        githubSignInAvailable: true,
+      }),
+    ),
+  );
+  await page.route("**/api/projects", (r) =>
+    r.fulfill(json({ items: [{ id: "prj_browser", name: "Browser", repository: "example/app" }] })),
+  );
+  await page.route("**/api/projects/prj_browser/catalog", (r) =>
+    r.fulfill(
+      json({
+        executionAvailable: true,
+        executionProvider: "github",
+        repository: { runner_enabled: 0 },
+      }),
+    ),
+  );
+  await page.route("**/api/projects/prj_browser/repository/index?kind=tests", (r) =>
+    r.fulfill(json(null)),
+  );
+  await page.route("**/api/projects/prj_browser/investigations", (r) => {
+    if (r.request().method() === "POST") {
+      expect(r.request().postDataJSON()).toMatchObject({
+        mode: "analyze",
+        expectedRepository: "example/app",
+        captureInteractions: false,
+      });
+      return r.fulfill(json(inv));
+    }
+    return r.fulfill(json({ items: [] }));
+  });
+  await page.route("**/api/projects/prj_browser/investigations/inv_browser", (r) =>
+    r.fulfill(json(inv)),
+  );
+  await page.goto("/investigations?project=prj_browser");
+  await page.getByLabel("Describe the problem").fill(inv.question);
+  await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Inspect evidence", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Investigate", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
+});
+
+test("workspace tools keep workflow runs distinct and preserve the selected project", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/session", (r) =>
+    r.fulfill(
+      json({
+        user: { id: "usr_browser", login: "browser", name: "Browser" },
+        sessions: [],
+        githubSignInAvailable: true,
+      }),
+    ),
+  );
+  await page.route("**/api/projects", (r) =>
+    r.fulfill(json({ items: [{ id: "prj_browser", name: "Browser", repository: "example/app" }] })),
+  );
+  await page.route("**/api/projects/prj_browser/catalog", (r) =>
+    r.fulfill(json({ executionAvailable: true, executionProvider: "github" })),
+  );
+  await page.route("**/api/projects/prj_browser/investigations", (r) =>
+    r.fulfill(json({ items: [] })),
+  );
+  await page.route("**/api/projects/prj_browser/repository/index?kind=tests", (r) =>
+    r.fulfill(json(null)),
+  );
+  await page.route("**/api/runs?*", (r) => r.fulfill(json({ items: [], nextCursor: null })));
+  await page.goto("/investigations?project=prj_browser");
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("link", { name: /Workflow runs/ }).click();
+  await expect(page).toHaveURL(/executions\?project=prj_browser/);
+  await expect(page.getByRole("heading", { name: "Workflow runs", exact: true })).toBeVisible();
+  await expect(page.getByText(/Repository test results live in Investigations/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Repository test investigations" })).toHaveAttribute(
+    "href",
+    "/investigations?project=prj_browser",
+  );
+});
+
+test("a regular local user can open every workspace destination on desktop and mobile", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/__acceptance/account");
+  await page.getByRole("button", { name: "Open local test account" }).click();
+  await expect(page.getByRole("heading", { name: "What’s breaking?" })).toBeVisible();
+  const routes = [
+    "investigations",
+    "connections",
+    "projects",
+    "workflows",
+    "executions",
+    "traces",
+    "approvals",
+    "gateway",
+    "laboratory",
+    "connect",
+    "settings/account",
+    "settings/projects",
+    "settings/appearance",
+    "settings/developer",
+    "settings/automations",
+  ];
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    for (const route of routes) {
+      await page.goto("/" + route);
+      await expect(page.getByRole("main")).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(page.getByRole("status")).toHaveCount(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+        `${route} at ${width}px`,
+      ).toBe(true);
+      const path = testInfo.outputPath(`${route.replaceAll("/", "-")}-${width}.png`);
+      await page.screenshot({ path, fullPage: true });
+      await testInfo.attach(`${route}-${width}`, { path, contentType: "image/png" });
+    }
+  }
+  expect(errors).toEqual([]);
+});
+
+test("a user creates a template workflow, publishes it, runs real input and reopens its persisted output", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120000);
+  await page.goto("/__acceptance/account");
+  await page.getByRole("button", { name: "Open local test account" }).click();
+  await page.getByRole("button", { name: "Tools", exact: true }).click();
+  await page.getByRole("link", { name: /^Workflows/ }).click();
+  await page.getByRole("tab", { name: "Templates", exact: true }).click();
+  await page.getByRole("link", { name: /Parallel processing/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Parallel processing", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Templates", exact: true }).click();
+  await expect(page).toHaveURL(/workflows\?tab=templates/);
+  await page.getByRole("link", { name: /Parallel processing/ }).click();
+  await page.getByRole("button", { name: "Use template", exact: true }).click();
+  await page.getByRole("button", { name: "Publish version", exact: true }).click();
+  await page.getByRole("button", { name: "Run v1", exact: true }).click();
+  await page
+    .getByLabel("JSON input", { exact: true })
+    .fill(
+      JSON.stringify({
+        customer: { name: "Acceptance customer" },
+        order: { id: "order-acceptance", total: 42 },
+      }),
+    );
+  await page.getByRole("button", { name: "Start execution", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Output is ready", exact: true })).toBeVisible({
+    timeout: 30000,
+  });
+  const output = page.locator(".result-output > pre");
+  await expect(output).toContainText("Acceptance customer");
+  await expect(output).toContainText("order-acceptance");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Output is ready", exact: true })).toBeVisible();
+  await expect(output).toContainText("order-acceptance");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const path = testInfo.outputPath(`persisted-workflow-result-${width}.png`);
+    await page.screenshot({ path, fullPage: true });
+    await testInfo.attach(`persisted-workflow-result-${width}`, { path, contentType: "image/png" });
+  }
+});
