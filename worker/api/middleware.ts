@@ -167,7 +167,10 @@ export function securityHeadersMiddleware(): MiddlewareHandler<AppEnv> {
       c.req.method === "GET" &&
       c.get("oauthFormRedirectOrigin") !== undefined &&
       c.res.headers.get("content-type")?.startsWith("text/html");
-    c.header("Referrer-Policy", consentPage ? "same-origin" : "no-referrer");
+    c.header(
+      "Referrer-Policy",
+      consentPage || c.req.path === "/oauth/connections" ? "same-origin" : "no-referrer",
+    );
     c.header("Cross-Origin-Resource-Policy", "same-origin");
     c.header(
       "Cache-Control",

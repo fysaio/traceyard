@@ -1,6 +1,6 @@
 # Coding-agent connection
 
-Add `https://YOUR_TRACEYARD_HOST/mcp` as a remote MCP server in a client that supports Streamable HTTP and OAuth browser authorization. Sign in with the existing GitHub account, select a project and approve the displayed scopes. No Traceyard server key or application provider key is pasted into the client.
+Add `https://YOUR_TRACEYARD_HOST/mcp` as a remote MCP server in a client that supports Streamable HTTP and OAuth browser authorization. Sign in with your GitHub account and connect the client. This step grants no access to projects. No Traceyard server key or application provider key is pasted into the client.
 
 The endpoint uses the same investigations and evidence as the browser APIs. It is enabled only after the application revision and migrations through `0022_investigation_retention.sql` are deployed. Targeted execution additionally requires the compatible reviewed runner; installing MCP does not attach to an already-deployed application process.
 
@@ -8,7 +8,7 @@ The endpoint uses the same investigations and evidence as the browser APIs. It i
 
 In Traceyard Connections, expand **Connect with Antigravity**, copy the setup request and paste it into an Antigravity chat. Review the configuration update, which asks the agent to preserve existing servers. Antigravity manages local MCP configuration and authorization; Traceyard cannot silently edit those settings from its web page.
 
-For manual configuration, add an entry named `traceyard` with `serverUrl` set to the deployed `/mcp` endpoint inside the existing `mcpServers` object. Antigravity's configuration is `~/.gemini/config/mcp_config.json` (under `%USERPROFILE%` on Windows). Then use **Customizations → Installed → MCP Servers → Authenticate**. Choose the Traceyard project whose investigations this agent should access. The selector lists existing Traceyard projects, not an additional GitHub repository grant. Finish any authorization-code step inside Antigravity. An Unauthorized status before completing this flow does not establish a transport failure.
+For manual configuration, add an entry named `traceyard` with `serverUrl` set to the deployed `/mcp` endpoint inside the existing `mcpServers` object. Antigravity's configuration is `~/.gemini/config/mcp_config.json` (under `%USERPROFILE%` on Windows). Then use **Customizations → Installed → MCP Servers → Authenticate**. Finish connecting in the browser. When you first ask the agent to work on a repository, use the link it returns to allow access to that project. Finish any authorization-code step inside Antigravity. An Unauthorized status before completing this flow does not establish a transport failure.
 
 See [Antigravity's MCP documentation](https://antigravity.google/docs/mcp?tab=ide). Its remote Streamable HTTP and dynamic client registration match the supported Traceyard flow. Successful integration tests do not prove that a particular installed Antigravity version has connected.
 
@@ -16,7 +16,7 @@ See [Antigravity's MCP documentation](https://antigravity.google/docs/mcp?tab=id
 
 The authorization document uses `Referrer-Policy: same-origin`: a native form under `no-referrer` otherwise submits `Origin: null`, which the cross-origin guard correctly rejects. Other responses, including the callback redirect, retain `no-referrer`. The consent document permits its validated, registered callback origin in CSP `form-action`, because Chromium applies that directive to the form's redirect too. Global form destinations stay restricted to self, and null/untrusted Origins remain rejected.
 
-No project is selected silently. Approval requires an owned project; cancellation requires no selection and creates no grant. Authorization errors render a recovery page with an instruction to restart authentication in the coding client. Browser acceptance exercises actual native form submission, explicit selection, a different-origin callback, PKCE token exchange, official SDK tool discovery and a project-bound investigation. Separate integration checks reject null/foreign Origins and another owner's project.
+An agent can connect before you have a repository. Call `inspect` with `section: capabilities` to check the connection. If it needs project access, open the returned browser link, sign in if prompted, and select **Allow access** for a project you own. If the repo is missing, connect it in Repositories and return to the access page. You can approve several projects for the same connection. With multiple approvals, pass `projectId` on the tool call. An investigation can also use `expectedRepository` to match an approved project.
 
 ## Tools
 
@@ -31,7 +31,7 @@ Start with a question such as “Use Traceyard to investigate the failing Today 
 
 Results use durable investigation IDs. The `browserUrl` opens the same record. `outputChars` bounds the brief; `omitted` signals details available through `inspect`. Evidence ranges include `nextOffset`. Polling status returns a small result and a suggested interval, rather than repeating full artifacts.
 
-Default authorization permits investigation reads and supported execution. Real workflow recovery is a separate requested scope. Grants are project-bound, revocable, and use expiring access tokens and rotating refresh tokens. Browser sign-out does not silently revoke an intentionally persistent agent connection; revoke it under project agent connections.
+Default authorization permits investigation reads and supported execution. Real workflow recovery is a separate requested scope. Connections use expiring access tokens and rotating refresh tokens. Use **Manage agent access** to remove a project approval or disconnect the agent entirely. Existing project-bound connections keep their original permissions.
 
 ## Compatibility and evidence
 

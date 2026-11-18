@@ -21,7 +21,7 @@ async function account(id = 950) {
     projectId: (await getDefaultProjectId(env.DB, user.id))!,
   };
 }
-async function connect(scope = "investigations:read investigations:run") {
+async function connect(scope = "investigations:read investigations:run", accountOnly = false) {
   const a = await account(),
     verifier = "v".repeat(64),
     redirect = "https://agent.example/callback";
@@ -56,7 +56,7 @@ async function connect(scope = "investigations:read investigations:run") {
     headers: { cookie: a.cookie, "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       consent: consent!,
-      project: a.projectId,
+      ...(accountOnly ? {} : { project: a.projectId }),
       decision: "approve",
     }).toString(),
   });
@@ -104,6 +104,64 @@ function client(token: string) {
   return { c, transport };
 }
 describe("authenticated remote MCP", () => {
+  it("connects without granting projects and enforces explicit, revocable project access", async () => {
+    const a = await connect(undefined, true);
+    const other = await account(965);
+    const remote = client(a.token.access_token);
+    await remote.c.connect(remote.transport);
+    try {
+      const capabilities = await remote.c.callTool({
+        name: "inspect",
+        arguments: { section: "capabilities" },
+      });
+      expect(capabilities.structuredContent).toMatchObject({
+        status: "PROJECT_ACCESS_REQUIRED",
+        items: [],
+      });
+      const url = new URL((capabilities.structuredContent as { browserUrl: string }).browserUrl);
+      const grant = url.searchParams.get("connection")!;
+      const investigate = (projectId?: string) =>
+        remote.c.callTool({
+          name: "investigate",
+          arguments: { projectId, question: "Inspect authorized project source" },
+        });
+      const manage = (decision: string, project: string, cookie = a.cookie, origin = ORIGIN) =>
+        apiFetch("/oauth/connections", {
+          method: "POST",
+          redirect: "manual",
+          headers: { cookie, Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ decision, project, connection: grant }).toString(),
+        });
+      expect((await investigate(a.projectId)).isError).toBe(true);
+      expect((await manage("allow", a.projectId, a.cookie, "https://foreign.example")).status).toBe(
+        403,
+      );
+      await manage("allow", other.projectId);
+      await manage("allow", other.projectId, other.cookie);
+      expect((await investigate(other.projectId)).isError).toBe(true);
+      expect((await manage("allow", a.projectId)).status).toBe(303);
+      expect((await investigate(a.projectId)).isError).not.toBe(true);
+      expect((await investigate(other.projectId)).isError).toBe(true);
+      const second = await apiFetch("/api/projects", {
+        method: "POST",
+        headers: { cookie: a.cookie, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Another approved project" }),
+      });
+      expect(second.status).toBe(201);
+      const project = ((await second.json()) as { data: { id: string } }).data;
+      await manage("allow", project.id);
+      expect((await investigate()).structuredContent).toMatchObject({
+        status: "PROJECT_SELECTION_REQUIRED",
+      });
+      expect((await investigate(project.id)).isError).not.toBe(true);
+      await manage("remove", a.projectId);
+      expect((await investigate(a.projectId)).isError).toBe(true);
+      expect((await investigate(project.id)).isError).not.toBe(true);
+    } finally {
+      await remote.c.close();
+    }
+  });
+
   it("keeps authenticated GET open while POST tools and reconnect remain usable", async () => {
     const a = await connect();
     const headers = {
@@ -186,7 +244,7 @@ describe("authenticated remote MCP", () => {
       "form-action 'self' https://antigravity.google;",
     );
     const html = await response.text();
-    expect(html).toContain('<option value="" disabled selected>Choose a project…</option>');
+    expect(html).not.toContain('name="project"');
     const consent = /name="consent" value="([^"]+)"/.exec(html)![1]!;
     const fields = new URLSearchParams({ consent, project: a.projectId, decision: "approve" });
     const post = (origin: string, body = fields) =>
@@ -204,8 +262,6 @@ describe("authenticated remote MCP", () => {
     }
     const wrongProject = new URLSearchParams(fields);
     wrongProject.set("project", other.projectId);
-    expect((await post(ORIGIN, wrongProject)).status).toBe(403);
-    wrongProject.set("project", "");
     expect((await post(ORIGIN, wrongProject)).status).toBe(403);
     const approved = await post(ORIGIN);
     expect(approved.status).toBe(302);

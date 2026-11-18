@@ -2,7 +2,7 @@
 
 Traceyard helps developers investigate existing code and verify repairs using focused tests and retained evidence. Coding agents connect through MCP; the browser opens the same investigation.
 
-Coding agents can use the authenticated remote MCP endpoint to create shared investigations, read bounded source/failure evidence and verify a candidate repair. Connect with browser authorization and project selection; no copied server key is required. See [MCP connection](docs/MCP.md) and the ordered [implementation checklist](docs/INVESTIGATION_BUILD_PLAN.md). Application execution still needs an available repository environment; GitHub source access alone does not instrument a deployed process.
+Coding agents can use the authenticated remote MCP endpoint to create shared investigations, read bounded source/failure evidence and verify a candidate repair. Connect in your browser, then allow access to a project when you first need it. No server key is required. See [MCP connection](docs/MCP.md) and the ordered [implementation checklist](docs/INVESTIGATION_BUILD_PLAN.md). Application execution still needs an available repository environment; GitHub source access alone does not instrument a deployed process.
 
 Create and publish a workflow, run it with JSON input, inspect each step and recover failed work. The browser, API, SDK and CLI use the same execution engine. Repository discovery and GitHub checks supply supporting source and test evidence; they are optional for running Traceyard workflows.
 
@@ -11,7 +11,7 @@ Create and publish a workflow, run it with JSON input, inspect each step and rec
 1. Open [Traceyard](https://traceyard.pilotsaviour229.workers.dev) and continue with GitHub.
 2. Connect a repository. In **Connections**, review and enable its GitHub Actions workflow if you want to run tests. Repository rules may require approval of that one-time change.
 3. Describe a problem in **Investigations** and choose an existing test, or inspect indexed source without running code.
-4. To work from your coding agent, follow its OAuth connection steps in **Connections**. No local Traceyard configuration file or pasted server key is required. Authorize the same repository project in the client.
+4. To work from your coding agent, follow its OAuth connection steps in **Connections**. No local Traceyard configuration file or pasted server key is required. When the agent needs a repository, open its access link and approve that project.
 5. Open the retained result to see its exact executed revision and failures. Verify the repair through your agent, or enter the pushed candidate commit in the app. The original failure and verification stay linked when reopened.
 
 Repository access, test execution and agent authorization are separate readiness states. An authorized agent can be closed or offline; the app does not label a saved authorization as a live connection. Execution currently supports focused Vitest tests in npm repositories. Other frameworks are not silently treated as supported.
