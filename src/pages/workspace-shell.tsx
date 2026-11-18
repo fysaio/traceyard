@@ -211,7 +211,8 @@ export function WorkspaceShell({
                 All projects
               </Link>
             </section>
-          ) : !project && !["/", "/projects"].includes(location.pathname) ? (
+          ) : !project &&
+            !["/", "/investigations", "/projects", "/connections"].includes(location.pathname) ? (
             <section className="first-project">
               <Icon name="folder-open" />
               <h1>Connect your first repository.</h1>
@@ -226,47 +227,33 @@ export function WorkspaceShell({
         </main>
         {menu === "tools" && (
           <Modal title="Workspace tools" close={() => setMenu(null)} className="tools-dialog">
-            <p className="hint">
-              Investigations handle repository tests. These tools support workflows and application
-              monitoring.
-            </p>
             <div className="tool-menu-grid">
               {[
                 [
                   "/workflows",
                   "Workflows",
                   "diagram-project",
-                  "Build and run a workflow, or start from a template.",
+                  "Build a workflow from scratch or from a template.",
                 ],
                 [
                   "/executions",
                   "Workflow runs",
                   "play",
-                  "Inspect workflow steps and recover interrupted work.",
+                  "See what ran and recover interrupted work.",
                 ],
-                [
-                  "/traces",
-                  "Runtime traces",
-                  "wave-square",
-                  "Inspect activity sent by a connected application.",
-                ],
+                ["/traces", "Runtime traces", "wave-square", "Follow activity in a connected app."],
                 [
                   "/approvals",
                   "Approvals",
                   "check-double",
-                  "Review workflow actions waiting for your decision.",
+                  "Review actions waiting for your decision.",
                 ],
-                [
-                  "/gateway",
-                  "Model gateway",
-                  "shuffle",
-                  "Configure model routing and provider credentials.",
-                ],
+                ["/gateway", "Model gateway", "shuffle", "Choose models and manage provider keys."],
                 [
                   "/laboratory",
                   "Workflow experiments",
                   "flask",
-                  "Compare workflow behavior under controlled scenarios.",
+                  "Compare how workflows handle different scenarios.",
                 ],
               ].map(([path, title, icon, description]) => (
                 <Link

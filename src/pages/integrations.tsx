@@ -1,5 +1,6 @@
 import { ProjectActivity } from "./project-overview";
 import { ProjectLink as Link } from "../components/project-link";
+import { Icon } from "../components/product-ui";
 import { useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -563,7 +564,7 @@ export function Approvals({ projectId: p }: { projectId: string }) {
           <section className="connected-panel">
             <h2>Nothing waiting for review</h2>
             <p>Add an Approval step in Studio to review its input before execution continues.</p>
-            <Link className="btn section" to="/">
+            <Link className="btn section" to="/workflows">
               Open workflows
             </Link>
           </section>
@@ -1042,8 +1043,13 @@ export function Experiments({ projectId: p }: { projectId: string }) {
           <h1>Workflow experiments</h1>
           <p>Run a repeatable check against a published workflow and inspect the evidence.</p>
         </div>
-        <button className="btn primary" onClick={() => setShow(!show)}>
-          Create experiment
+        <button
+          className={show ? "btn" : "btn primary"}
+          aria-expanded={show}
+          onClick={() => setShow(!show)}
+        >
+          {show ? "Hide experiment form" : "Create experiment"}
+          <Icon name={show ? "chevron-up" : "chevron-down"} />
         </button>
       </div>
       <Wait loading={q.isPending} error={q.error} />

@@ -35,9 +35,11 @@ export function RunLedger({ projectId }: { projectId: string }) {
           <button className="btn" disabled={runs.isFetching} onClick={() => void runs.refetch()}>
             <Icon name="arrows-rotate" /> Refresh
           </button>
-          <Link className="btn primary" to="/workflows">
-            <Icon name="play" /> Run a workflow
-          </Link>
+          {(items.length > 0 || runs.isError) && (
+            <Link className="btn primary" to="/workflows">
+              <Icon name="play" /> Run a workflow
+            </Link>
+          )}
         </div>
       </div>
       <div className="content-toolbar">
@@ -115,9 +117,15 @@ export function RunLedger({ projectId }: { projectId: string }) {
               ? "Choose another status to see more executions."
               : "Create a workflow or choose a template. Its steps and recovery history will appear here. Tests run through your coding agent appear in Investigations."}
           </p>
-          <Link className="btn primary" to="/workflows">
-            Open workflows
-          </Link>
+          {status ? (
+            <button className="btn" onClick={() => setStatus("")}>
+              Show all statuses
+            </button>
+          ) : (
+            <Link className="btn primary" to="/workflows">
+              Open workflows
+            </Link>
+          )}
         </section>
       ) : null}
     </>
