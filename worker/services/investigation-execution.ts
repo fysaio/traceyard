@@ -4,8 +4,9 @@ import type {
   InvestigationReport,
 } from "../../shared/contracts/investigation-execution";
 import { redact } from "../../shared/contracts/traces";
-import { ApiError, conflict, notFound } from "../api/errors";
+import { ApiError, badRequest, conflict, notFound } from "../api/errors";
 import { dispatchRepositoryChecks } from "../repositories/checks";
+import { githubRequest } from "../repositories/github";
 import { getInvestigation, createInvestigation } from "./investigation-service";
 import { getRecording } from "./recording-service";
 import type { InvestigationRequest } from "../../shared/contracts/investigations";
@@ -16,6 +17,78 @@ export async function beginInvestigation(
   request: InvestigationRequest,
   fetcher: typeof fetch = fetch,
 ) {
+  if (request.commit) {
+    if (request.mode !== "execute" || request.target.kind !== "source") {
+      throw badRequest(
+        "COMMIT_SELECTION_UNSUPPORTED",
+        "Explicit commit selection is supported for source-targeted execute investigations.",
+      );
+    }
+    const repo = await env.DB.prepare(
+      "SELECT full_name,installation_id FROM project_repositories WHERE project_id=?",
+    )
+      .bind(projectId)
+      .first<{ full_name: string; installation_id: number | null }>();
+    if (!repo?.installation_id || !repo.full_name) {
+      throw badRequest(
+        "REPOSITORY_ACCESS_REQUIRED",
+        "Connect GitHub repository access to execute an explicit commit revision.",
+      );
+    }
+    let validatedCommit: string;
+    try {
+      const commitData = await githubRequest<{ sha: string }>(
+        env,
+        repo.installation_id,
+        `/repos/${repo.full_name}/commits/${encodeURIComponent(request.commit)}`,
+        {},
+        fetcher,
+      );
+      if (!commitData?.sha || commitData.sha.toLowerCase() !== request.commit.toLowerCase()) {
+        throw notFound("The selected commit was not found in the connected repository.");
+      }
+      validatedCommit = commitData.sha;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        const ghStatus = (error.details as { githubStatus?: number } | undefined)?.githubStatus;
+        if (ghStatus === 404 || error.status === 404) {
+          throw notFound("The selected commit was not found in the connected repository.");
+        }
+        if (ghStatus !== undefined) {
+          throw badRequest(
+            "COMMIT_INACCESSIBLE",
+            "The selected commit is inaccessible through the connected repository installation.",
+            { githubStatus: ghStatus },
+          );
+        }
+      }
+      throw error;
+    }
+    const inv = await createInvestigation(
+      env.DB,
+      userId,
+      projectId,
+      request,
+      {
+        repository: repo.full_name,
+        commit: validatedCommit,
+        filesScanned: 0,
+        warnings: ["The selected revision will be indexed by its executor."],
+      },
+    );
+    return startInvestigationExecution(
+      env,
+      userId,
+      projectId,
+      inv.id,
+      {
+        initial: true,
+        testPath: request.testPath,
+        captureInteractions: request.captureInteractions,
+      },
+      fetcher,
+    );
+  }
   const recording =
     request.mode === "replay" && request.recordingId
       ? await getRecording(env.DB, userId, projectId, request.recordingId)
