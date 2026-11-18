@@ -83,12 +83,22 @@ test("native consent form preserves Origin, selects one project and completes MC
   expect(tokenResponse.status()).toBe(200);
   const token = await tokenResponse.json();
   const sdk = new Client({ name: "browser-acceptance", version: "1" });
+  let resolveGet!: (status: number) => void;
+  const backgroundGet = new Promise<number>((resolve) => {
+    resolveGet = resolve;
+  });
   try {
     await sdk.connect(
       new StreamableHTTPClientTransport(new URL(baseURL + "/mcp"), {
         requestInit: { headers: { Authorization: "Bearer " + token.access_token } },
+        fetch: async (input, init) => {
+          const response = await fetch(input, init);
+          if (init?.method === "GET") resolveGet(response.status);
+          return response;
+        },
       }),
     );
+    expect(await backgroundGet).toBe(405);
     expect((await sdk.listTools()).tools.map((tool) => tool.name)).toEqual([
       "investigate",
       "inspect",
