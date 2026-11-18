@@ -2,6 +2,8 @@ import { it, expect } from "vitest";
 import { env } from "cloudflare:workers";
 it("uses test-only service settings without operator credentials, runner pins or dotenv variables", () => {
   const settings = env as unknown as Record<string, unknown>;
+  expect(settings.APP_VERSION).toBe("0.1.0");
+  expect(settings.SANDBOX_DAILY_RUN_LIMIT).toBe("100");
   expect(settings.PUBLIC_APP_ORIGIN).toBe("https://traceyard.test");
   expect(settings.GITHUB_CLIENT_ID).toBe("traceyard-test-client");
   for (const name of [

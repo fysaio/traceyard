@@ -31,6 +31,15 @@ export default defineConfig(async () => {
               remoteBindings: false,
               miniflare: {
                 bindings: {
+                  // Explicit bindings also override operator process environment variables.
+                  APP_VERSION: "0.1.0",
+                  SOURCE_SCAN_FILE_LIMIT: "16",
+                  SOURCE_SCAN_FILE_BYTES: "16000",
+                  SANDBOX_DAILY_RUN_LIMIT: "100",
+                  SANDBOX_SESSION_HOURLY_LIMIT: "6",
+                  SANDBOX_SESSION_DAILY_LIMIT: "20",
+                  SANDBOX_GLOBAL_CONCURRENCY_LIMIT: "8",
+                  RUN_RETENTION_DAYS: "30",
                   TEST_MODE: "true",
                   INTEGRATION_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
                   OUTBOUND_ALLOWED_HOSTS: "hooks.example.test",
