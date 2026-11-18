@@ -6,6 +6,7 @@ import { startInvestigationExecution } from "./investigation-execution";
 import { githubRequest } from "../repositories/github";
 import { badRequest, conflict, notFound } from "../api/errors";
 import { randomId, sha256Hex } from "../lib/crypto";
+import { getRecording } from "./recording-service";
 import { nowIso } from "../lib/time";
 const testFile = (p: string) =>
   /\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)(?:__tests__|tests?|fixtures?)\//.test(p);
@@ -179,12 +180,23 @@ export async function createVerification(
   )
     .bind(projectId, key)
     .first<{ id: string }>();
+  const capture = await env.DB.prepare(
+    "SELECT id FROM investigation_recordings WHERE investigation_id=? AND project_id=? AND request_id=? AND eligible=1 LIMIT 1",
+  )
+    .bind(baselineId, projectId, report.requestId)
+    .first<{ id: string }>();
+  const recording = capture ? await getRecording(env.DB, userId, projectId, capture.id) : null;
   await startInvestigationExecution(
     env,
     userId,
     projectId,
     candidate.id,
-    { initial: true, testPath: report.command.testPath, changedFiles: changed.slice(0, 100) },
+    {
+      initial: true,
+      testPath: report.command.testPath,
+      changedFiles: changed.slice(0, 100),
+      ...(recording ? { replayRecording: { id: recording.id, manifest: recording.manifest } } : {}),
+    },
     fetcher,
   );
   return getVerification(env.DB, userId, projectId, retained!.id);

@@ -10,7 +10,12 @@ export const investigationTargetSchema = z.discriminatedUnion("kind", [
 ]);
 export const investigationRequestSchema = z
   .object({
-    mode: z.enum(["analyze", "execute"]).default("analyze"),
+    mode: z.enum(["analyze", "execute", "replay"]).default("analyze"),
+    captureInteractions: z.boolean().default(false),
+    recordingId: z
+      .string()
+      .regex(/^rcd_[a-f0-9]{32}$/)
+      .optional(),
     testPath: repositoryPathSchema.optional(),
     question: z.string().trim().min(3).max(1000),
     target: investigationTargetSchema.default({ kind: "source" }),
@@ -61,6 +66,7 @@ export interface Investigation {
     checkId: string | null;
     createdAt: string;
   }[];
+  recordings?: { id: string; eligible: boolean; createdAt: string }[];
   createdAt: string;
   updatedAt: string;
   browserPath: string;

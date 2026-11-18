@@ -9,13 +9,13 @@ import {
 } from "../../shared/contracts/investigations";
 import { repositoryPathSchema } from "../../shared/contracts/repository-index";
 import {
-  createInvestigation,
   getInvestigation,
   listInvestigations,
   inspectEvidence,
 } from "../services/investigation-service";
-import { startInvestigationExecution } from "../services/investigation-execution";
+import { beginInvestigation } from "../services/investigation-execution";
 import { createVerification, getVerification } from "../services/verification-service";
+import { getRecording } from "../services/recording-service";
 import { retryRun } from "../services/run-service";
 import { sha256Hex } from "../lib/crypto";
 import { nowIso } from "../lib/time";
@@ -54,7 +54,7 @@ function result(value: Record<string, unknown>, limit = 4000) {
       packet.omitted = true;
     }
   }
-  for (const key of ["items", "evidence", "attempts", "limitations"]) {
+  for (const key of ["items", "evidence", "attempts", "recordings", "limitations"]) {
     const array = packet[key];
     if (Array.isArray(array))
       while (array.length > 1 && size() > limit) {
@@ -63,6 +63,7 @@ function result(value: Record<string, unknown>, limit = 4000) {
       }
   }
   for (const key of [
+    "recordings",
     "snapshot",
     "limitations",
     "attempts",
@@ -102,6 +103,7 @@ function brief(inv: Awaited<ReturnType<typeof getInvestigation>>, origin: string
     snapshot: inv.snapshot,
     evidence: inv.evidence,
     attempts: inv.attempts,
+    recordings: inv.recordings,
     browserUrl: origin + inv.browserPath,
   };
 }
@@ -185,7 +187,9 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
         "Inspect stored source or failure evidence; optionally execute a supported existing test. Returns a durable investigation ID and bounded finding.",
       inputSchema: {
         question: z.string().min(3).max(1000),
-        mode: z.enum(["analyze", "execute"]).default("analyze"),
+        mode: z.enum(["analyze", "execute", "replay"]).default("analyze"),
+        captureInteractions: z.boolean().default(false),
+        recordingId: z.string().max(100).optional(),
         target: investigationTargetSchema.optional(),
         testPath: repositoryPathSchema.optional(),
         requestKey: z
@@ -202,19 +206,14 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
       },
     },
     async (args) =>
-      guard(args.mode === "execute" ? "investigations:run" : "investigations:read", async () => {
-        const body = investigationRequestSchema.parse(args),
-          inv = await createInvestigation(c.env.DB, principal.userId, principal.projectId, body);
-        const current =
-          args.mode === "execute"
-            ? await startInvestigationExecution(
-                c.env,
-                principal.userId,
-                principal.projectId,
-                inv.id,
-                { testPath: args.testPath, initial: true },
-              )
-            : inv;
+      guard(args.mode !== "analyze" ? "investigations:run" : "investigations:read", async () => {
+        const body = investigationRequestSchema.parse(args);
+        const current = await beginInvestigation(
+          c.env,
+          principal.userId,
+          principal.projectId,
+          body,
+        );
         return result(brief(current, origin), args.outputChars);
       })(),
   );
@@ -232,10 +231,12 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
             "evidence",
             "source",
             "verification",
+            "recording",
             "recent",
             "capabilities",
           ])
           .default("finding"),
+        recordingId: z.string().max(100).optional(),
         evidenceId: z.string().max(100).optional(),
         verificationId: z.string().max(100).optional(),
         path: repositoryPathSchema.optional(),
@@ -258,7 +259,7 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
               projectId: principal.projectId,
               status: "AVAILABLE",
               summary:
-                "Source/check investigation and focused Vitest execution are supported. Replay and real recovery require explicit runtime capabilities.",
+                "Source/check investigation and focused Vitest execution are supported. Eligible JSON fetch recordings support network-disabled replay on Linux Docker executors. Other runtime recovery requires explicit capabilities.",
               scopes: principal.scopes,
               browserUrl: origin + "/connections?project=" + principal.projectId,
             },
@@ -276,6 +277,28 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
               })),
               summary: `${list.length} recent investigation(s).`,
               browserUrl: origin + "/investigations?project=" + principal.projectId,
+            },
+            args.outputChars,
+          );
+        }
+        if (args.section === "recording") {
+          if (!args.recordingId)
+            throw badRequest("RECORDING_REQUIRED", "Provide the recording ID.");
+          const recording = await getRecording(
+            c.env.DB,
+            principal.userId,
+            principal.projectId,
+            args.recordingId,
+          );
+          const raw = JSON.stringify(recording.manifest),
+            length = Math.max(100, Math.floor(args.outputChars / 2) - 500);
+          return result(
+            {
+              status: recording.eligible ? "ELIGIBLE" : "UNAVAILABLE",
+              recordingId: recording.id,
+              summary: raw.slice(args.offset, args.offset + length),
+              offset: args.offset,
+              nextOffset: args.offset + length < raw.length ? args.offset + length : null,
             },
             args.outputChars,
           );
@@ -487,7 +510,8 @@ export async function handleMcp(c: Context<AppEnv>) {
       ? "runs:recover"
       : wire?.method === "tools/call" &&
           (wire.params?.name === "verify" ||
-            (wire.params?.name === "investigate" && wire.params.arguments?.mode === "execute"))
+            (wire.params?.name === "investigate" &&
+              ["execute", "replay"].includes(wire.params.arguments?.mode ?? "analyze")))
         ? "investigations:run"
         : "investigations:read";
   if (!principal.scopes.includes(scope)) {

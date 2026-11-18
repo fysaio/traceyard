@@ -18,6 +18,7 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM investigation_recordings"),
     env.DB.prepare("DELETE FROM mcp_request_limits"),
     env.DB.prepare("DELETE FROM mcp_access_tokens"),
     env.DB.prepare("DELETE FROM mcp_refresh_tokens"),

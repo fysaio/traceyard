@@ -24,6 +24,8 @@ jobs:
       - run: npm ci
       - name: Unit and Worker integration tests
         run: npm test
+      - name: Isolated recorded replay acceptance
+        run: node scripts/verify-isolated-replay.mjs
       - name: Production build and TypeScript
         run: npm run build
       - name: Managed deployment configuration build

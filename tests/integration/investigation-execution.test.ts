@@ -10,6 +10,9 @@ import {
 } from "../../worker/services/investigation-execution";
 import { investigationRequestSchema } from "../../shared/contracts/investigations";
 import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
+import { saveRecording, getRecording } from "../../worker/services/recording-service";
+import { interactionSignature } from "../../agent/interaction-format.mjs";
+import type { RecordingManifest } from "../../shared/contracts/recordings";
 import { ORIGIN } from "./helpers";
 async function setup() {
   const user = await getOrCreateGitHubIdentity(env.DB, {
@@ -118,5 +121,90 @@ describe("investigation execution lifecycle", () => {
     expect((await getInvestigation(env.DB, a.userId, a.projectId, a.inv.id)).status).toBe(
       "CANCELLED",
     );
+  });
+});
+
+describe("interaction recordings", () => {
+  it("binds captures to the authorized runner and keeps manifests immutable and scoped", async () => {
+    const a = await setup(),
+      report = await seed(a);
+    const item = {
+      method: "GET",
+      url: "https://api.example/value",
+      requestBody: null,
+      response: { status: 200, body: { value: 42 } },
+      signature: await interactionSignature("GET", "https://api.example/value", null),
+    };
+    const manifest: RecordingManifest = {
+      schemaVersion: 1,
+      kind: "json-fetch",
+      sourceCommit: report.commit,
+      testPath: report.command.testPath!,
+      interactions: [item],
+      environment: [],
+      omissions: [],
+      eligible: true,
+    };
+    await expect(
+      saveRecording(env.DB, a.projectId, a.inv.id, report.requestId, report.runId, manifest),
+    ).rejects.toThrow("authorize interaction capture");
+    await env.DB.prepare("UPDATE investigation_attempts SET plan_json=? WHERE request_id=?")
+      .bind(
+        JSON.stringify({
+          commit: report.commit,
+          testPath: manifest.testPath,
+          captureInteractions: true,
+        }),
+        report.requestId,
+      )
+      .run();
+    await expect(
+      saveRecording(env.DB, a.projectId, a.inv.id, report.requestId, "another-runner", manifest),
+    ).rejects.toThrow("Authorized capture");
+    const saved = await saveRecording(
+      env.DB,
+      a.projectId,
+      a.inv.id,
+      report.requestId,
+      report.runId,
+      manifest,
+    );
+    expect((await getRecording(env.DB, a.userId, a.projectId, saved.id)).manifest).toEqual(
+      manifest,
+    );
+    await expect(getRecording(env.DB, "another-user", a.projectId, saved.id)).rejects.toThrow(
+      "not found",
+    );
+    await expect(
+      saveRecording(env.DB, a.projectId, a.inv.id, report.requestId, report.runId, {
+        ...manifest,
+        environment: [{ name: "EXAMPLE_API_KEY", kind: "credential" }],
+      }),
+    ).rejects.toThrow("cannot be replaced");
+    await expect(
+      saveRecording(env.DB, a.projectId, a.inv.id, report.requestId, report.runId, {
+        ...manifest,
+        sourceCommit: "d".repeat(40),
+      }),
+    ).rejects.toThrow("revision");
+  });
+  it("rejects a successful replay result without isolated recording proof", async () => {
+    const a = await setup(),
+      report = await seed(a);
+    await env.DB.prepare("UPDATE investigation_attempts SET plan_json=? WHERE request_id=?")
+      .bind(
+        JSON.stringify({ commit: report.commit, replayRecording: { id: "rcd_required" } }),
+        report.requestId,
+      )
+      .run();
+    await expect(
+      recordInvestigationReport(env.DB, a.projectId, a.inv.id, {
+        ...report,
+        status: "SUCCEEDED",
+        counts: { passed: 1, failed: 0, skipped: 0 },
+        failures: [],
+        exitCode: 0,
+      }),
+    ).rejects.toThrow("isolated replay evidence");
   });
 });
