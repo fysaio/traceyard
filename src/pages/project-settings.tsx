@@ -245,9 +245,8 @@ export function ConnectApplication() {
     code = connectionExample(origin, name, transport);
   return (
     <>
-      <Link className="back" to="/">
-        {" "}
-        <Icon name="arrow-left" /> Workflows
+      <Link className="back" to="/traces">
+        <Icon name="arrow-left" /> Runtime traces
       </Link>
       <div className="page-head">
         <div>
@@ -369,7 +368,7 @@ export function ConnectApplication() {
                   <Link className="btn primary" to="/traces">
                     Open traces <Icon name="arrow-right" />
                   </Link>
-                  <Link className="btn" to="/">
+                  <Link className="btn" to="/workflows">
                     View workflows
                   </Link>
                 </div>

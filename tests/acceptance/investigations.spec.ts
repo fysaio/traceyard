@@ -377,6 +377,12 @@ test("a regular local user can open every workspace destination on desktop and m
       await expect(page.getByRole("main")).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.getByRole("status")).toHaveCount(0);
+      if (route === "approvals") {
+        await expect(page.getByRole("link", { name: "Open workflows" })).toHaveAttribute(
+          "href",
+          /^\/workflows\b/,
+        );
+      }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
         `${route} at ${width}px`,
