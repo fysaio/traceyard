@@ -35,6 +35,7 @@ it("fingerprints JSON structurally and rejects incomplete or ambiguous recording
     interactions: [item],
   };
   expect(eligibleRecording(base)).toBe(true);
+  expect(eligibleRecording({ ...base, sourceCommit: null })).toBe(false);
   expect(eligibleRecording({ ...base, omissions: ["stream omitted"] })).toBe(false);
   expect(
     eligibleRecording({

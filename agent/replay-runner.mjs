@@ -97,7 +97,9 @@ export async function replayVitest(root, invocation, plan) {
                 ".ssh",
                 ".config",
                 ".wrangler",
-              ].includes(p) || p.startsWith(".env"),
+              ].includes(p) ||
+              p.startsWith(".env") ||
+              p.startsWith(".dev.vars"),
           )
         )
           return false;

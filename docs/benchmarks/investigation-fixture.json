@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-11-18T11:11:37.357Z",
+  "fixture": "12 independent Vitest files; one arithmetic defect; no external services",
+  "baseline": {
+    "testFiles": 12,
+    "tests": 12,
+    "evidenceBytes": 7638,
+    "durationMs": 1125
+  },
+  "focused": {
+    "testFiles": 1,
+    "tests": {
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0
+    },
+    "evidenceBytes": 1484,
+    "durationMs": 641
+  },
+  "repair": {
+    "status": "SUCCEEDED",
+    "testFiles": 1,
+    "tests": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "omittedRelatedTests": 0,
+    "durationMs": 546
+  },
+  "evidenceReductionPercent": 80.6,
+  "paidModelCallsByTraceyard": 0,
+  "providerCallsInFixture": 0,
+  "agentTokens": null,
+  "limitations": [
+    "A controlled fixture, not a production workload or general savings guarantee.",
+    "Local execution durations exclude hosted checkout and dependency installation.",
+    "Evidence bytes are not tokens. Coding-agent reasoning and provider billing were not measured.",
+    "Replay cost and isolation are tested separately in the Docker CI acceptance."
+  ]
+}

@@ -7,6 +7,7 @@ export default tseslint.config(
     ignores: [
       "dist",
       "node_modules",
+      "runner/package/agent",
       ".wrangler",
       "worker-configuration.d.ts",
       "playwright-report",
@@ -36,9 +37,15 @@ export default tseslint.config(
       ],
     },
   },
-  {files:["agent/**/*.cjs"],rules:{"@typescript-eslint/no-require-imports":"off"}},
+  { files: ["agent/**/*.cjs"], rules: { "@typescript-eslint/no-require-imports": "off" } },
   {
-    files: ["scripts/**/*.mjs", "agent/**/*.mjs", "agent/**/*.cjs", "*.config.js"],
+    files: [
+      "runner/**/*.mjs",
+      "scripts/**/*.mjs",
+      "agent/**/*.mjs",
+      "agent/**/*.cjs",
+      "*.config.js",
+    ],
     languageOptions: {
       globals: {
         console: "readonly",

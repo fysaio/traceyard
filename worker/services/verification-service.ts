@@ -48,9 +48,11 @@ export async function getVerification(
   else if (report?.status === "SUCCEEDED")
     verdict = changedTests.length
       ? "REVIEW_TEST_CHANGES"
-      : changedFiles.length
-        ? "PASSED"
-        : "INCONCLUSIVE";
+      : changedFiles.length >= 300
+        ? "INCONCLUSIVE"
+        : changedFiles.length
+          ? "PASSED"
+          : "INCONCLUSIVE";
   const limitations = JSON.parse(row.limitations_json) as string[];
   if (report?.coverage?.omittedTests)
     limitations.push(
@@ -72,7 +74,9 @@ export async function getVerification(
           : verdict === "FAILED"
             ? "The candidate still fails an executed check."
             : verdict === "INCONCLUSIVE"
-              ? "The test passed without a recorded file change; this does not establish a source repair."
+              ? changedFiles.length >= 300
+                ? "The selected checks pass, but the changed-file comparison may be incomplete. Review test integrity before treating this as a repaired behavior."
+                : "The test passed without a recorded file change; this does not establish a source repair."
               : candidate.finding.summary,
     metrics: {
       baselineDurationMs: baseline?.durationMs ?? null,
@@ -143,6 +147,8 @@ export async function createVerification(
       "Verification covers recorded checks, not every application behavior.",
       "Provider calls and coding-agent token consumption are unknown unless separately measured.",
     ];
+  if (changed.length > 100)
+    limitations.push("Regression discovery examines only the first 100 changed files.");
   if (changed.length >= 300) limitations.push("GitHub's changed-file response may be truncated.");
   const candidate = await createInvestigation(
     env.DB,

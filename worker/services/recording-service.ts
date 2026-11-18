@@ -3,6 +3,7 @@ import {
   eligibleRecording,
   interactionSignature,
   sensitive,
+  recordingUrl,
 } from "../../agent/interaction-format.mjs";
 import { getOwnedProject } from "../persistence/projects";
 import { sha256Hex } from "../lib/crypto";
@@ -57,7 +58,10 @@ export async function saveRecording(
       "The recording is oversized or contains credential-bearing data.",
     );
   for (const item of manifest.interactions)
-    if (item.signature !== (await interactionSignature(item.method, item.url, item.requestBody)))
+    if (
+      item.url !== recordingUrl(item.url) ||
+      item.signature !== (await interactionSignature(item.method, item.url, item.requestBody))
+    )
       throw badRequest("RECORDING_SIGNATURE_MISMATCH", "An interaction fingerprint is invalid.");
   if (manifest.eligible !== eligibleRecording(manifest))
     throw badRequest(

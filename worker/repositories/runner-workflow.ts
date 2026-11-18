@@ -1,5 +1,5 @@
 // Reviewed agent revision; customer CI does not execute a moving platform branch.
-export const DEFAULT_RUNNER_REF = "a23df5c114e7302e76418309206150983255a3c8";
+export { REVIEWED_RUNNER_REVISION as DEFAULT_RUNNER_REF } from "../../shared/repository/runner-version";
 export function runnerWorkflow(origin: string, runnerRef: string) {
   return `name: Traceyard
 run-name: Traceyard \${{ inputs.run_request }}
@@ -36,12 +36,14 @@ jobs:
         with:
           node-version: '22'
       - name: Install runner dependencies
-        run: npm ci --prefix .traceyard-runner --omit=dev --ignore-scripts --no-audit --no-fund
+        run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Prepare trusted runner
+        run: node .traceyard-runner/runner/prepare.mjs
       - name: Discover, build and test
         env:
           CI: 'true'
           TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
           TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
-        run: node .traceyard-runner/agent/cli.mjs run .
+        run: node .traceyard-runner/runner/package/agent/cli.mjs run .
 `;
 }

@@ -1,3 +1,4 @@
+import { maintainInvestigations } from "../../worker/services/investigation-maintenance";
 import { describe, it, expect } from "vitest";
 import { env } from "cloudflare:workers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
@@ -7,6 +8,7 @@ import {
   startInvestigationExecution,
   recordInvestigationReport,
   cancelInvestigation,
+  cancelInvestigationExecution,
 } from "../../worker/services/investigation-execution";
 import { investigationRequestSchema } from "../../shared/contracts/investigations";
 import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
@@ -206,5 +208,40 @@ describe("interaction recordings", () => {
         exitCode: 0,
       }),
     ).rejects.toThrow("isolated replay evidence");
+  });
+});
+
+describe("investigation maintenance", () => {
+  it("closes interrupted work without repeating it and expires retained artifacts", async () => {
+    const a = await setup();
+    await seed(a);
+    await env.DB.prepare("UPDATE investigations SET status='EXECUTING',updated_at=? WHERE id=?")
+      .bind(new Date(Date.now() - 16 * 60000).toISOString(), a.inv.id)
+      .run();
+    expect((await maintainInvestigations(env.DB)).stale).toBe(1);
+    expect(
+      (await getInvestigation(env.DB, a.userId, a.projectId, a.inv.id)).finding.summary,
+    ).toContain("did not deliver");
+    await env.DB.prepare("UPDATE investigations SET updated_at=? WHERE id=?")
+      .bind(new Date(Date.now() - 31 * 86400000).toISOString(), a.inv.id)
+      .run();
+    await maintainInvestigations(env.DB);
+    await expect(getInvestigation(env.DB, a.userId, a.projectId, a.inv.id)).rejects.toThrow(
+      "not found",
+    );
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS n FROM investigation_attempts").first<{
+          n: number;
+        }>()
+      )?.n,
+    ).toBe(0);
+  });
+  it("preserves logical cancellation when no external check is attached", async () => {
+    const a = await setup();
+    await seed(a);
+    const stopped = await cancelInvestigationExecution(env, a.userId, a.projectId, a.inv.id);
+    expect(stopped.status).toBe("CANCELLED");
+    expect(stopped.finding.summary).toContain("cancelled");
   });
 });
