@@ -131,7 +131,7 @@ export async function replayVitest(root, invocation, plan) {
       "--cpus=1",
       "--memory=2g",
       "--tmpfs",
-      "/tmp:rw,nosuid,size=1536m",
+      "/tmp:rw,exec,nosuid,nodev,size=1536m",
       "--mount",
       `type=bind,source=${snapshot},target=/source,readonly`,
       "--mount",
