@@ -9,6 +9,7 @@ import {
   graphDraftSchema,
   graphSchema,
   graphLayers,
+  graphStepPolicy,
   INITIAL_GRAPH,
 } from "../../../shared/workflow/graph";
 import { randomId, sha256Hex } from "../../lib/crypto";
@@ -210,8 +211,7 @@ studioRoutes.post("/projects/:projectId/studio/:id/publish", async (c) => {
       name: n.name,
       ordinal: i + 1,
       description: n.type,
-      timeoutMs: n.type === "model" ? 120000 : n.type === "http" ? 30000 : 10000,
-      retry: { maxAttempts: 1, baseDelayMs: 0, backoff: "fixed", maxDelayMs: 0 },
+      ...graphStepPolicy(n),
     }));
   const version = w.current_version + 1,
     checksum = await sha256Hex(draft.graph_json),

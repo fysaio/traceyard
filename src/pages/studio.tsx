@@ -635,6 +635,47 @@ function Editor({
                   {httpConnections.error && <p role="alert">{httpConnections.error.message}</p>}
                 </>
               )}
+              {["http", "model"].includes(node.type) && (
+                <fieldset>
+                  <legend>Failure handling</legend>
+                  <label>
+                    Maximum attempts
+                    <select
+                      value={node.config.retry?.maxAttempts ?? 1}
+                      onChange={(e) =>
+                        update((g) => ({
+                          ...g,
+                          nodes: g.nodes.map((n) =>
+                            n.id === node.id
+                              ? {
+                                  ...n,
+                                  config: {
+                                    ...n.config,
+                                    retry: {
+                                      maxAttempts: Number(e.target.value),
+                                      baseDelayMs: 1000,
+                                      backoff: "exponential",
+                                    },
+                                  },
+                                }
+                              : n,
+                          ),
+                        }))
+                      }
+                    >
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <option key={n} value={n}>
+                          {n === 1 ? "1 — no automatic retry" : `${n} attempts`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="hint">
+                    Only temporary failures retry, with increasing delays. Completed steps remain
+                    retained for manual recovery.
+                  </p>
+                </fieldset>
+              )}
               {node.type === "parse" && (
                 <label>
                   Required fields (comma separated)

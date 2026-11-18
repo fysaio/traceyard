@@ -22,6 +22,7 @@ import {
 } from "./pages/integrations";
 import { Compare } from "./pages/compare";
 import { Studio } from "./pages/studio";
+import { RunLedger } from "./pages/run-ledger";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -140,8 +141,11 @@ function Welcome({ session }: { session: AuthSession }) {
         <div className="entry-mark">
           <Icon name="diagram-project" />
         </div>
-        <h1>Know what your application does.</h1>
-        <p>Connect your code. Explore its operations and investigate real runs.</p>
+        <h1>Execute workflows. Recover when they break.</h1>
+        <p>
+          An open-source platform for executing, observing, debugging and recovering workflows and
+          AI agents.
+        </p>
         <div className="entry-actions">
           {session.githubSignInAvailable ? (
             <a className="btn primary" href="/api/auth/github/start">
@@ -168,7 +172,15 @@ function Workspace({ session }: { session: AuthSession }) {
     <WorkspaceShell session={session}>
       {(projectId) => (
         <Routes>
-          <Route path="/" element={<Navigate to="/projects" replace />} />
+          <Route
+            path="/"
+            element={
+              <Navigate
+                to={"/workflows" + (projectId ? "?project=" + encodeURIComponent(projectId) : "")}
+                replace
+              />
+            }
+          />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:selectedProject" element={<ProjectPage key={projectId} />} />
           <Route
@@ -192,9 +204,12 @@ function Workspace({ session }: { session: AuthSession }) {
             path="/builder"
             element={<WorkflowLibrary key={projectId} projectId={projectId} />}
           />
-          <Route path="/workflows" element={<Navigate to="/" replace />} />
+          <Route
+            path="/workflows"
+            element={<WorkflowLibrary key={projectId} projectId={projectId} />}
+          />
           <Route path="/workflow/:id" element={<WorkflowDetail projectId={projectId} />} />
-          <Route path="/executions" element={<Navigate to={"/projects/" + projectId} replace />} />
+          <Route path="/executions" element={<RunLedger key={projectId} projectId={projectId} />} />
           <Route path="/executions/:id" element={<Execution />} />
           <Route path="/analytics" element={<Navigate to={"/projects/" + projectId} replace />} />
           <Route
@@ -239,12 +254,14 @@ export function Launch({
   projectId,
   close,
   initialInput,
+  parentRunId,
   fault = "success",
 }: {
   workflow: WorkflowSummary;
   projectId?: string;
   close: () => void;
   initialInput?: unknown;
+  parentRunId?: string;
   fault?: FailureScenario;
 }) {
   const navigate = useNavigate(),
@@ -280,6 +297,7 @@ export function Launch({
         {
           workflowId: workflow.id,
           ...(projectId ? { projectId } : {}),
+          ...(parentRunId ? { parentRunId } : {}),
           version: workflow.version,
           input: inputValue(),
           scenario: fault,
@@ -288,9 +306,7 @@ export function Launch({
       ),
     onSuccess: (result) => {
       void cache.invalidateQueries({ queryKey: ["runs"] });
-      navigate(
-        `/executions/${result.result.run.id}${projectId ? "?project=" + projectId : ""}`,
-      );
+      navigate(`/executions/${result.result.run.id}${projectId ? "?project=" + projectId : ""}`);
       close();
     },
   });
@@ -354,6 +370,12 @@ export function Launch({
         </button>
       </div>
       <form onSubmit={submit}>
+        {parentRunId && (
+          <p className="hint">
+            This starts a linked execution with edited input. All steps execute again; completed
+            external actions may repeat.
+          </p>
+        )}
         {workflow.graph ? (
           <div className="field">
             <label htmlFor="graph-input">JSON input</label>
@@ -452,8 +474,17 @@ function Execution() {
     refetchInterval: (q) => (q.state.data && terminal(q.state.data.status) ? false : 1500),
   });
   const [tab, setTab] = useState("summary"),
+    [editWorkflow, setEditWorkflow] = useState<WorkflowSummary | null>(null),
     [step, setStep] = useState<string | null>(null),
     [walk, setWalk] = useState(false);
+  const prepareEdit = useMutation({
+    mutationFn: () => {
+      const current = run.data;
+      if (!current) throw Error("Load the execution first.");
+      return api.workflow(current.workflow.id, current.projectId, current.workflow.version);
+    },
+    onSuccess: setEditWorkflow,
+  });
   const events = useQuery({
     queryKey: ["events", id],
     queryFn: () => readAllEvents(id),
@@ -468,11 +499,15 @@ function Execution() {
     },
   });
   const retry = useMutation({
-    mutationFn: () => api.retry(id),
+    mutationFn: (mode: "restart" | "resume") => api.retry(id, mode),
     onSuccess: (result) => {
       setStep(null);
       setTab("summary");
-      navigate(`/executions/${result.run.id}`);
+      void cache.invalidateQueries({ queryKey: ["runs"] });
+      navigate(`/executions/${result.run.id}${window.location.search}`);
+    },
+    onError: () => {
+      void cache.invalidateQueries({ queryKey: ["run", id] });
     },
   });
   const exportTrace = useMutation({ mutationFn: () => readAllEvents(id) });
@@ -497,8 +532,8 @@ function Execution() {
   };
   return (
     <>
-      <Link className="back" to="/">
-        ← Project
+      <Link className="back" to="/executions">
+        ← Executions
       </Link>
       <Heading
         title={r.workflow.name}
@@ -513,13 +548,43 @@ function Execution() {
                 Cancel execution
               </button>
             )}
-            {r.status === "FAILED" && (
+            {r.status === "FAILED" && !r.retryRunId && (
+              <>
+                <button
+                  className="btn primary"
+                  disabled={retry.isPending}
+                  onClick={() => retry.mutate("resume")}
+                >
+                  Resume failed work
+                </button>
+                <button
+                  className="btn"
+                  disabled={retry.isPending}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Restart every step? Completed HTTP calls and model requests may run again. Resume reuses completed steps instead.",
+                      )
+                    )
+                      retry.mutate("restart");
+                  }}
+                >
+                  Restart from beginning
+                </button>
+              </>
+            )}
+            {r.retryRunId && (
+              <Link className="btn primary" to={"/executions/" + r.retryRunId}>
+                Open recovery execution
+              </Link>
+            )}
+            {terminal(r.status) && (
               <button
-                className="btn primary"
-                disabled={retry.isPending}
-                onClick={() => retry.mutate()}
+                className="btn"
+                disabled={prepareEdit.isPending}
+                onClick={() => prepareEdit.mutate()}
               >
-                Retry execution
+                Edit input and run
               </button>
             )}
             <button
@@ -549,9 +614,51 @@ function Execution() {
           Original execution
         </Link>
       )}
+      {r.recoveryMode === "resume" && (
+        <p className="hint">
+          Resumed with {r.steps.filter((s) => s.reusedFromRunId).length} completed steps reused. The
+          original input and workflow version are retained.
+        </p>
+      )}
       {r.error && <Notice error={new Error(r.error.message)} />}
+      {r.error?.stepKey && (
+        <section className="connected-panel section">
+          <h2>
+            Failed at {r.steps.find((s) => s.key === r.error?.stepKey)?.name ?? r.error.stepKey}
+          </h2>
+          <p className="hint">
+            {r.error.code} · {label(r.error.class)}
+            {r.error.attempt ? ` · attempt ${r.error.attempt}` : ""}
+          </p>
+          <button
+            className="btn"
+            onClick={() => {
+              setTab("trace");
+              setStep(r.steps.find((s) => s.key === r.error?.stepKey)?.id ?? null);
+            }}
+          >
+            Inspect failed step
+          </button>
+        </section>
+      )}
+      {r.status === "FAILED" && (
+        <p className="hint">
+          Resume reuses completed outputs and retries unfinished steps. An external service must
+          honor idempotency keys to prevent duplicate effects after an uncertain request.
+        </p>
+      )}
       {cancel.isError && <Notice error={cancel.error} />}
       {retry.isError && <Notice error={retry.error} />}
+      {prepareEdit.isError && <Notice error={prepareEdit.error} />}
+      {editWorkflow && (
+        <Launch
+          workflow={editWorkflow}
+          projectId={r.projectId}
+          parentRunId={r.id}
+          initialInput={r.input}
+          close={() => setEditWorkflow(null)}
+        />
+      )}
       {exportTrace.isError && <Notice error={exportTrace.error} />}
       <div className="product-tabs" role="tablist">
         {["summary", "trace", "events"].map((t) => (
@@ -663,7 +770,9 @@ function Execution() {
                   <div>
                     <strong>{s.name}</strong>
                     <span>
-                      {duration(s.durationMs)} · {s.attemptCount} attempts
+                      {s.reusedFromRunId
+                        ? "Reused completed output"
+                        : `${duration(s.durationMs)} · ${s.attemptCount} attempts`}
                     </span>
                   </div>
                   <Status value={s.status} />
@@ -683,6 +792,15 @@ function Execution() {
                   </button>
                 </div>
                 <Status value={selected.status} />
+                {selected.reusedFromRunId && (
+                  <p>
+                    Output reused from{" "}
+                    <Link className="text-link" to={"/executions/" + selected.reusedFromRunId}>
+                      the previous execution
+                    </Link>
+                    . This step did not execute again.
+                  </p>
+                )}
                 {selected.error && <Notice error={new Error(selected.error.message)} />}
                 <details className="disclosure" open>
                   <summary>Input</summary>
@@ -751,6 +869,3 @@ function Settings({ session }: { session: AuthSession }) {
     </>
   );
 }
-
-
-

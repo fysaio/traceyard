@@ -97,6 +97,7 @@ export function stepCountsFromRows(rows: StepStatusCountRow[]): StepCounts {
 
 export function toRunSummary(row: RunWithWorkflowRow, counts: StepCounts): RunSummary {
   return {
+    projectId: row.project_id,
     id: row.id,
     workflow: {
       id: row.workflow_id,
@@ -134,6 +135,7 @@ export function toAttemptView(row: AttemptRow): AttemptView {
 
 export function toStepView(row: StepRow, attempts: AttemptRow[]): StepView {
   return {
+    reusedFromRunId: row.reused_from_run_id ?? null,
     id: row.id,
     key: row.step_key,
     name: row.name,
@@ -182,6 +184,7 @@ export function toRunDetail(
 ): RunDetail {
   return {
     ...toRunSummary(row, counts),
+    recoveryMode: row.recovery_mode ?? null,
     input: parseJson(row.input_json),
     output: parseJson(row.output_json),
     correlationId: row.correlation_id,
