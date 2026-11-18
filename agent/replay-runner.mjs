@@ -82,6 +82,7 @@ export async function replayVitest(root, invocation, plan) {
     }
     await cp(root, snapshot, {
       recursive: true,
+      verbatimSymlinks: true,
       filter: async (source) => {
         const parts = relative(root, source).split("/");
         if (

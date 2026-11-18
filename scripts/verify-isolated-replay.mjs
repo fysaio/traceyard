@@ -79,5 +79,5 @@ try {
   );
 } finally {
   await new Promise((done) => server.close(done));
-  await rm(fixture, { recursive: true, force: true });
+  await rm(fixture, { recursive: true, verbatimSymlinks: true, force: true });
 }

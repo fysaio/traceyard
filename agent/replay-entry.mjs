@@ -11,6 +11,7 @@ try {
   mkdirSync("/tmp/workspace", { recursive: true });
   cpSync("/source", "/tmp/workspace", {
     recursive: true,
+    verbatimSymlinks: true,
     filter: (src) => {
       const path = relative("/source", src),
         parts = path.split("/");
