@@ -31,6 +31,7 @@ export function WorkspaceShell({
     [name, setName] = useState("");
   const projects = q.data ?? [],
     connectedProjects = projects.filter((p) => Boolean(p.repository)),
+    queryProject = new URLSearchParams(location.search).get("project"),
     pathProject = location.pathname.match(/^\/projects\/([^/]+)/)?.[1],
     project =
       (pathProject ? projects.find((p) => p.id === pathProject) : undefined) ??
@@ -46,6 +47,8 @@ export function WorkspaceShell({
     // Keep connection setup in context; detail IDs belong to the old project.
     const destination = [
       "/connect",
+      "/connections",
+      "/investigations",
       "/executions",
       "/traces",
       "/approvals",
@@ -53,7 +56,7 @@ export function WorkspaceShell({
       "/builder",
     ].includes(location.pathname)
       ? location.pathname
-      : "/workflows";
+      : "/investigations";
     navigate(destination + "?project=" + encodeURIComponent(id));
   }
   const create = useMutation({
@@ -67,7 +70,7 @@ export function WorkspaceShell({
       setSelection(p.id);
       setMenu(null);
       setName("");
-      navigate("/workflows?project=" + p.id);
+      navigate("/investigations?project=" + p.id);
     },
   });
   const logout = useMutation({
@@ -109,6 +112,8 @@ export function WorkspaceShell({
           </Link>
           <nav aria-label="Main navigation">
             {[
+              ["/investigations", "Investigations", "magnifying-glass"],
+              ["/connections", "Connections", "plug"],
               ["/workflows", "Workflows", "diagram-project"],
               ["/executions", "Executions", "play"],
               ["/traces", "Traces", "wave-square"],
@@ -179,7 +184,8 @@ export function WorkspaceShell({
                 Try again
               </button>
             </section>
-          ) : pathProject && !projects.some((p) => p.id === pathProject) ? (
+          ) : (pathProject && !projects.some((p) => p.id === pathProject)) ||
+            (queryProject && !projects.some((p) => p.id === queryProject)) ? (
             <section className="flow-empty">
               <h1>Project not found</h1>
               <p>This project is unavailable in your account.</p>
@@ -346,6 +352,8 @@ function Search({ projectId, close }: { projectId: string; close: () => void }) 
       enabled: !!projectId,
     });
   const pages = [
+    ["Investigations", "/investigations"],
+    ["Connections", "/connections"],
     ["Projects", "/settings/projects"],
     ["Connect application", "/connect"],
     ["Executions", "/executions"],

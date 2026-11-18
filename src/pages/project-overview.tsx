@@ -279,12 +279,14 @@ export function ConnectRepository({
   mode,
   close,
   connected,
+  destination,
 }: {
   projectId?: string;
   attachToProject?: boolean;
   mode: "github" | "local";
   close: () => void;
   connected: () => void;
+  destination?: "investigate";
 }) {
   const [local, setLocal] = useState(mode === "local");
   const { session } = useWorkspace(),
@@ -340,7 +342,11 @@ export function ConnectRepository({
         project,
       ]);
       savePreference("project:" + session.user!.id, project.id);
-      navigate("/projects/" + encodeURIComponent(project.id));
+      navigate(
+        destination === "investigate"
+          ? "/investigations?project=" + encodeURIComponent(project.id)
+          : "/projects/" + encodeURIComponent(project.id),
+      );
       connected();
     },
   });

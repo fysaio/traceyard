@@ -4,7 +4,7 @@ test("the signed-out screen reflows without horizontal scrolling", async ({ page
   for (const width of [390, 768, 1009, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(
-      page.getByRole("heading", { name: "Execute workflows. Recover when they break." }),
+      page.getByRole("heading", { name: "Find the failure. Verify the fix." }),
     ).toBeVisible();
     expect(
       await page.evaluate(

@@ -1007,7 +1007,7 @@ interface CISetupResult {
   workflow?: string;
   message?: string;
 }
-function EnableGitHubChecks({
+export function EnableGitHubChecks({
   projectId,
   close,
   onReady,
@@ -1071,7 +1071,7 @@ function EnableGitHubChecks({
             {setup.data?.state === "MERGING"
               ? "GitHub is processing the setup merge. Required checks and repository rules still apply."
               : setup.data?.state === "READY"
-                ? "Starting your check…"
+                ? "Execution is ready…"
                 : "Preparing your setup change…"}
           </p>
         ) : (
