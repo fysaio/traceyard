@@ -169,7 +169,12 @@ export function securityHeadersMiddleware(): MiddlewareHandler<AppEnv> {
       c.res.headers.get("content-type")?.startsWith("text/html");
     c.header("Referrer-Policy", consentPage ? "same-origin" : "no-referrer");
     c.header("Cross-Origin-Resource-Policy", "same-origin");
-    c.header("Cache-Control", "no-store");
+    c.header(
+      "Cache-Control",
+      c.res.headers.get("content-type")?.startsWith("text/event-stream")
+        ? "no-store, no-transform"
+        : "no-store",
+    );
     c.header(
       "Content-Security-Policy",
       contentSecurityPolicy(

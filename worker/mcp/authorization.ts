@@ -307,7 +307,7 @@ export async function exchangeAgentToken(db: D1Database, origin: string, form: U
   }
   throw new ApiError(400, "unsupported_grant_type", "Use authorization_code or refresh_token.");
 }
-export async function authenticateAgent(
+export async function getAgentPrincipal(
   db: D1Database,
   origin: string,
   request: Request,
@@ -330,19 +330,6 @@ export async function authenticateAgent(
       redirects_json: string;
     }>();
   if (!row) return null;
-  const minute = nowIso().slice(0, 16),
-    quota = await db
-      .prepare(
-        "INSERT INTO mcp_request_limits(grant_id,minute,count) VALUES(?,?,1) ON CONFLICT(grant_id,minute) DO UPDATE SET count=count+1 WHERE count<120 RETURNING count",
-      )
-      .bind(row.id, minute)
-      .first();
-  if (!quota)
-    throw tooManyRequests(
-      "AGENT_RATE_LIMIT",
-      "This connection reached its request budget. Inspect again after the current minute.",
-      60,
-    );
   return {
     grantId: row.id,
     userId: row.owner_user_id,
@@ -351,6 +338,28 @@ export async function authenticateAgent(
     scopes: JSON.parse(row.scopes_json),
     redirects: JSON.parse(row.redirects_json),
   };
+}
+export async function authenticateAgent(
+  db: D1Database,
+  origin: string,
+  request: Request,
+): Promise<AgentPrincipal | null> {
+  const principal = await getAgentPrincipal(db, origin, request);
+  if (!principal) return null;
+  const minute = nowIso().slice(0, 16),
+    quota = await db
+      .prepare(
+        "INSERT INTO mcp_request_limits(grant_id,minute,count) VALUES(?,?,1) ON CONFLICT(grant_id,minute) DO UPDATE SET count=count+1 WHERE count<120 RETURNING count",
+      )
+      .bind(principal.grantId, minute)
+      .first();
+  if (!quota)
+    throw tooManyRequests(
+      "AGENT_RATE_LIMIT",
+      "This connection reached its request budget. Inspect again after the current minute.",
+      60,
+    );
+  return principal;
 }
 export function requireAgentScope(principal: AgentPrincipal, scope: string) {
   if (!principal.scopes.includes(scope))
