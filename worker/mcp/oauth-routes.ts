@@ -22,6 +22,11 @@ const escape = (v: string) =>
   );
 const page = (title: string, body: string) =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Traceyard</title><link rel="stylesheet" href="/agent-connect.css"></head><body><main><a class="brand" href="/">Traceyard.</a><h1>${escape(title)}</h1>${body}</main></body></html>`;
+export const authorizationFailurePage = (message: string, requestId: string) =>
+  page(
+    "Your agent is not connected yet",
+    `<p>${escape(message)}</p><p>Return to your coding agent and choose <strong>Authenticate</strong> to start a fresh connection request.</p><p class="muted">Reference: ${escape(requestId)}</p>`,
+  );
 async function form(c: Parameters<typeof readJsonBody>[0]) {
   if (!c.req.header("content-type")?.startsWith("application/x-www-form-urlencoded"))
     throw badRequest("INVALID_FORM", "Use form-encoded authorization fields.");
@@ -125,10 +130,13 @@ export function oauthRoutes() {
     const client = await c.env.DB.prepare("SELECT name FROM oauth_clients WHERE id=?")
       .bind(request.clientId)
       .first<{ name: string }>();
+    // Chromium also applies form-action to the POST's OAuth redirect. Permit
+    // only this validated, registered callback origin on this consent document.
+    c.set("oauthFormRedirectOrigin", new URL(request.redirectUri).origin);
     return c.html(
       page(
         "Connect your coding agent",
-        `<p><strong>${escape(client?.name ?? "Coding agent")}</strong> is requesting access to Traceyard.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="consent" value="${escape(csrf)}"><label for="project">Project</label><select id="project" name="project" required>${projects.map((p) => `<option value="${escape(p.id)}">${escape(p.repository ?? p.name)}</option>`).join("")}</select><p>This connection can:</p><ul>${request.scopes.map((scope) => `<li>${escape(scope === "investigations:read" ? "Read investigation findings and retained evidence" : scope === "investigations:run" ? "Run supported repository tests and verify candidate repairs" : "Recover supported real workflow executions")}</li>`).join("")}</ul><p class="muted">Access stays within this project. Revoke the connection from Traceyard at any time.</p><div class="actions"><button name="decision" value="approve" ${projects.length ? "" : "disabled"}>Connect agent</button><button class="secondary" name="decision" value="deny">Cancel</button></div></form>${projects.length ? "" : '<p><a href="/projects">Connect a repository first</a>, then reopen this request.</p>'}`,
+        `<p><strong>${escape(client?.name ?? "Coding agent")}</strong> wants to connect to one Traceyard project.</p><form method="post" action="/oauth/authorize"><input type="hidden" name="consent" value="${escape(csrf)}"><label for="project">Traceyard project</label><select id="project" name="project" aria-describedby="project-help" required><option value="" disabled selected>Choose a project…</option>${projects.map((p) => `<option value="${escape(p.id)}">${escape(p.repository ?? p.name)}</option>`).join("")}</select><p id="project-help" class="muted">These are your existing Traceyard projects. Choose the codebase you want this agent to debug. Access is limited to your selection.</p><p>For the selected project, this connection can:</p><ul>${request.scopes.map((scope) => `<li>${escape(scope === "investigations:read" ? "Read investigation findings and retained evidence" : scope === "investigations:run" ? "Run supported repository tests and verify candidate repairs" : "Recover supported real workflow executions")}</li>`).join("")}</ul><p class="muted">Revoke this connection from the project’s Connections page at any time. After connecting, finish authentication in your coding agent.</p><div class="actions"><button name="decision" value="approve" ${projects.length ? "" : "disabled"}>Connect agent</button><button class="secondary" name="decision" value="deny" formnovalidate>Cancel</button></div></form>${projects.length ? "" : '<p><a href="/projects">Connect a repository first</a>, then reopen this request.</p>'}`,
       ),
     );
   });

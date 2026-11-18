@@ -29,6 +29,7 @@ export interface AppVariables {
   requestContext: RequestContext;
   session: SandboxSession;
   auth: AuthenticatedPrincipal | null;
+  oauthFormRedirectOrigin?: string;
 }
 
 export type AppEnv = {
@@ -128,7 +129,7 @@ export function authSessionMiddleware(): MiddlewareHandler<AppEnv> {
  * HMR, so those allowances are scoped to localhost/127.0.0.1 only. A deployed
  * Worker never sees those hostnames.
  */
-function contentSecurityPolicy(origin: URL): string {
+function contentSecurityPolicy(origin: URL, formRedirectOrigin?: string): string {
   const isLocal =
     origin.hostname === "localhost" ||
     origin.hostname === "127.0.0.1" ||
@@ -147,7 +148,7 @@ function contentSecurityPolicy(origin: URL): string {
     "object-src 'none'",
     "base-uri 'none'",
     "frame-ancestors 'none'",
-    "form-action 'self'",
+    `form-action 'self'${formRedirectOrigin ? " " + formRedirectOrigin : ""}`,
     "manifest-src 'self'",
     "worker-src 'self'",
   ].join("; ");
@@ -158,10 +159,24 @@ export function securityHeadersMiddleware(): MiddlewareHandler<AppEnv> {
     await next();
     c.header("X-Content-Type-Options", "nosniff");
     c.header("X-Frame-Options", "DENY");
-    c.header("Referrer-Policy", "no-referrer");
+    // A native form POST under no-referrer sends Origin: null. Keep origin
+    // validation intact and retain a browser origin only on the consent page.
+    // Redirect responses and all other pages still suppress referrers entirely.
+    const consentPage =
+      c.req.path === "/oauth/authorize" &&
+      c.req.method === "GET" &&
+      c.get("oauthFormRedirectOrigin") !== undefined &&
+      c.res.headers.get("content-type")?.startsWith("text/html");
+    c.header("Referrer-Policy", consentPage ? "same-origin" : "no-referrer");
     c.header("Cross-Origin-Resource-Policy", "same-origin");
     c.header("Cache-Control", "no-store");
-    c.header("Content-Security-Policy", contentSecurityPolicy(new URL(c.req.url)));
+    c.header(
+      "Content-Security-Policy",
+      contentSecurityPolicy(
+        new URL(c.req.url),
+        consentPage ? c.get("oauthFormRedirectOrigin") : undefined,
+      ),
+    );
     // The inspector exposes a copy-to-clipboard control, so clipboard-write is
     // granted to the app itself; every other powerful feature is disabled.
     c.header(

@@ -166,11 +166,13 @@ export async function approveConsent(
   projectId: string,
   approved: boolean,
 ) {
-  const project = await db
-    .prepare("SELECT id FROM projects WHERE id=? AND owner_user_id=?")
-    .bind(projectId, userId)
-    .first();
-  if (!project) throw forbidden("PROJECT_REQUIRED", "Choose a project you own.");
+  if (approved) {
+    const project = await db
+      .prepare("SELECT id FROM projects WHERE id=? AND owner_user_id=?")
+      .bind(projectId, userId)
+      .first();
+    if (!project) throw forbidden("PROJECT_REQUIRED", "Choose a project you own.");
+  }
   const consent = await db
     .prepare(
       "UPDATE oauth_consents SET consumed_at=? WHERE token_hash=? AND owner_user_id=? AND expires_at>? AND consumed_at IS NULL RETURNING request_json",
