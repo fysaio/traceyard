@@ -38,12 +38,12 @@ export interface Session {
 }
 
 export async function createSession(): Promise<Session> {
-  const response = await apiFetch("/api/health");
+  const response = await apiFetch("/api/auth/session");
   const token = /ty_session=([A-Za-z0-9_-]{43})/u.exec(
     response.headers.get("set-cookie") ?? "",
   )?.[1];
   if (token === undefined) {
-    throw new Error("The health endpoint did not issue a sandbox session cookie.");
+    throw new Error("The session endpoint did not issue a sandbox session cookie.");
   }
   return { token, cookie: `ty_session=${token}`, idHash: await sha256Hex(token) };
 }

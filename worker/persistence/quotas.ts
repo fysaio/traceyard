@@ -53,16 +53,6 @@ export async function reserveQuota(
   return { allowed: true, count: await getQuotaCount(db, options.bucketKey) };
 }
 
-export async function releaseQuota(db: D1Database, bucketKey: string): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE quota_counters SET count = count - 1, updated_at = ?
-        WHERE bucket_key = ? AND count > 0`,
-    )
-    .bind(nowIso(), bucketKey)
-    .run();
-}
-
 export async function getQuotaCount(db: D1Database, bucketKey: string): Promise<number> {
   const row = await db
     .prepare(`SELECT count FROM quota_counters WHERE bucket_key = ?`)
@@ -118,10 +108,7 @@ export async function commitQuotaReservation(db: D1Database, runId: string): Pro
  * reservation still being PENDING inside the same transactional batch, so a
  * concurrent or repeated release cannot decrement twice.
  */
-export async function releaseQuotaReservation(
-  db: D1Database,
-  runId: string,
-): Promise<boolean> {
+export async function releaseQuotaReservation(db: D1Database, runId: string): Promise<boolean> {
   const rows = await db
     .prepare(
       `SELECT bucket_key FROM quota_reservation_buckets
@@ -134,7 +121,9 @@ export async function releaseQuotaReservation(
     .all<{ bucket_key: string }>();
   if (rows.results.length === 0) {
     const pending = await db
-      .prepare(`SELECT 1 AS pending FROM quota_reservations WHERE run_id = ? AND status = 'PENDING'`)
+      .prepare(
+        `SELECT 1 AS pending FROM quota_reservations WHERE run_id = ? AND status = 'PENDING'`,
+      )
       .bind(runId)
       .first<{ pending: number }>();
     if (pending === null) return false;

@@ -20,7 +20,6 @@ import { getSandboxStatus } from "../persistence/quotas";
 import { emptyStepCounts, toRunSummary } from "../persistence/mappers";
 import { getStepStatusCounts, listRuns } from "../persistence/runs";
 import { SANDBOX_PROJECT_ID } from "../persistence/catalog";
-import type { RunStatus } from "../../shared/domain/status";
 
 interface TotalCounts {
   runs: number;
@@ -186,21 +185,4 @@ export async function buildAnalytics(
     throughputPerDay: days > 0 ? Math.round((window.runs / days) * 100) / 100 : null,
     sandbox,
   };
-}
-
-export function statusLabel(status: RunStatus): string {
-  switch (status) {
-    case "QUEUED":
-      return "Queued";
-    case "RUNNING":
-      return "Running";
-    case "SUCCEEDED":
-      return "Succeeded";
-    case "FAILED":
-      return "Failed";
-    case "CANCELLING":
-      return "Cancelling";
-    case "CANCELLED":
-      return "Cancelled";
-  }
 }

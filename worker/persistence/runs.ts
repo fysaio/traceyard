@@ -1,9 +1,6 @@
 import type { RunStatus } from "../../shared/domain/status";
-import { nowIso } from "../lib/time";
 import type {
   AttemptRow,
-  DispatchRow,
-  DispatchSummaryRow,
   EventRow,
   RunRow,
   RunWithWorkflowRow,
@@ -89,12 +86,7 @@ export async function getRunForSession(
   const bindings =
     userId === null
       ? [runId, ...(projectId === null ? [] : [projectId]), sessionHash]
-      : [
-          runId,
-          ...(projectId === null ? [] : [projectId]),
-          userId,
-          sessionHash,
-        ];
+      : [runId, ...(projectId === null ? [] : [projectId]), userId, sessionHash];
   return db
     .prepare(
       `${RUN_SELECT}
@@ -164,29 +156,6 @@ export async function getAttempts(db: D1Database, runId: string): Promise<Attemp
   return result.results;
 }
 
-export async function getDispatch(db: D1Database, runId: string): Promise<DispatchRow | null> {
-  return db
-    .prepare(`SELECT * FROM execution_dispatches WHERE run_id = ?`)
-    .bind(runId)
-    .first<DispatchRow>();
-}
-
-export async function getDispatchSummaries(
-  db: D1Database,
-  runIds: string[],
-): Promise<DispatchSummaryRow[]> {
-  if (runIds.length === 0) return [];
-  const placeholders = runIds.map(() => "?").join(", ");
-  const result = await db
-    .prepare(
-      `SELECT run_id, status, attempt_count, last_error, published_at, claimed_at
-         FROM execution_dispatches WHERE run_id IN (${placeholders})`,
-    )
-    .bind(...runIds)
-    .all<DispatchSummaryRow>();
-  return result.results;
-}
-
 export async function getEvents(
   db: D1Database,
   runId: string,
@@ -203,154 +172,4 @@ export async function getEvents(
     .bind(runId, after, limit)
     .all<EventRow>();
   return result.results;
-}
-
-export async function getAllEvents(db: D1Database, runId: string): Promise<EventRow[]> {
-  const result = await db
-    .prepare(`SELECT * FROM execution_events WHERE run_id = ? ORDER BY seq ASC`)
-    .bind(runId)
-    .all<EventRow>();
-  return result.results;
-}
-
-/* ------------------------------------------------------------------------- */
-/* Transitions                                                                */
-/* ------------------------------------------------------------------------- */
-
-export async function markRunRunning(db: D1Database, runId: string): Promise<boolean> {
-  const now = nowIso();
-  const result = await db
-    .prepare(
-      `UPDATE runs
-          SET status = 'RUNNING', started_at = COALESCE(started_at, ?), updated_at = ?
-        WHERE id = ? AND status = 'QUEUED'`,
-    )
-    .bind(now, now, runId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function markRunSucceeded(
-  db: D1Database,
-  runId: string,
-  outputJson: string,
-): Promise<boolean> {
-  const now = nowIso();
-  const result = await db
-    .prepare(
-      `UPDATE runs
-          SET status = 'SUCCEEDED', output_json = ?, completed_at = ?, updated_at = ?,
-              error_json = NULL, error_class = NULL
-        WHERE id = ? AND status = 'RUNNING'`,
-    )
-    .bind(outputJson, now, now, runId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function markRunFailed(
-  db: D1Database,
-  runId: string,
-  errorJson: string,
-  errorClass: string,
-): Promise<boolean> {
-  const now = nowIso();
-  const result = await db
-    .prepare(
-      `UPDATE runs
-          SET status = 'FAILED', error_json = ?, error_class = ?, completed_at = ?, updated_at = ?
-        WHERE id = ? AND status IN ('QUEUED', 'RUNNING', 'CANCELLING')`,
-    )
-    .bind(errorJson, errorClass, now, now, runId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function markRunCancelled(db: D1Database, runId: string): Promise<boolean> {
-  const now = nowIso();
-  const result = await db
-    .prepare(
-      `UPDATE runs
-          SET status = 'CANCELLED', completed_at = ?, updated_at = ?
-        WHERE id = ? AND status IN ('RUNNING', 'CANCELLING')`,
-    )
-    .bind(now, now, runId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function requestCancellation(db: D1Database, runId: string): Promise<boolean> {
-  const now = nowIso();
-  const result = await db
-    .prepare(
-      `UPDATE runs
-          SET status = 'CANCELLING', cancel_requested_at = ?, updated_at = ?
-        WHERE id = ? AND status = 'RUNNING'`,
-    )
-    .bind(now, now, runId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function cancelQueuedRun(db: D1Database, runId: string): Promise<boolean> {
-  const now = nowIso();
-  const result = await db
-    .prepare(
-      `UPDATE runs
-          SET status = 'CANCELLED', cancel_requested_at = ?, completed_at = ?, updated_at = ?
-        WHERE id = ? AND status = 'QUEUED'`,
-    )
-    .bind(now, now, now, runId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function skipPendingSteps(db: D1Database, runId: string): Promise<void> {
-  const now = nowIso();
-  await db
-    .prepare(
-      `UPDATE execution_steps
-          SET status = 'SKIPPED', updated_at = ?, completed_at = ?
-        WHERE run_id = ? AND status = 'PENDING'`,
-    )
-    .bind(now, now, runId)
-    .run();
-}
-
-export async function markAbandonedAttempts(db: D1Database, runId: string): Promise<void> {
-  const now = nowIso();
-  await db
-    .prepare(
-      `UPDATE step_attempts
-          SET status = 'ABANDONED', completed_at = ?
-        WHERE run_id = ? AND status = 'RUNNING'`,
-    )
-    .bind(now, runId)
-    .run();
-}
-
-export async function setRetryRunId(
-  db: D1Database,
-  originalRunId: string,
-  retryRunId: string,
-): Promise<boolean> {
-  const result = await db
-    .prepare(
-      `UPDATE runs SET retry_run_id = ?, updated_at = ?
-        WHERE id = ? AND status = 'FAILED' AND retry_run_id IS NULL`,
-    )
-    .bind(retryRunId, nowIso(), originalRunId)
-    .run();
-  return result.meta.changes === 1;
-}
-
-export async function countActiveRuns(db: D1Database, projectId: string): Promise<number> {
-  const row = await db
-    .prepare(
-      `SELECT COUNT(*) AS count FROM runs
-        WHERE project_id = ? AND status IN ('QUEUED', 'RUNNING', 'CANCELLING')`,
-    )
-    .bind(projectId)
-    .first<{ count: number }>();
-  return Number(row?.count ?? 0);
 }
