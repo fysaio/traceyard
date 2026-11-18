@@ -137,10 +137,21 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     const query = new URL(c.req.url).searchParams;
     const state = query.get("state");
     const code = query.get("code");
+    const rejectedCallback = (errorCode: string, message: string) => {
+      // Browser navigations need a safe way to restart without retaining OAuth parameters.
+      // API clients keep the structured error response, and every failed state stays rejected.
+      if (c.req.header("accept")?.includes("text/html")) {
+        return c.redirect(
+          errorCode === "GITHUB_SIGN_IN_CANCELLED" ? "/?signIn=cancelled" : "/?signIn=retry",
+          303,
+        );
+      }
+      throw badRequest(errorCode, message);
+    };
 
     clearOAuthCookies(c, secure);
     if (query.has("error")) {
-      throw badRequest("GITHUB_SIGN_IN_CANCELLED", "GitHub sign-in was cancelled.");
+      return rejectedCallback("GITHUB_SIGN_IN_CANCELLED", "GitHub sign-in was cancelled.");
     }
     if (
       state === null ||
@@ -151,7 +162,7 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       code.length < 1 ||
       code.length > 512
     ) {
-      throw badRequest(
+      return rejectedCallback(
         "INVALID_OAUTH_CALLBACK",
         "The GitHub sign-in response could not be verified.",
       );
@@ -166,7 +177,7 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
       .bind(nowIso(), await sha256Hex(state), nowIso())
       .first<{ state_hash: string; return_to: string | null }>();
     if (consumed === null) {
-      throw badRequest(
+      return rejectedCallback(
         "INVALID_OAUTH_CALLBACK",
         "The GitHub sign-in state is expired or has already been used.",
       );
