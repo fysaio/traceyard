@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { repositoryPathSchema } from "./repository-index";
 
 const reference = z.string().trim().min(1).max(200);
 export const investigationTargetSchema = z.discriminatedUnion("kind", [
@@ -9,6 +10,8 @@ export const investigationTargetSchema = z.discriminatedUnion("kind", [
 ]);
 export const investigationRequestSchema = z
   .object({
+    mode: z.enum(["analyze", "execute"]).default("analyze"),
+    testPath: repositoryPathSchema.optional(),
     question: z.string().trim().min(3).max(1000),
     target: investigationTargetSchema.default({ kind: "source" }),
     requestKey: z
@@ -51,6 +54,13 @@ export interface Investigation {
     nextAction: string | null;
   };
   evidence: Omit<InvestigationEvidence, "content">[];
+  attempts?: {
+    id: string;
+    requestId: string;
+    status: string;
+    checkId: string | null;
+    createdAt: string;
+  }[];
   createdAt: string;
   updatedAt: string;
   browserPath: string;
