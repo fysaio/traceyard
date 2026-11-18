@@ -10,9 +10,9 @@ test("an anonymous visitor can explore the example and find sign-in at every wid
   );
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  await expect(
-    page.getByRole("heading", { name: /Find what broke.*Prove it’s fixed/ }),
-  ).toBeVisible();
+  const headline = page.getByRole("heading", { name: /Find what broke.*Prove it’s fixed/ });
+  await expect(headline).toBeVisible();
+  await page.evaluate(() => document.fonts.ready.then(() => null));
   const signIn = page.getByRole("link", { name: "Continue with GitHub" });
   await expect(signIn).toHaveAttribute("href", "/api/auth/github/start");
   const example = page.getByRole("region", { name: "Why does checkout fail on retry?" });
@@ -25,6 +25,13 @@ test("an anonymous visitor can explore the example and find sign-in at every wid
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
+    expect(
+      await headline.evaluate(
+        (element) =>
+          element.clientHeight <= 2 * parseFloat(getComputedStyle(element).lineHeight) + 1,
+      ),
+      `The headline keeps its two lines at ${width}px`,
+    ).toBe(true);
     const path = testInfo.outputPath(`welcome-${width}.png`);
     await page.screenshot({ path, fullPage: true });
     await testInfo.attach(`welcome-${width}`, { path, contentType: "image/png" });

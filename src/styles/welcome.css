@@ -43,13 +43,13 @@ html[data-theme="dark"] .welcome {
   grid-template-columns: minmax(0, 0.93fr) minmax(0, 1fr);
   align-items: center;
   gap: clamp(28px, 5vw, 80px);
-  padding-block: clamp(42px, 7.2vw, 112px);
+  padding-block: clamp(42px, 6vw, 96px);
 }
 .welcome-copy h1 {
-  font-size: clamp(48px, 6.3vw, 97px);
+  font-size: clamp(40px, 5.1vw, 76px);
   font-weight: 750;
   line-height: 0.99;
-  letter-spacing: -0.072em;
+  letter-spacing: -0.058em;
   margin: 0;
 }
 .welcome-copy > p {
@@ -194,7 +194,7 @@ html[data-theme="dark"] .welcome {
     gap: 32px;
   }
   .welcome-copy h1 {
-    font-size: clamp(43px, 9.4vw, 68px);
+    font-size: clamp(38px, 10.3vw, 68px);
   }
   .welcome-visual {
     min-height: 390px;

@@ -475,17 +475,6 @@ summary:focus-visible {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 2px;
   }
-  .product-header nav a,
-  .workspace-tools {
-    padding: 10px 4px;
-    font-size: 12px;
-    gap: 5px;
-    min-width: 0;
-  }
-  .product-header nav a > i,
-  .workspace-tools > i:first-child {
-    display: none;
-  }
   .product-main {
     padding: 28px 18px 56px;
   }
@@ -568,6 +557,37 @@ summary:focus-visible {
     margin: 0;
     background: var(--bg);
     border-top: 1px solid var(--line);
+  }
+  .product-header nav a,
+  .product-header .workspace-tools {
+    min-height: 52px;
+    min-width: 0;
+    padding: 6px 2px;
+    font-size: 10px;
+    gap: 5px;
+    border-radius: 10px;
+  }
+  .product-header nav a {
+    flex-direction: column;
+  }
+  .product-header nav a > i,
+  .product-header .workspace-tools > i:first-child {
+    font-size: 16px;
+  }
+  .product-header .workspace-tools {
+    display: grid;
+    grid-template-areas: "icon icon" "label chevron";
+    align-content: center;
+  }
+  .product-header .workspace-tools > i:first-child {
+    grid-area: icon;
+  }
+  .product-header .workspace-tools > span {
+    grid-area: label;
+  }
+  .product-header .workspace-tools > i:last-child {
+    grid-area: chevron;
+    margin-left: 0;
   }
   .product-main {
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
