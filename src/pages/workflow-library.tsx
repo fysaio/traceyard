@@ -108,10 +108,12 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
           <h1>Workflows & agents</h1>
           <p>Build executable workflows, inspect every step and recover failed work.</p>
         </div>
-        <button className="btn primary" onClick={() => setMenu("create")}>
-          <Icon name="plus" />
-          Create workflow
-        </button>
+        {(tab === "templates" || !!q.data?.items.length || q.isError) && (
+          <button className="btn primary" onClick={() => setMenu("create")}>
+            <Icon name="plus" />
+            Create workflow
+          </button>
+        )}
       </div>
       <div className="content-toolbar">
         <div className="product-tabs" role="tablist">
@@ -261,8 +263,11 @@ export function WorkflowLibrary({ projectId }: { projectId: string }) {
           <h2>{search ? "No matching workflows." : "Your first workflow starts here."}</h2>
           <p>{search ? "Try another search." : "Create a workflow or use an editable template."}</p>
           <div className="actions">
-            <button className="btn primary" onClick={() => setMenu("create")}>
-              Create a workflow
+            <button
+              className="btn primary"
+              onClick={() => (search ? setSearch("") : setMenu("create"))}
+            >
+              {search ? "Clear search" : "Create workflow"}
             </button>
             <button className="btn" onClick={() => setParams({ tab: "templates" })}>
               Explore templates

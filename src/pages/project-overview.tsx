@@ -413,8 +413,8 @@ export function ConnectRepository({
 export function RepositorySetup() {
   return (
     <>
-      <Link className="back" to="/">
-        ← Project
+      <Link className="back" to="/projects">
+        ← Repositories
       </Link>
       <div className="page-head">
         <div>

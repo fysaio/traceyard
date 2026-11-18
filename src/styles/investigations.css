@@ -199,9 +199,6 @@
   .investigation-submit {
     align-items: stretch;
   }
-  .investigation-submit > .btn {
-    width: 100%;
-  }
   .investigation-submit .segmented {
     display: flex;
     max-width: 100%;
