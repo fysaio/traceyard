@@ -94,8 +94,7 @@ export function InvestigationsPage() {
   });
   const ready =
     catalog.data?.executionAvailable &&
-    (catalog.data.executionProvider === "managed" ||
-      catalog.data.repository?.runner_enabled !== 0);
+    (catalog.data.executionProvider === "managed" || catalog.data.repository?.runner_enabled !== 0);
   const q = useQuery({
     queryKey: ["investigations", projectId],
     queryFn: () => investigations.list(projectId),
@@ -473,20 +472,28 @@ function InvestigationDetail() {
           <h1>{i.question}</h1>
           <p className="hint">{i.id}</p>
         </div>
-        <State value={i.status} />
+        <State
+          value={i.status === "EVIDENCE_READY" && i.execution ? i.execution.status : i.status}
+        />
       </div>
       <section className="connected-panel finding-panel" aria-labelledby="finding-title">
         <p className="eyebrow">
-          {i.finding.basis === "observed" ? "Recorded finding" : "Source analysis"}
+          {busy(i)
+            ? "Execution in progress"
+            : i.finding.basis === "observed"
+              ? "Recorded finding"
+              : "Source analysis"}
         </p>
         <h2 id="finding-title">{busy(i) ? "The focused check is running" : "What we found"}</h2>
         <p className="finding-summary">
-          {i.execution && i.status === "EVIDENCE_READY"
-            ? `${i.execution.counts.passed} passed, ${i.execution.counts.failed} failed across the selected checks.`
-            : i.finding.summary}
+          {busy(i)
+            ? "Waiting for the current execution to report its result."
+            : i.execution && i.status === "EVIDENCE_READY"
+              ? `${i.execution.counts.passed} passed, ${i.execution.counts.failed} failed across the selected checks.`
+              : i.finding.summary}
         </p>
         {i.execution && <ExecutionSummary execution={i.execution} />}
-        {i.finding.nextAction && <p>{i.finding.nextAction}</p>}
+        {i.finding.nextAction && !busy(i) && <p>{i.finding.nextAction}</p>}
         {busy(i) && (
           <>
             <p role="status" className="hint">
@@ -751,8 +758,7 @@ export function ConnectionsPage() {
   });
   const ready =
     catalog.data?.executionAvailable &&
-    (catalog.data.executionProvider === "managed" ||
-      catalog.data.repository?.runner_enabled !== 0);
+    (catalog.data.executionProvider === "managed" || catalog.data.repository?.runner_enabled !== 0);
   const authorized = grants.data?.items.filter((g) => !g.revoked_at) ?? [];
   return (
     <div className="connections-page">

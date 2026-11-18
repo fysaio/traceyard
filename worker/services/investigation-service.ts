@@ -119,11 +119,13 @@ export async function getInvestigation(
     .all<{ id: string; eligible: number; createdAt: string }>();
   const latest = await db
     .prepare(
-      "SELECT report_json FROM investigation_attempts WHERE investigation_id=? AND report_json IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1",
+      "SELECT report_json FROM investigation_attempts WHERE investigation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
     )
     .bind(id)
-    .first<{ report_json: string }>();
-  const report = latest ? (JSON.parse(latest.report_json) as InvestigationReport) : null;
+    .first<{ report_json: string | null }>();
+  const report = latest?.report_json
+    ? (JSON.parse(latest.report_json) as InvestigationReport)
+    : null;
   const verifications = await db
     .prepare(
       "SELECT id,baseline_id AS baselineId,candidate_id AS candidateId,candidate_commit AS candidateCommit,created_at AS createdAt FROM investigation_verifications WHERE project_id=? AND (baseline_id=? OR candidate_id=?) ORDER BY created_at DESC,id DESC LIMIT 5",

@@ -481,7 +481,7 @@ summary:focus-visible {
   .product-header nav a,
   .workspace-tools {
     padding: 10px 4px;
-    font-size: 11px;
+    font-size: 12px;
     gap: 5px;
     min-width: 0;
   }
