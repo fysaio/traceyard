@@ -330,15 +330,19 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
       )
         .bind(requestId, who.projectId, new Date(Date.now() - 30 * 60000).toISOString())
         .first<{ snapshot_json: string; runner_id: string | null }>();
-      if (!row || who.source !== "github") throw notFound("Check request not found or expired.");
+      if (!row) throw notFound("Check request not found or expired.");
+      const runnerId = who.runId ?? c.req.query("run");
+      if (!runnerId || !/^[A-Za-z0-9_-]{1,100}$/.test(runnerId))
+        throw badRequest("RUNNER_ID_REQUIRED", "The runner must identify this execution.");
       const bound = await c.env.DB.prepare(
         "UPDATE repository_check_requests SET runner_id=? WHERE id=? AND project_id=? AND (runner_id IS NULL OR runner_id=?) RETURNING id",
       )
-        .bind(who.runId, requestId, who.projectId, who.runId)
+        .bind(runnerId, requestId, who.projectId, runnerId)
         .first();
       if (!bound)
         throw badRequest("REQUEST_ALREADY_BOUND", "This test request belongs to another run.");
-      await bindGitHubDispatch(c.env, who.projectId, requestId, who.runId!, who.sha!);
+      if (who.source === "github")
+        await bindGitHubDispatch(c.env, who.projectId, requestId, who.runId!, who.sha!);
       return c.json(
         data(c, { ...JSON.parse(row.snapshot_json), capabilities: { repositoryIndex: true } }),
       );
