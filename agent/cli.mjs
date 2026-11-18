@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { discoverFile } from "./discovery.mjs";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
 import { indexRepository } from "./repository-index.mjs";
-import { runTargetedTest, sanitizeDiagnostic } from "./test-evidence.mjs";
+import { runInvestigationPlan, sanitizeDiagnostic } from "./test-evidence.mjs";
 import { createHash } from "node:crypto";
 
 export async function scanDirectory(root) {
@@ -250,6 +250,33 @@ export async function main(args = process.argv.slice(2)) {
     throw Error("The configured application directory is not inside this project.");
   let repositoryIndex;
   try {
+    const desired = manifest.investigation?.commit;
+    if (desired && desired !== sha) {
+      if (!/^[a-f0-9]{40}$/.test(desired)) throw Error("Invalid candidate revision.");
+      if (!isActions && !managedId)
+        throw Error(
+          "Use an isolated checkout at the requested candidate revision; Traceyard will not change your working checkout.",
+        );
+      execFileSync("git", ["cat-file", "-e", desired + "^{commit}"], {
+        cwd: workspaceRoot,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["checkout", "--detach", desired], {
+        cwd: workspaceRoot,
+        stdio: "ignore",
+      });
+      sha = desired;
+    }
+    if (manifest.investigation && !isActions && !managedId) {
+      try {
+        execFileSync("git", ["diff", "--quiet", "HEAD"], { cwd: workspaceRoot, stdio: "ignore" });
+      } catch {
+        sha = null;
+        throw Error(
+          "The working tree differs from its commit. Verification requires an immutable candidate checkout.",
+        );
+      }
+    }
     console.log("Traceyard: discovering source entry points…");
     if (manifest.capabilities?.repositoryIndex) {
       const index = (repositoryIndex = await indexRepository(workspaceRoot));
@@ -424,7 +451,7 @@ export async function main(args = process.argv.slice(2)) {
     };
     if (manifest.investigation) {
       const plan = manifest.investigation;
-      const focused = await runTargetedTest(
+      const focused = await runInvestigationPlan(
         workspaceRoot,
         repositoryIndex ?? (await indexRepository(workspaceRoot)),
         plan,

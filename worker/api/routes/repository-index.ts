@@ -12,7 +12,7 @@ import {
   getRepositoryIndex,
 } from "../../services/repository-index-service";
 import { ownedProject } from "../../integrations/access";
-import { runnerPrincipal } from "../../repositories/runner-auth";
+import { runnerPrincipal, runnerRevision } from "../../repositories/runner-auth";
 import { badRequest, parseWith } from "../errors";
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 
@@ -40,6 +40,7 @@ export function repositoryIndexRoutes(fetcher: typeof fetch = fetch) {
   });
   routes.post("/v1/repository/index", async (c) => {
     const principal = await runnerPrincipal(c, fetcher);
+    const revision = await runnerRevision(c, principal);
     const body = parseWith(
       z.discriminatedUnion("action", [
         z.object({ action: z.literal("begin"), manifest: repositoryIndexManifestSchema }).strict(),
@@ -58,7 +59,7 @@ export function repositoryIndexRoutes(fetcher: typeof fetch = fetch) {
       "Invalid repository index upload.",
     );
     if (body.action === "begin") {
-      if (principal.sha && body.manifest.commit !== principal.sha)
+      if (revision && body.manifest.commit !== revision)
         throw badRequest(
           "INDEX_REVISION_MISMATCH",
           "The uploaded index must match the authorized runner revision.",
@@ -70,7 +71,7 @@ export function repositoryIndexRoutes(fetcher: typeof fetch = fetch) {
       )
         .bind(principal.projectId, body.snapshotId)
         .first<{ commit_sha: string | null }>();
-      if (principal.sha && snapshot?.commit_sha !== principal.sha)
+      if (revision && snapshot?.commit_sha !== revision)
         throw badRequest(
           "INDEX_REVISION_MISMATCH",
           "The index does not belong to this runner revision.",

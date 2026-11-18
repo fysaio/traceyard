@@ -12,7 +12,7 @@ import {
   syncPersonalInstallation,
   verifyWebhook,
 } from "../../repositories/github";
-import { runnerPrincipal } from "../../repositories/runner-auth";
+import { runnerPrincipal, runnerRevision } from "../../repositories/runner-auth";
 import { ownedProject, keyPrincipal } from "../../integrations/access";
 import { ingestSpans } from "./traces";
 import {
@@ -488,7 +488,7 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
       b = parseWith(reportSchema, await readJsonBody(c), "Invalid runner report.");
     if (who.source === "local" && !b.id.startsWith("local-"))
       throw badRequest("LOCAL_RUN_ID_REQUIRED", "Local check IDs must start with local-.");
-    if (who.source !== "local" && (b.id !== who.runId || b.sha !== who.sha))
+    if (who.source !== "local" && (b.id !== who.runId || b.sha !== (await runnerRevision(c, who))))
       throw forbidden("RUN_IDENTITY_MISMATCH", "The report does not match its assigned run.");
     const repo = await c.env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
       .bind(who.projectId)
@@ -678,7 +678,7 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
     if (who.source !== "local")
       for (const span of spans) {
         span.attributes["traceyard.run.id"] = who.runId;
-        span.attributes["service.version"] = who.sha;
+        span.attributes["service.version"] = await runnerRevision(c, who);
       }
     await ingestSpans(c.env.DB, who.projectId, spans);
     return c.json({});
