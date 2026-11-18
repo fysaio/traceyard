@@ -104,6 +104,57 @@ function client(token: string) {
   return { c, transport };
 }
 describe("authenticated remote MCP", () => {
+  it("keeps consent browser-compatible while rejecting untrusted origins and invalid projects", async () => {
+    const a = await account(953),
+      other = await account(954);
+    const callback = "https://antigravity.google/oauth-callback";
+    const registration = await apiFetch("/oauth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_name: "Google Antigravity", redirect_uris: [callback] }),
+    });
+    expect(registration.status).toBe(201);
+    const client = (await registration.json()) as { client_id: string };
+    const query = new URLSearchParams({
+      client_id: client.client_id,
+      redirect_uri: callback,
+      response_type: "code",
+      code_challenge_method: "S256",
+      code_challenge: await sha256Base64Url("v".repeat(64)),
+    });
+    const response = await apiFetch("/oauth/authorize?" + query, { headers: { cookie: a.cookie } });
+    expect(response.headers.get("referrer-policy")).toBe("same-origin");
+    expect(response.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://antigravity.google;",
+    );
+    const html = await response.text();
+    expect(html).toContain('<option value="" disabled selected>Choose a project…</option>');
+    const consent = /name="consent" value="([^"]+)"/.exec(html)![1]!;
+    const fields = new URLSearchParams({ consent, project: a.projectId, decision: "approve" });
+    const post = (origin: string, body = fields) =>
+      apiFetch("/oauth/authorize", {
+        method: "POST",
+        redirect: "manual",
+        headers: { origin, cookie: a.cookie, "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+    for (const origin of ["null", "https://attacker.example"]) {
+      const rejected = await post(origin);
+      expect(rejected.status).toBe(403);
+      expect(rejected.headers.get("content-type")).toContain("text/html");
+      expect(await rejected.text()).toContain("Your agent is not connected yet");
+    }
+    const wrongProject = new URLSearchParams(fields);
+    wrongProject.set("project", other.projectId);
+    expect((await post(ORIGIN, wrongProject)).status).toBe(403);
+    wrongProject.set("project", "");
+    expect((await post(ORIGIN, wrongProject)).status).toBe(403);
+    const approved = await post(ORIGIN);
+    expect(approved.status).toBe(302);
+    expect(approved.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(approved.headers.get("content-security-policy")).toContain("form-action 'self';");
+    expect(new URL(approved.headers.get("location")!).origin).toBe("https://antigravity.google");
+  });
   it("uses the SDK's OAuth discovery and registration flow without a pasted server key", async () => {
     const a = await account();
     let information: Awaited<ReturnType<OAuthClientProvider["clientInformation"]>>,

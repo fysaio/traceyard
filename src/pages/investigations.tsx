@@ -580,10 +580,20 @@ export function ConnectionsPage() {
     cache = useQueryClient(),
     [connect, setConnect] = useState(false),
     [setup, setSetup] = useState(false),
-    [copied, setCopied] = useState(false),
+    [copied, setCopied] = useState<"endpoint" | "antigravity" | null>(null),
     [copyError, setCopyError] = useState("");
   const project = projects.find((p) => p.id === projectId),
     endpoint = window.location.origin + "/mcp";
+  const antigravitySetup = `Add a remote MCP server named traceyard to my Antigravity global MCP configuration. Use serverUrl ${endpoint}. Preserve every existing server and setting. The configuration is at ~/.gemini/config/mcp_config.json (under USERPROFILE on Windows). Save the configuration, then tell me how to reload the server and click Authenticate in Customizations > Installed > MCP Servers. During Traceyard consent I should choose ${project?.repository ?? project?.name ?? "the project I want to debug"}. Let me complete browser consent and any authorization-code entry in Antigravity myself.`;
+  const copy = (value: string, kind: "endpoint" | "antigravity") => {
+    void navigator.clipboard
+      .writeText(value)
+      .then(() => {
+        setCopied(kind);
+        setCopyError("");
+      })
+      .catch(() => setCopyError("Clipboard access is unavailable. Use the text shown below."));
+  };
   const catalog = useQuery({
     queryKey: ["catalog", projectId],
     queryFn: () => integrationRequest<Catalog>(projectId, "catalog"),
@@ -660,24 +670,33 @@ export function ConnectionsPage() {
       <section className="connected-panel section">
         <h2>Use your coding agent</h2>
         <p>
-          Add Traceyard as a remote HTTP MCP server. The agent opens browser authorization; choose
-          this project and its permissions.
+          Connect once, then ask your coding agent to investigate with Traceyard. It can read
+          findings and run focused checks for the project you approve.
         </p>
+        <details className="disclosure">
+          <summary>Connect with Antigravity</summary>
+          <p>Ask Antigravity to add the connection while keeping your existing servers.</p>
+          <button className="btn" onClick={() => copy(antigravitySetup, "antigravity")}>
+            {copied === "antigravity" ? "Setup request copied" : "Copy Antigravity setup request"}
+          </button>
+          <ol>
+            <li>Paste the request into an Antigravity chat and review its configuration update.</li>
+            <li>In Customizations → Installed → MCP Servers, choose Authenticate for Traceyard.</li>
+            <li>
+              Choose this Traceyard project in the browser and connect. If Antigravity asks for a
+              code, paste the callback page’s code into Antigravity to finish.
+            </li>
+          </ol>
+          <p className="hint">An Unauthorized status means authentication has not finished yet.</p>
+          <details>
+            <summary>View setup request</summary>
+            <p>{antigravitySetup}</p>
+          </details>
+        </details>
         <div className="mcp-endpoint">
           <code>{endpoint}</code>
-          <button
-            className="btn"
-            onClick={() => {
-              void navigator.clipboard
-                .writeText(endpoint)
-                .then(() => {
-                  setCopied(true);
-                  setCopyError("");
-                })
-                .catch(() => setCopyError("Copy the endpoint shown above."));
-            }}
-          >
-            {copied ? "Copied" : "Copy MCP URL"}
+          <button className="btn" onClick={() => copy(endpoint, "endpoint")}>
+            {copied === "endpoint" ? "Copied" : "Copy MCP URL"}
           </button>
         </div>
         {copyError && <p role="status">{copyError}</p>}
