@@ -220,6 +220,42 @@ describe("GitHub authentication", () => {
     expect(providerCalls).toBe(0);
   });
 
+  it.each(["missing", "mismatch", "expired", "cancelled"] as const)(
+    "returns browser %s callbacks to sign-in without exchanging or disclosing a code",
+    async (scenario) => {
+      const start = await apiFetchWithGitHub("/api/auth/github/start", {}, providerFetch());
+      const cookies = cookiePairs(start);
+      const state = cookieValue(cookies, "ty_oauth_state");
+      if (scenario === "expired") {
+        await env.DB.prepare("UPDATE github_oauth_states SET expires_at = ? WHERE state_hash = ?")
+          .bind("2000-01-01T00:00:00.000Z", await sha256Hex(state))
+          .run();
+      }
+      const query = new URLSearchParams({ code: "private-provider-code", state });
+      if (scenario === "missing") query.delete("state");
+      if (scenario === "mismatch") query.set("state", "wrong-state");
+      if (scenario === "cancelled") query.set("error", "access_denied");
+      let providerCalls = 0;
+      const response = await apiFetchWithGitHub(
+        "/api/auth/github/callback?" + query,
+        { headers: { Accept: "text/html" } },
+        async () => {
+          providerCalls++;
+          return Response.json({});
+        },
+        cookies.join("; "),
+      );
+      expect(response.status).toBe(303);
+      expect(response.headers.get("location")).toBe(
+        scenario === "cancelled" ? "/?signIn=cancelled" : "/?signIn=retry",
+      );
+      expect(response.headers.get("set-cookie")).toContain("ty_oauth_state=; Path=/");
+      expect(response.headers.get("set-cookie")).toContain("ty_oauth_pkce=; Path=/");
+      expect(response.headers.get("set-cookie")).not.toContain("ty_auth_session=");
+      expect(providerCalls).toBe(0);
+    },
+  );
+
   it("logout revokes the persistent application session immediately", async () => {
     const signedIn = await signIn();
     const logout = await apiFetchWithGitHub(
