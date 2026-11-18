@@ -34,7 +34,9 @@
     "predev": "npm run db:migrate:local",
     "predev:acceptance": "npm run db:migrate:acceptance",
     "deploy:managed": "npm run build:managed && wrangler deploy --config dist/worker/wrangler.json",
-    "configure:cloudflare": "node scripts/configure-cloudflare.mjs"
+    "configure:cloudflare": "node scripts/configure-cloudflare.mjs",
+    "bench:investigation": "node scripts/bench-investigation.mjs",
+    "deploy:investigations": "node scripts/deploy-investigations.mjs"
   },
   "dependencies": {
     "@babel/parser": "^7.29.14",

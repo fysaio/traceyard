@@ -236,7 +236,10 @@ export async function main(args = process.argv.slice(2)) {
             encodeURIComponent(id)
           : ""),
     {
-      headers: { Authorization: "Bearer " + (await credential()) },
+      headers: {
+        Authorization: "Bearer " + (await credential()),
+        "X-Traceyard-Runner-Protocol": "2",
+      },
       signal: AbortSignal.timeout(15000),
     },
   );
@@ -386,10 +389,18 @@ export async function main(args = process.argv.slice(2)) {
         return;
       }
     }
+    const replaying = Boolean(manifest.investigation?.replayRecording);
+    const installEnv = replaying
+      ? Object.fromEntries(
+          Object.entries(env).filter(([name]) =>
+            ["PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR", "CI"].includes(name),
+          ),
+        )
+      : env;
     await execute(
       process.platform === "win32" ? "npm.cmd" : "npm",
-      ["ci"],
-      { cwd: installRoot, env },
+      replaying ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"] : ["ci"],
+      { cwd: installRoot, env: installEnv },
       "install",
     );
     await report("install", "SUCCEEDED", "Dependencies installed.");
@@ -473,13 +484,19 @@ export async function main(args = process.argv.slice(2)) {
             }
           : testEnv,
       );
-      if (captureFile && focused.command.testPath) {
-        const recording = await buildRecording(captureFile, sha, focused.command.testPath);
-        await send("investigations/" + encodeURIComponent(plan.investigationId) + "/recordings", {
-          requestId: plan.requestId,
-          runId: id,
-          manifest: recording,
-        });
+      try {
+        if (captureFile && focused.command.testPath) {
+          const recording = await buildRecording(captureFile, sha, focused.command.testPath);
+          await send("investigations/" + encodeURIComponent(plan.investigationId) + "/recordings", {
+            requestId: plan.requestId,
+            runId: id,
+            manifest: recording,
+          });
+        }
+      } catch {
+        focused.message =
+          focused.message.slice(0, 1750) +
+          " Interaction capture could not be retained; replay is unavailable.";
       }
       if (capture) await rm(capture, { recursive: true, force: true });
       await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {

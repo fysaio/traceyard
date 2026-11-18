@@ -28,6 +28,7 @@ healthRoutes.get("/health", async (c) => {
   const payload: HealthPayload = {
     status: databaseStatus === "ok" ? "ok" : "degraded",
     version: config.version,
+    revision: c.env.BUILD_REVISION ?? null,
     environment,
     timestamp: new Date().toISOString(),
     checks: {

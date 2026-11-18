@@ -1,3 +1,4 @@
+import { cancelRepositoryCheck } from "../repositories/cancel-check";
 import type {
   InvestigationPlan,
   InvestigationReport,
@@ -324,4 +325,45 @@ export async function cancelInvestigation(
       .bind(nowIso(), id),
   ]);
   return getInvestigation(db, userId, projectId, id);
+}
+
+export async function cancelInvestigationExecution(
+  env: Env,
+  userId: string,
+  projectId: string,
+  id: string,
+  fetcher: typeof fetch = fetch,
+) {
+  await cancelInvestigation(env.DB, userId, projectId, id);
+  const attempt = await env.DB.prepare(
+    "SELECT check_id FROM investigation_attempts WHERE investigation_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+  )
+    .bind(id)
+    .first<{ check_id: string | null }>();
+  let limitation = "No external check was attached.";
+  if (attempt?.check_id) {
+    try {
+      await cancelRepositoryCheck(env, userId, projectId, attempt.check_id, fetcher);
+      limitation = "External cancellation was requested. The executor may take time to stop.";
+    } catch {
+      limitation =
+        "The external executor did not confirm cancellation. Its execution timeout still applies; no late result will replace this record.";
+    }
+  }
+  await env.DB.prepare(
+    "UPDATE investigations SET finding_json=?,updated_at=? WHERE id=? AND project_id=?",
+  )
+    .bind(
+      JSON.stringify({
+        summary: "This investigation was cancelled.",
+        basis: "observed",
+        limitations: [limitation],
+        nextAction: "Start a new investigation when ready.",
+      }),
+      nowIso(),
+      id,
+      projectId,
+    )
+    .run();
+  return getInvestigation(env.DB, userId, projectId, id);
 }

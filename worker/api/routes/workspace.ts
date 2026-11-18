@@ -1,3 +1,4 @@
+import { cancelRepositoryCheck } from "../../repositories/cancel-check";
 import { redact } from "../../../shared/contracts/traces";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -14,9 +15,7 @@ import { bindGitHubDispatch, syncGitHubDispatches } from "../../repositories/git
 import { projectCatalog, applicationRuns } from "../../repositories/catalog";
 import { syncRepositoryChecks } from "../../repositories/check-sync";
 import { runnerPrincipal } from "../../repositories/runner-auth";
-import { installationOwned, githubRequest } from "../../repositories/github";
 import { dispatchRepositoryChecks } from "../../repositories/checks";
-import { finishManagedCheck } from "../../repositories/managed";
 import { randomId } from "../../lib/crypto";
 import { nowIso } from "../../lib/time";
 import type { RepositoryRecord } from "../../../shared/repository/contracts";
@@ -51,63 +50,7 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   });
   app.post("/projects/:projectId/checks/:id/cancel", async (c) => {
     const { projectId, userId } = await ownedProject(c);
-    const dispatch = await c.env.DB.prepare(
-      "SELECT runner_id FROM github_check_dispatches WHERE project_id=? AND id=?",
-    )
-      .bind(projectId, c.req.param("id"))
-      .first<{ runner_id: string | null }>();
-    let job = await c.env.DB.prepare("SELECT * FROM repository_jobs WHERE project_id=? AND id=?")
-      .bind(projectId, dispatch?.runner_id ?? c.req.param("id"))
-      .first<{ id: string; status: string; source: string }>();
-    if (job?.source === "github-pending") {
-      const cancelled = await c.env.DB.batch([
-        c.env.DB.prepare(
-          "UPDATE github_check_dispatches SET state='CANCELLED',updated_at=? WHERE id=? AND project_id=? AND runner_id IS NULL",
-        ).bind(nowIso(), job.id, projectId),
-        c.env.DB.prepare(
-          "UPDATE repository_jobs SET status='CANCELLED',phase='complete',updated_at=? WHERE id=? AND project_id=? AND source='github-pending' AND EXISTS(SELECT 1 FROM github_check_dispatches WHERE id=? AND state='CANCELLED')",
-        ).bind(nowIso(), job.id, projectId, job.id),
-      ]);
-      if (cancelled[0]?.meta.changes) return c.json(data(c, { requested: true }), 202);
-      // The runner may have bound between the read and cancellation claim.
-      job = await c.env.DB.prepare(
-        "SELECT j.* FROM repository_jobs j JOIN github_check_dispatches d ON d.runner_id=j.id AND d.project_id=j.project_id WHERE d.id=? AND d.project_id=?",
-      )
-        .bind(c.req.param("id"), projectId)
-        .first<{ id: string; status: string; source: string }>();
-    }
-    if (job?.source === "managed") {
-      if (!["RUNNING", "QUEUED"].includes(job.status))
-        throw badRequest("CHECK_FINISHED", "This check has already finished.");
-      await finishManagedCheck(
-        c.env,
-        job.id,
-        "CANCELLED",
-        "This check was cancelled. Source discoveries remain available.",
-      );
-      await c.env.MANAGED_REPOSITORY_RUNNERS?.getByName(job.id).cancel();
-      return c.json(data(c, { requested: true }), 202);
-    }
-    const repo = await c.env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
-      .bind(projectId)
-      .first<RepositoryRecord>();
-    if (
-      !job ||
-      job.source !== "github" ||
-      !/^\d+-\d+$/.test(job.id) ||
-      !repo?.installation_id ||
-      !(await installationOwned(c.env.DB, userId, repo.installation_id))
-    )
-      throw notFound("GitHub check not found.");
-    if (job.status !== "RUNNING")
-      throw badRequest("CHECK_FINISHED", "This check has already finished.");
-    await githubRequest(
-      c.env,
-      repo.installation_id,
-      `/repos/${repo.full_name}/actions/runs/${job.id.split("-")[0]}/cancel`,
-      { method: "POST" },
-      fetcher,
-    );
+    await cancelRepositoryCheck(c.env, userId, projectId, c.req.param("id"), fetcher);
     return c.json(data(c, { requested: true }), 202);
   });
   app.get("/projects/:projectId/catalog", async (c) => {
@@ -307,6 +250,34 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
     const { projectId } = await ownedProject(c);
     return c.json(data(c, { items: await applicationRuns(c.env.DB, projectId, 500) }));
   });
+  const compatibleRunner = async (
+    c: Parameters<typeof getRequestContext>[0],
+    manifest: { investigation?: { investigationId: string; requestId: string } },
+  ) => {
+    if (!manifest.investigation || c.req.header("X-Traceyard-Runner-Protocol") === "2") return;
+    const plan = manifest.investigation;
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        "UPDATE investigations SET status='BLOCKED',finding_json=?,updated_at=? WHERE id=? AND status='EXECUTING'",
+      ).bind(
+        JSON.stringify({
+          summary: "The executor uses an older Traceyard runner.",
+          basis: "observed",
+          limitations: ["The focused test has not executed."],
+          nextAction: "Review GitHub execution setup in Connections to update the runner.",
+        }),
+        nowIso(),
+        plan.investigationId,
+      ),
+      c.env.DB.prepare(
+        "UPDATE investigation_attempts SET status='BLOCKED',updated_at=? WHERE request_id=?",
+      ).bind(nowIso(), plan.requestId),
+    ]);
+    throw conflict(
+      "RUNNER_UPDATE_REQUIRED",
+      "Update the reviewed runner before executing an investigation.",
+    );
+  };
   app.get("/v1/repository/configuration", async (c) => {
     const who = await runnerPrincipal(c, fetcher),
       requestId = c.req.query("request");
@@ -317,6 +288,7 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
         .bind(who.runId, who.projectId)
         .first<{ snapshot_json: string }>();
       if (!snapshot) throw notFound("Managed check snapshot not found.");
+      await compatibleRunner(c, JSON.parse(snapshot.snapshot_json).manifest);
       return c.json(
         data(c, {
           ...JSON.parse(snapshot.snapshot_json).manifest,
@@ -331,6 +303,7 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
         .bind(requestId, who.projectId, new Date(Date.now() - 30 * 60000).toISOString())
         .first<{ snapshot_json: string; runner_id: string | null }>();
       if (!row) throw notFound("Check request not found or expired.");
+      await compatibleRunner(c, JSON.parse(row.snapshot_json));
       const runnerId = who.runId ?? c.req.query("run");
       if (!runnerId || !/^[A-Za-z0-9_-]{1,100}$/.test(runnerId))
         throw badRequest("RUNNER_ID_REQUIRED", "The runner must identify this execution.");

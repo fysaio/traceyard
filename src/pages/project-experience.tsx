@@ -1,3 +1,4 @@
+import { REVIEWED_RUNNER_REVISION } from "../../shared/repository/runner-version";
 import { ApiClientError } from "../lib/api";
 import { SourceFlowTree } from "../components/source-flow";
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
@@ -1161,7 +1162,7 @@ function LocalCheck({
   });
   const environment = `TRACEYARD_ORIGIN=${window.location.origin}\nTRACEYARD_KEY=${key.data?.token ?? "<create a project key below>"}\n`,
     command =
-      "npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#a23df5c114e7302e76418309206150983255a3c8 -- traceyard run ." +
+      `npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#${REVIEWED_RUNNER_REVISION} -- traceyard run .` +
       (caseId ? " --case " + caseId : "");
   return (
     <Modal title={caseId ? "Run this test locally" : "Run project checks locally"} close={close}>

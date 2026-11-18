@@ -7,7 +7,7 @@ import { runnerPrincipal } from "../../repositories/runner-auth";
 import {
   recordInvestigationReport,
   startInvestigationExecution,
-  cancelInvestigation,
+  cancelInvestigationExecution,
 } from "../../services/investigation-execution";
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 import { badRequest, parseWith } from "../errors";
@@ -38,7 +38,13 @@ export function investigationExecutionRoutes(fetcher: typeof fetch = fetch) {
   app.post("/projects/:projectId/investigations/:id/cancel", async (c) => {
     const { userId, projectId } = await ownedProject(c);
     return c.json({
-      data: await cancelInvestigation(c.env.DB, userId, projectId, c.req.param("id")),
+      data: await cancelInvestigationExecution(
+        c.env,
+        userId,
+        projectId,
+        c.req.param("id"),
+        fetcher,
+      ),
       meta: { requestId: getRequestContext(c).requestId },
     });
   });
