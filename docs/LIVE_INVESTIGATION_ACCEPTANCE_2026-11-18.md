@@ -36,3 +36,9 @@ The transport follow-up reproduces the cause: authenticated GET returned 200 wit
 ## Still unverified live
 
 A retained failing baseline/candidate verification and isolated replay remain unverified on the live deployment. A stable external MCP tool session and actual authenticated tool invocation remain open. The remote browser could not reach this workspace's loopback callback listener; the operator's own Antigravity subsequently completed its separate authorization as described above. Existing CI covers the supported mechanisms with official-client, actual-process, browser and isolated-container fixtures; this report does not substitute those fixtures for live acceptance.
+
+### Antigravity 405 compatibility follow-up
+
+The next operator screenshot showed `Error: standalone SSE stream: Method Not Allowed`, while sign-out and all four tools remained visible. This disproves the prior assumption that declining optional GET would keep this client healthy. The prior SDK checks passed because that SDK accepts 405; they did not represent this installed client's behavior.
+
+The correction implements a long-lived authenticated comment-only GET stream with 15-second heartbeats, independent of the POST server cleanup. It bounds buffering, clears timers on disconnect and revalidates authorization without spending the request quota. A real HTTP acceptance case requires five heartbeats, a successful post-idle tool call, reconnect and grant revocation; deterministic tests cover abort/cancel and authorization failure. Production deployment and the operator's Antigravity tool session remain unverified until recorded separately.
