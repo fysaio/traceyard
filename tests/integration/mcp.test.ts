@@ -104,6 +104,58 @@ function client(token: string) {
   return { c, transport };
 }
 describe("authenticated remote MCP", () => {
+  it("declines optional GET streams and keeps the official client's POST tools usable", async () => {
+    const a = await connect();
+    for (const method of ["GET", "DELETE"]) {
+      const response = await apiFetch("/mcp", {
+        method,
+        headers: { Authorization: "Bearer " + a.token.access_token, Accept: "text/event-stream" },
+      });
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST, OPTIONS");
+      expect(response.headers.get("content-type")).not.toContain("text/event-stream");
+    }
+    let gets = 0;
+    let resolveGet!: (status: number) => void;
+    const backgroundGet = new Promise<number>((resolve) => {
+      resolveGet = resolve;
+    });
+    const errors: Error[] = [];
+    const sdk = new Client({ name: "stateless-transport", version: "1" });
+    sdk.onerror = (error) => errors.push(error);
+    try {
+      await sdk.connect(
+        new StreamableHTTPClientTransport(new URL(ORIGIN + "/mcp"), {
+          requestInit: { headers: { Authorization: "Bearer " + a.token.access_token } },
+          fetch: async (input, init) => {
+            const response = await SELF.fetch(String(input), init as RequestInit);
+            if (init?.method === "GET") {
+              gets++;
+              resolveGet(response.status);
+            }
+            return response;
+          },
+        }),
+      );
+      expect(await backgroundGet).toBe(405);
+      expect((await sdk.listTools()).tools).toHaveLength(4);
+      const finding = await sdk.callTool({
+        name: "investigate",
+        arguments: {
+          question: "Inspect stateless transport evidence",
+          mode: "analyze",
+          outputChars: 1000,
+        },
+      });
+      expect(finding.isError).not.toBe(true);
+      expect((await sdk.listTools()).tools).toHaveLength(4);
+      expect(gets).toBe(1);
+      expect(errors).toEqual([]);
+    } finally {
+      await sdk.close();
+    }
+    expect((await apiFetch("/mcp", { headers: { Accept: "text/event-stream" } })).status).toBe(401);
+  });
   it("keeps consent browser-compatible while rejecting untrusted origins and invalid projects", async () => {
     const a = await account(953),
       other = await account(954);
