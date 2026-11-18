@@ -91,7 +91,7 @@ export function RunStatus({ value }: { value: string }) {
 function Crumbs({ items }: { items: { label: string; to?: string }[] }) {
   return (
     <nav className="flow-crumbs" aria-label="Breadcrumb">
-      <Link to="/projects">Projects</Link>
+      <Link to="/projects">Repositories</Link>
       {items.map((item, i) => (
         <span key={i}>
           <Icon name="chevron-right" />
@@ -198,8 +198,8 @@ export function ProjectsPage() {
     <div className="flow-page">
       <p className="flow-kicker">Your workspace</p>
       <PageHead
-        title="Projects"
-        description="Your applications. What’s working, and what needs attention."
+        title="Repositories"
+        description="Manage connected source. Run focused tests from Investigations; runtime recordings appear here."
         actions={
           <button className="btn primary" onClick={() => setConnect(true)}>
             <Icon name="plus" />
@@ -260,6 +260,8 @@ export function ProjectsPage() {
                 </span>
                 {p.lastCheck ? (
                   <RunStatus value={p.lastCheck} />
+                ) : p.discoveryStatus === "SUCCEEDED" ? (
+                  <span className="flow-muted">Source indexed</span>
                 ) : p.discoveryStatus ? (
                   <RunStatus value={p.discoveryStatus} />
                 ) : (
@@ -272,12 +274,12 @@ export function ProjectsPage() {
               </div>
               <div className="flow-project-health">
                 <span>
-                  {p.runs} recorded {p.runs === 1 ? "run" : "runs"}
+                  {p.runs} runtime {p.runs === 1 ? "recording" : "recordings"}
                 </span>
                 {p.failed > 0 && <span className="flow-error">{p.failed} failed</span>}
               </div>
               <div className="flow-card-footer">
-                <span>{stamp(p.lastRunAt)}</span>
+                <span>{p.lastRunAt ? stamp(p.lastRunAt) : "No runtime recordings yet"}</span>
                 <Icon name="arrow-right" />
               </div>
             </Link>

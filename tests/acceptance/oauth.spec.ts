@@ -213,3 +213,25 @@ test("cancel returns to the agent without requiring a project or creating access
   expect(returned.searchParams.has("code")).toBe(false);
   expect(await grants()).toEqual(before);
 });
+
+test("an expired browser sign-in returns to an actionable welcome screen", async ({ page }) => {
+  // The acceptance server deliberately has no external GitHub credentials.
+  // Model a configured deployment while exercising its real callback and redirect.
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: { user: null, currentSessionId: null, sessions: [], githubSignInAvailable: true },
+      }),
+    }),
+  );
+  await page.goto("/api/auth/github/callback?state=expired&code=not-a-real-code");
+  await expect(page).toHaveURL(/\/\?signIn=retry$/);
+  await expect(page.getByRole("alert")).toContainText(
+    "sign-in link expired or could not be verified",
+  );
+  await expect(page.getByRole("link", { name: "Continue with GitHub" })).toHaveAttribute(
+    "href",
+    "/api/auth/github/start",
+  );
+});
