@@ -74,6 +74,13 @@ interface GitHubOAuthConfig {
   secure: boolean;
 }
 
+function agentReturnPath(value: string) {
+  return (
+    (value.startsWith("/oauth/authorize?") && value.length <= 6000 && !/[\r\n]/.test(value)) ||
+    /^\/oauth\/connections(?:\?connection=grant_[a-f0-9]{32})?$/.test(value)
+  );
+}
+
 export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
 
@@ -99,12 +106,7 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     const stateHash = await sha256Hex(state);
     const now = nowIso();
     const requestedReturn = c.req.query("returnTo") ?? "";
-    const returnTo =
-      requestedReturn.startsWith("/oauth/authorize?") &&
-      requestedReturn.length <= 6000 &&
-      !/[\r\n]/.test(requestedReturn)
-        ? requestedReturn
-        : null;
+    const returnTo = agentReturnPath(requestedReturn) ? requestedReturn : null;
     await c.env.DB.prepare(
       `INSERT INTO github_oauth_states (state_hash, created_at, expires_at, consumed_at,return_to)
        VALUES (?, ?, ?, NULL,?)`,
@@ -288,7 +290,7 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     );
     return c.redirect(
       config.origin +
-        (consumed.return_to?.startsWith("/oauth/authorize?") ? consumed.return_to : "/"),
+        (consumed.return_to && agentReturnPath(consumed.return_to) ? consumed.return_to : "/"),
       302,
     );
   });
