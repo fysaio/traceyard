@@ -1009,10 +1009,12 @@ interface CISetupResult {
   message?: string;
 }
 export function EnableGitHubChecks({
+  enableOnly = false,
   projectId,
   close,
   onReady,
 }: {
+  enableOnly?: boolean;
   projectId: string;
   close: () => void;
   onReady: () => void;
@@ -1117,7 +1119,9 @@ export function EnableGitHubChecks({
                 ? "Requesting merge…"
                 : setup.data.state === "BLOCKED"
                   ? "Retry merge"
-                  : "Enable and run"}
+                  : enableOnly
+                    ? "Enable test execution"
+                    : "Enable and run"}
             </button>
           )}
           {(setup.error || setup.data?.state === "SETUP_REQUIRED") && (

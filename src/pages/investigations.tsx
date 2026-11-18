@@ -288,7 +288,9 @@ function Evidence({
             </button>
             <span className="hint">
               Offset {q.data.offset}
-              {q.data.truncated ? " · More retained evidence" : " · End of retained evidence"}
+              {q.data.nextOffset !== null
+                ? " · More retained evidence"
+                : " · End of retained evidence"}
             </span>
             <button
               className="btn"
@@ -636,7 +638,10 @@ export function ConnectionsPage() {
           <>
             <p>
               {catalog.data?.executionAvailable
-                ? `Connected ${catalog.data.executionProvider === "managed" ? "managed" : "GitHub"} executor. Availability is checked when a test launches.`
+                ? catalog.data.executionProvider === "managed" ||
+                  !!catalog.data.repository?.runner_enabled
+                  ? `${catalog.data.executionProvider === "managed" ? "Managed" : "GitHub"} execution is enabled. Availability is checked when a test launches.`
+                  : "GitHub execution is available. Review the repository workflow to enable tests."
                 : "Source analysis is available after repository scanning. Running tests also needs an executor."}
             </p>
             {project?.repository && catalog.data?.executionProvider !== "managed" && (
@@ -741,6 +746,7 @@ export function ConnectionsPage() {
       )}
       {setup && (
         <EnableGitHubChecks
+          enableOnly
           projectId={projectId}
           close={() => setSetup(false)}
           onReady={() => {
