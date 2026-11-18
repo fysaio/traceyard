@@ -9,7 +9,6 @@ import type {
   StepView,
 } from "../../shared/contracts/api";
 import type { ErrorClass } from "../../shared/domain/errors";
-import { serializeError } from "../../shared/domain/errors";
 import { durationMs } from "../lib/time";
 import type {
   AttemptRow,
@@ -44,21 +43,6 @@ export function parseError(value: string | null): ErrorView | null {
     retryable: record["retryable"] === true,
     ...(typeof record["stepKey"] === "string" ? { stepKey: record["stepKey"] } : {}),
     ...(typeof record["attempt"] === "number" ? { attempt: record["attempt"] } : {}),
-  };
-}
-
-export function errorFromUnknown(error: unknown, stepKey?: string, attempt?: number): ErrorView {
-  const serialized = serializeError(error, {
-    ...(stepKey === undefined ? {} : { stepKey }),
-    ...(attempt === undefined ? {} : { attempt }),
-  });
-  return {
-    class: serialized.class,
-    code: serialized.code,
-    message: serialized.message,
-    retryable: serialized.retryable,
-    ...(serialized.stepKey === undefined ? {} : { stepKey: serialized.stepKey }),
-    ...(serialized.attempt === undefined ? {} : { attempt: serialized.attempt }),
   };
 }
 

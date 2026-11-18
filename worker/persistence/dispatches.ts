@@ -1,6 +1,8 @@
 import { nowIso } from "../lib/time";
 import type { DispatchRow } from "./rows";
 
+export const MAX_DISPATCH_ATTEMPTS = 6;
+
 export async function recordPublishSuccess(db: D1Database, dispatchId: string): Promise<void> {
   const now = nowIso();
   await db
@@ -60,18 +62,6 @@ export async function getDispatchByRunId(
     .first<DispatchRow>();
 }
 
-export async function cancelDispatch(db: D1Database, runId: string): Promise<void> {
-  const now = nowIso();
-  await db
-    .prepare(
-      `UPDATE execution_dispatches
-          SET status = 'CANCELLED', updated_at = ?
-        WHERE run_id = ? AND status IN ('PENDING', 'PUBLISHED')`,
-    )
-    .bind(now, runId)
-    .run();
-}
-
 export async function failDispatch(
   db: D1Database,
   dispatchId: string,
@@ -98,29 +88,13 @@ export async function listDispatchesForReconciliation(
       `SELECT * FROM execution_dispatches
         WHERE status IN ('PENDING', 'PUBLISHED')
           AND available_at <= ?
-          AND attempt_count < 6
+          AND attempt_count < ?
         ORDER BY available_at ASC
         LIMIT ?`,
     )
-    .bind(now, limit)
+    .bind(now, MAX_DISPATCH_ATTEMPTS, limit)
     .all<DispatchRow>();
   return result.results;
-}
-
-export async function postponeDispatch(
-  db: D1Database,
-  dispatchId: string,
-  availableAt: string,
-  error: string,
-): Promise<void> {
-  await db
-    .prepare(
-      `UPDATE execution_dispatches
-          SET available_at = ?, last_error = ?, updated_at = ?
-        WHERE id = ? AND status IN ('PENDING', 'PUBLISHED')`,
-    )
-    .bind(availableAt, error.slice(0, 500), nowIso(), dispatchId)
-    .run();
 }
 
 /**

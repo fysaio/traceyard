@@ -11,6 +11,7 @@ import {
 import { repositoryPathSchema } from "../../shared/contracts/repository-index";
 import {
   getInvestigation,
+  getInvestigationStatus,
   listInvestigations,
   inspectEvidence,
 } from "../services/investigation-service";
@@ -461,23 +462,24 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
               args.outputChars,
             );
           }
+          if (args.section === "status") {
+            return result(
+              await getInvestigationStatus(
+                c.env.DB,
+                principal.userId,
+                principal.projectId,
+                args.investigationId,
+              ),
+              args.outputChars,
+            );
+          }
           const inv = await getInvestigation(
             c.env.DB,
             principal.userId,
             principal.projectId,
             args.investigationId,
           );
-          return result(
-            args.section === "status"
-              ? {
-                  investigationId: inv.id,
-                  status: inv.status,
-                  summary: inv.finding.summary.slice(0, 250),
-                  nextPollAfterMs: inv.status === "EXECUTING" ? 5000 : null,
-                }
-              : brief(inv, origin),
-            args.outputChars,
-          );
+          return result(brief(inv, origin), args.outputChars);
         },
         args.projectId,
         undefined,

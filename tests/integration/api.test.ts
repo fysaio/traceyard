@@ -24,14 +24,17 @@ import {
 } from "./helpers";
 
 describe("health and catalog", () => {
-  it("reports a healthy database and issues a session cookie", async () => {
+  it("reports database health without creating a sandbox session", async () => {
+    const sessionCount = () =>
+      env.DB.prepare("SELECT COUNT(*) AS count FROM sandbox_sessions").first<number>("count");
+    const before = await sessionCount();
     const response = await apiFetch("/api/health");
     expect(response.status).toBe(200);
     expect(response.headers.get("x-request-id")).toMatch(/^[a-f0-9-]{36}$/u);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-    expect(response.headers.get("set-cookie")).toContain("ty_session=");
-    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(await sessionCount()).toBe(before);
 
     const body = await readSuccess<{
       status: string;
