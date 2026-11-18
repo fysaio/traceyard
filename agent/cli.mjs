@@ -8,6 +8,8 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { discoverFile } from "./discovery.mjs";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
+import { indexRepository } from "./repository-index.mjs";
+import { createHash } from "node:crypto";
 
 export async function scanDirectory(root) {
   const operations = [],
@@ -239,6 +241,36 @@ export async function main(args = process.argv.slice(2)) {
     throw Error("The configured application directory is not inside this project.");
   try {
     console.log("Traceyard: discovering source entry points…");
+    if (manifest.capabilities?.repositoryIndex) {
+      const index = await indexRepository(workspaceRoot);
+      const snapshotId = createHash("sha256")
+        .update((sha ?? "working-tree") + index.snapshotId)
+        .digest("hex");
+      await send("repository/index", {
+        action: "begin",
+        manifest: {
+          snapshotId,
+          commit: sha,
+          packages: index.packages,
+          fileCount: index.files.length,
+          coverage: index.coverage,
+        },
+      });
+      let batch = [];
+      for (const file of index.files) {
+        if (
+          batch.length &&
+          (batch.length === 20 || Buffer.byteLength(JSON.stringify([...batch, file])) > 24000)
+        ) {
+          await send("repository/index", { action: "files", snapshotId, files: batch });
+          batch = [];
+        }
+        batch.push(file);
+      }
+      if (batch.length)
+        await send("repository/index", { action: "files", snapshotId, files: batch });
+      await send("repository/index", { action: "complete", snapshotId });
+    }
     await report("discovery", "RUNNING", "Reading source files.");
     const discovered = await scanDirectory(root);
     for (const op of discovered.operations)
