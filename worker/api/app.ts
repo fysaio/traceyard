@@ -3,7 +3,7 @@ import { investigationRoutes } from "./routes/investigations";
 import { repositoryIndexRoutes } from "./routes/repository-index";
 import { investigationExecutionRoutes } from "./routes/investigation-execution";
 import { verificationRoutes } from "./routes/verifications";
-import { oauthRoutes } from "../mcp/oauth-routes";
+import { authorizationFailurePage, oauthRoutes } from "../mcp/oauth-routes";
 import { handleMcp } from "../mcp/server";
 import { recordingRoutes } from "./routes/recordings";
 import { activityRoutes } from "./routes/activity";
@@ -114,10 +114,20 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
       for (const [name, value] of Object.entries(error.headers ?? {})) {
         c.header(name, value);
       }
+      if (c.req.path === "/oauth/authorize")
+        return c.html(authorizationFailurePage(error.message, requestId), error.status);
       return c.json(failure(requestId, error.code, error.message, error.details), error.status);
     }
 
     logError("api.unhandled_error", error, { requestId, path: new URL(c.req.url).pathname });
+    if (c.req.path === "/oauth/authorize")
+      return c.html(
+        authorizationFailurePage(
+          "Traceyard could not complete this connection request.",
+          requestId,
+        ),
+        500,
+      );
     return c.json(failure(requestId, "INTERNAL_ERROR", "An unexpected error occurred."), 500);
   });
 
