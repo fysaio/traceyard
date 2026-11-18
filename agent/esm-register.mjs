@@ -1,4 +1,5 @@
 import { createRequire, register } from "node:module";
+import { pathToFileURL } from "node:url";
 
 // Vitest loads application modules through its own transformer. A second ESM
 // loader instruments the test tool's dependency graph and makes every fork slow,
@@ -11,5 +12,9 @@ const vitest =
 if (!vitest) {
   // Ordinary applications, including tsx, retain the full ESM instrumentation.
   const require = createRequire(import.meta.url);
-  register(require.resolve("@opentelemetry/instrumentation/hook.mjs"), import.meta.url);
+  // require.resolve returns a filesystem path; register expects a URL specifier on Windows.
+  register(
+    pathToFileURL(require.resolve("@opentelemetry/instrumentation/hook.mjs")).href,
+    import.meta.url,
+  );
 }

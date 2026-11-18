@@ -18,6 +18,10 @@ Connect a GitHub repository, ask about the failure and run a focused existing Vi
 
 Run `npm test`, `npm run build`, `npm run build:managed`, `npm run lint`, and `npx tsc -p tsconfig.test.json --pretty false`. CI additionally runs `node scripts/verify-isolated-replay.mjs`, the built runner image and `npx playwright test --config playwright.investigations.config.ts`.
 
+## Windows compatibility
+
+Node ESM loader registration uses a `file:` URL converted from the resolved instrumentation path. A bare Windows drive-letter path is not an ESM specifier. CI runs the full unit/Worker suite and production build on Windows with Node 22.19.0, in addition to the Linux and container gates.
+
 ## Cost accounting
 
 `npm run bench:investigation -- --output /tmp/investigation-fixture.json` reruns a controlled 12-file Vitest fixture. The retained local result is [investigation-fixture.json](benchmarks/investigation-fixture.json). That run reduced evidence from 7,638 to 1,484 bytes, executed one selected file instead of twelve, then verified the repaired assertion. No paid model or provider was called in that fixture. The measured duration excludes GitHub checkout and dependency installation. Values vary with environment; evidence bytes are not a token estimate.
@@ -32,7 +36,7 @@ Focused execution currently supports npm projects with an unambiguous direct Vit
 
 A protocol header prevents old runners from treating focused plans as ordinary full-suite requests. Review execution setup in Connections to update a repository workflow. Investigation cancellation closes the durable record and requests the same external cancellation used by repository checks. An unconfirmed external cancellation remains explicitly uncertain. Hosted work that produces no complete report within fifteen minutes becomes blocked without automatic duplicate execution. Thirty-day inactive investigations and their artifacts expire; latest complete source indexes are preserved. OAuth transient records also expire.
 
-Reviewed bootstrap: [`6d78bf1f941ef65c4180bf20a8b37703a6451149`](https://github.com/fysaio/traceyard/commit/6d78bf1f941ef65c4180bf20a8b37703a6451149). The shared runner version pins hosted setup and the optional local command to this immutable source.
+Reviewed bootstrap: [`6bfde2973ff92f322b6d575e60a3212e2474bbcc`](https://github.com/fysaio/traceyard/commit/6bfde2973ff92f322b6d575e60a3212e2474bbcc). The shared runner version pins hosted setup and the optional local command to this immutable source.
 
 ## Production rollout
 
