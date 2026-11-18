@@ -3,6 +3,8 @@ import type { AttemptStatus, RunStatus, StepStatus } from "../../shared/domain/s
 import type { FailureScenario } from "../../shared/workflow/document";
 
 export interface RunRow {
+  recovery_mode?: "restart" | "resume" | null;
+  effect_scope_id?: string | null;
   id: string;
   project_id: string;
   workflow_id: string;
@@ -39,6 +41,7 @@ export interface RunWithWorkflowRow extends RunRow {
 }
 
 export interface StepRow {
+  reused_from_run_id?: string | null;
   id: string;
   run_id: string;
   step_key: string;

@@ -18,7 +18,9 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM managed_repository_checks"),
     env.DB.prepare("DELETE FROM repository_test_results"),
+    env.DB.prepare("DELETE FROM github_check_dispatches"),
     env.DB.prepare("DELETE FROM repository_check_requests"),
     env.DB.prepare("DELETE FROM repository_test_cases"),
     env.DB.prepare("DELETE FROM repository_runner_configs"),
@@ -57,7 +59,11 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM quota_counters"),
     env.DB.prepare("DELETE FROM audit_events"),
     env.DB.prepare("DELETE FROM sandbox_sessions"),
-    env.DB.prepare("UPDATE system_flags SET value = 'true' WHERE key = 'sandbox_enabled'"),
-    env.DB.prepare("UPDATE system_flags SET value = '' WHERE key = 'sandbox_circuit_open_until'"),
+    env.DB.prepare(
+      "INSERT INTO system_flags(key,value,updated_at) VALUES('sandbox_enabled','true',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    ),
+    env.DB.prepare(
+      "INSERT INTO system_flags(key,value,updated_at) VALUES('sandbox_circuit_open_until','',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    ),
   ]);
 });

@@ -31,7 +31,6 @@ export function WorkspaceShell({
     [name, setName] = useState("");
   const projects = q.data ?? [],
     connectedProjects = projects.filter((p) => Boolean(p.repository)),
-    hasConnectedRepo = connectedProjects.length > 0,
     pathProject = location.pathname.match(/^\/projects\/([^/]+)/)?.[1],
     project =
       (pathProject ? projects.find((p) => p.id === pathProject) : undefined) ??
@@ -45,7 +44,16 @@ export function WorkspaceShell({
     setSelection(id);
     setMenu(null);
     // Keep connection setup in context; detail IDs belong to the old project.
-    const destination = location.pathname === "/connect" ? "/connect" : "/projects/" + id;
+    const destination = [
+      "/connect",
+      "/executions",
+      "/traces",
+      "/approvals",
+      "/workflows",
+      "/builder",
+    ].includes(location.pathname)
+      ? location.pathname
+      : "/workflows";
     navigate(destination + "?project=" + encodeURIComponent(id));
   }
   const create = useMutation({
@@ -59,7 +67,7 @@ export function WorkspaceShell({
       setSelection(p.id);
       setMenu(null);
       setName("");
-      navigate("/projects/" + p.id);
+      navigate("/workflows?project=" + p.id);
     },
   });
   const logout = useMutation({
@@ -101,8 +109,11 @@ export function WorkspaceShell({
           </Link>
           <nav aria-label="Main navigation">
             {[
-              ["/projects", "Projects", "layer-group"],
-              ["/builder", "Build", "diagram-project"],
+              ["/workflows", "Workflows", "diagram-project"],
+              ["/executions", "Executions", "play"],
+              ["/traces", "Traces", "wave-square"],
+              ["/approvals", "Approvals", "check-double"],
+              ["/projects", "Repositories", "code-branch"],
             ].map(([path, label, icon]) => (
               <NavLink
                 key={path}
@@ -110,10 +121,8 @@ export function WorkspaceShell({
                 end={false}
                 className={({ isActive }) =>
                   isActive ||
-                  (path === "/builder" &&
-                    /^\/(?:studio|workflow|template)(?:\/|$)/.test(location.pathname)) ||
-                  (path === "/projects" &&
-                    /^\/(?:executions|traces|analytics)(?:\/|$)/.test(location.pathname))
+                  (path === "/workflows" &&
+                    /^\/(?:builder|studio|workflow|template)(?:\/|$)/.test(location.pathname))
                     ? "active"
                     : ""
                 }
@@ -133,21 +142,19 @@ export function WorkspaceShell({
               <Icon name="magnifying-glass" />
             </button>
             <button
-              className={"btn project-switch " + (!hasConnectedRepo ? "connect-prompt" : "")}
-              aria-label={hasConnectedRepo ? "Switch project" : "Connect repository"}
+              className="btn project-switch"
+              aria-label="Switch project"
               aria-haspopup="dialog"
               disabled={q.isPending || q.isError}
               onClick={() => setMenu("projects")}
             >
-              <Icon name={hasConnectedRepo ? "folder" : "code-branch"} />
+              <Icon name="folder" />
               <span>
                 {q.isPending
                   ? "Loading projects…"
-                  : hasConnectedRepo
-                    ? (project?.repository ?? project?.name ?? "Choose a project")
-                    : "Connect repository"}
+                  : (project?.repository ?? project?.name ?? "Choose a project")}
               </span>
-              <Icon name={hasConnectedRepo ? "chevron-down" : "plus"} />
+              <Icon name="chevron-down" />
             </button>
             <button
               className="btn icon-only"
@@ -195,8 +202,9 @@ export function WorkspaceShell({
         </main>
         {menu === "projects" && (
           <Modal
-            title="Workspace & projects"
+            title="Projects"
             menu
+            className="project-switcher"
             close={() => setMenu(null)}
             actions={
               <Link
@@ -212,7 +220,7 @@ export function WorkspaceShell({
           >
             <p className="hint">{session.user!.name ?? session.user!.login}’s workspace</p>
             <div className="project-menu-list">
-              {hasConnectedRepo ? (
+              {projects.length ? (
                 projects.map((p) => (
                   <button
                     className="menu-action"
@@ -237,19 +245,20 @@ export function WorkspaceShell({
                   <div className="modal-connect-icon">
                     <i className="fa-brands fa-github" aria-hidden="true" />
                   </div>
-                  <p className="modal-connect-title">Connect a repository first</p>
-                  <p className="hint">
-                    Connecting repositories will create your projects. Once connected, you can choose whichever project to work on.
-                  </p>
+                  <p className="modal-connect-title">Connect your first repo</p>
+                  <p className="hint">Your connected repos appear here as projects.</p>
                 </div>
               )}
             </div>
-            <div className="dialog-actions">
+            <div className="dialog-actions project-menu-actions">
               <Link className="btn" to="/projects" onClick={() => setMenu(null)}>
                 All projects
               </Link>
               <button className="btn primary" onClick={() => setMenu("connect")}>
-                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
+                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repo
+              </button>
+              <button className="btn" onClick={() => setMenu("create")}>
+                Create project
               </button>
             </div>
           </Modal>
@@ -339,8 +348,9 @@ function Search({ projectId, close }: { projectId: string; close: () => void }) 
   const pages = [
     ["Projects", "/settings/projects"],
     ["Connect application", "/connect"],
-    ["Application runs", "/"],
-    ["Workflow builder", "/builder"],
+    ["Executions", "/executions"],
+    ["Workflows & agents", "/workflows"],
+    ["Traces", "/traces"],
     ["Gateway", "/gateway"],
     ["Laboratory", "/laboratory"],
     ["Approvals", "/approvals"],

@@ -1,5 +1,7 @@
-import { useState, type ReactNode, type FormEvent } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ApiClientError } from "../lib/api";
+import { SourceFlowTree } from "../components/source-flow";
+import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon, Modal, ErrorMessage, downloadJson } from "../components/product-ui";
 import { ConnectRepository } from "./project-overview";
@@ -15,6 +17,7 @@ import type {
   TestCaseInput,
 } from "../../shared/repository/workspace";
 import type { RepositoryJob } from "../../shared/repository/contracts";
+import { checkDisplayStatus } from "../../shared/repository/check-status";
 const projectPath = (id: string) => "/projects/" + encodeURIComponent(id);
 const operationPath = (p: string, key: string) =>
   projectPath(p) + "/operations/" + encodeURIComponent(key);
@@ -72,11 +75,11 @@ export function RunStatus({ value }: { value: string }) {
           SUCCEEDED: "Completed",
           FAILED: "Failed",
           RUNNING: "Running",
+          STALE: "Update overdue",
           QUEUED: "Queued",
           SKIPPED: "Not tested",
           CANCELLED: "Cancelled",
           DISCOVERING: "Discovering",
-          AWAITING_MERGE: "Setup to approve",
           PREPARING: "Preparing",
           READY: "Connected",
         } as Record<string, string>
@@ -199,7 +202,7 @@ export function ProjectsPage() {
         actions={
           <button className="btn primary" onClick={() => setConnect(true)}>
             <Icon name="plus" />
-            Connect repository
+            Connect repo
           </button>
         }
       />
@@ -236,7 +239,7 @@ export function ProjectsPage() {
                 "Clear search"
               ) : (
                 <>
-                  <i className="fa-brands fa-github" aria-hidden="true" /> Connect repository
+                  <i className="fa-brands fa-github" aria-hidden="true" /> Connect repo
                 </>
               )}
             </button>
@@ -256,8 +259,8 @@ export function ProjectsPage() {
                 </span>
                 {p.lastCheck ? (
                   <RunStatus value={p.lastCheck} />
-                ) : p.setupState && p.setupState !== "NOT_STARTED" ? (
-                  <RunStatus value={p.setupState} />
+                ) : p.discoveryStatus ? (
+                  <RunStatus value={p.discoveryStatus} />
                 ) : (
                   <span className="flow-muted">Ready to connect</span>
                 )}
@@ -306,68 +309,35 @@ function SourceLink({ catalog, operation }: { catalog: Catalog; operation: Opera
   ) : null;
 }
 function SetupProgress({ catalog, refresh }: { catalog: Catalog; refresh: () => void }) {
-  const p = catalog.project.id,
-    r = catalog.repository,
-    cache = useQueryClient();
+  const r = catalog.repository;
   const action = useMutation({
-    mutationFn: (kind: string) => integrationRequest(p, "repository/" + kind, "POST"),
-    onSuccess: () => {
-      refresh();
-      void cache.invalidateQueries({ queryKey: ["repository", p] });
-    },
+    mutationFn: () => integrationRequest(catalog.project.id, "repository/scan", "POST"),
+    onSuccess: refresh,
   });
-  if (!r?.repository_id) return null;
-  const needsSetup = !r.runner_enabled,
-    failed = !!r.check_setup_error || r.status === "FAILED";
-  if (!needsSetup && r.status !== "DISCOVERING" && !failed) return null;
+  if (!r?.repository_id || !["DISCOVERING", "FAILED"].includes(r.status)) return null;
   return (
-    <section className="flow-setup-banner" aria-label="Connection progress">
+    <section className="flow-setup-banner" aria-label="Source discovery">
       <div className="flow-setup-line">
         <span className="flow-icon">
-          <Icon
-            name={
-              failed
-                ? "circle-exclamation"
-                : r.status === "DISCOVERING"
-                  ? "circle-notch"
-                  : "code-pull-request"
-            }
-          />
+          <Icon name={r.status === "DISCOVERING" ? "circle-notch" : "circle-exclamation"} />
         </span>
         <div>
           <h2>
-            {r.status === "DISCOVERING"
-              ? "Getting to know your code"
-              : needsSetup
-                ? "One approval, then your first run"
-                : "Connection needs attention"}
+            {r.status === "DISCOVERING" ? "Reading your repository" : "Source scan needs attention"}
           </h2>
           <p>
             {r.status === "DISCOVERING"
-              ? `${catalog.filesScanned} source files read. Operations appear as they’re discovered.`
-              : needsSetup
-                ? "Review and merge the runner setup PR. Its first build and tests start automatically."
-                : (r.last_error ?? r.check_setup_error)}
+              ? "Operations appear as they are discovered. Existing discoveries stay available while this scan runs."
+              : (r.last_error ??
+                "The scan stopped. Existing discoveries and recorded runs are still available.")}
           </p>
         </div>
-        <div className="flow-actions">
-          {needsSetup && r.setup_pr_url ? (
-            <a className="btn primary" target="_blank" rel="noreferrer" href={r.setup_pr_url}>
-              Review setup PR
-              <Icon name="arrow-up-right-from-square" />
-            </a>
-          ) : (
-            <button
-              className="btn"
-              disabled={action.isPending}
-              onClick={() => action.mutate(needsSetup ? "setup" : "scan")}
-            >
-              {action.isPending ? "Starting…" : needsSetup ? "Prepare setup PR" : "Retry discovery"}
-            </button>
-          )}
-        </div>
+        {r.status === "FAILED" && (
+          <button className="btn" disabled={action.isPending} onClick={() => action.mutate()}>
+            {action.isPending ? "Starting…" : "Retry scan"}
+          </button>
+        )}
       </div>
-      {r.check_setup_error && <p className="flow-error">{r.check_setup_error}</p>}
       <ErrorMessage error={action.error} />
     </section>
   );
@@ -375,14 +345,29 @@ function SetupProgress({ catalog, refresh }: { catalog: Catalog; refresh: () => 
 export function ProjectPage() {
   const { projectId } = useWorkspace(),
     q = useCatalog(projectId),
-    cache = useQueryClient();
+    cache = useQueryClient(),
+    navigate = useNavigate(),
+    checkRequest = useRef(crypto.randomUUID());
   const [search, setSearch] = useState(""),
     [onlyFailed, setOnlyFailed] = useState(false),
     [connect, setConnect] = useState(false),
-    [settings, setSettings] = useState(false);
+    [settings, setSettings] = useState(false),
+    [localCheck, setLocalCheck] = useState(false),
+    [enableChecks, setEnableChecks] = useState(false);
   const run = useMutation({
-    mutationFn: () => integrationRequest(projectId, "repository/analyze", "POST"),
-    onSuccess: () => void cache.invalidateQueries({ queryKey: ["catalog", projectId] }),
+    mutationFn: () =>
+      integrationRequest<{ url: string }>(projectId, "repository/analyze", "POST", {
+        requestId: checkRequest.current,
+      }),
+    onError: (error) => {
+      if (error instanceof ApiClientError && error.code === "CI_SETUP_REQUIRED")
+        setEnableChecks(true);
+    },
+    onSuccess: (result) => {
+      checkRequest.current = crypto.randomUUID();
+      void cache.invalidateQueries({ queryKey: ["catalog", projectId] });
+      navigate(result.url);
+    },
   });
   if (q.isPending) return <LoadingPage />;
   if (q.error || !q.data) return <LoadingError error={q.error} retry={() => void q.refetch()} />;
@@ -391,11 +376,8 @@ export function ProjectPage() {
       (o) => (!onlyFailed || o.failed > 0) && o.name.toLowerCase().includes(search.toLowerCase()),
     );
   const latest = d.jobs[0],
-    busy =
-      (latest?.status === "RUNNING" &&
-        q.dataUpdatedAt - Date.parse(latest.updated_at) < 15 * 60000) ||
-      (d.repository?.check_setup_state === "QUEUED" &&
-        q.dataUpdatedAt - Date.parse(d.repository.check_setup_updated_at ?? "") < 10 * 60000);
+    latestStatus = latest ? checkDisplayStatus(latest, q.dataUpdatedAt) : "",
+    busy = ["RUNNING", "QUEUED"].includes(latestStatus);
   return (
     <div className="flow-page">
       <Crumbs items={[{ label: d.repository?.full_name ?? d.project.name }]} />
@@ -412,19 +394,27 @@ export function ProjectPage() {
               <Icon name="sliders" />
               Test settings
             </button>
-            {d.repository?.repository_id ? (
+            {d.repository ? (
               <button
                 className="btn primary"
                 disabled={
                   run.isPending ||
-                  busy ||
-                  !d.repository.runner_enabled ||
-                  d.repository.status === "DISCOVERING"
+                  (busy && !!d.executionAvailable) ||
+                  (!!d.repository?.repository_id && !d.executionAvailable)
                 }
-                onClick={() => run.mutate()}
+                onClick={() => {
+                  if (!d.repository?.repository_id) setLocalCheck(true);
+                  else if (d.executionProvider === "github" && !d.repository.runner_enabled)
+                    setEnableChecks(true);
+                  else run.mutate();
+                }}
               >
                 <Icon name={busy ? "circle-notch" : "play"} />
-                {busy ? "Checks in progress" : "Check project"}
+                {!d.repository.repository_id
+                  ? "Run locally"
+                  : busy
+                    ? "Checks in progress"
+                    : "Run checks"}
               </button>
             ) : (
               <button className="btn primary" onClick={() => setConnect(true)}>
@@ -437,6 +427,17 @@ export function ProjectPage() {
       />
       <ErrorMessage error={run.error} />
       <SetupProgress catalog={d} refresh={() => void q.refetch()} />
+      {d.executionProvider === "github" && !d.repository?.runner_enabled && (
+        <p className="flow-notice">
+          Run checks on GitHub and view results here. The first run includes a one-time approval
+          inside Traceyard.
+        </p>
+      )}
+      {!!d.repository?.repository_id && !d.executionAvailable && (
+        <p className="flow-notice">
+          GitHub checks need server configuration. Source discoveries remain available.
+        </p>
+      )}
       {latest && (
         <Link className="flow-check-summary" to={checkPath(projectId, latest.id)}>
           <span className="flow-icon small">
@@ -448,7 +449,7 @@ export function ProjectPage() {
               {latest.commit_sha?.slice(0, 7) ?? "Local directory"} · {stamp(latest.updated_at)}
             </span>
           </div>
-          <RunStatus value={latest.status} />
+          <RunStatus value={latestStatus} />
           <Icon name="chevron-right" />
         </Link>
       )}
@@ -477,7 +478,7 @@ export function ProjectPage() {
                 checked={onlyFailed}
                 onChange={(e) => setOnlyFailed(e.target.checked)}
               />
-              With failed runs
+              Failed application runs
             </label>
           </div>
         )}
@@ -504,9 +505,11 @@ export function ProjectPage() {
               ) : undefined
             }
           >
-            {search || onlyFailed
-              ? "Try a different name or clear the filter."
-              : "Supported source entry points and recorded application operations will appear here. Running tests only records the paths those tests exercise."}
+            {onlyFailed
+              ? "No operations match a failed application run. Build and test failures appear in the project check above. Clear filters to see discovered operations."
+              : search
+                ? "Try a different name or clear the filter."
+                : "Supported source entry points and recorded application operations will appear here. Running tests only records the paths those tests exercise."}
           </Empty>
         ) : (
           <div className="flow-operations">
@@ -533,7 +536,7 @@ export function ProjectPage() {
                       ? `${o.failed} failed`
                       : o.runs
                         ? `${o.runs} recorded runs`
-                        : "Not yet observed"}
+                        : "Source available"}
                   </span>
                 </div>
                 <h3>{o.name}</h3>
@@ -564,6 +567,14 @@ export function ProjectPage() {
         runs={[...d.runs, ...(d.managedRuns ?? [])].sort((a, b) =>
           b.startedAt.localeCompare(a.startedAt),
         )}
+        emptyAction={
+          d.operations[0] && (
+            <Link className="btn" to={operationPath(projectId, d.operations[0].key)}>
+              Explore source flow
+              <Icon name="arrow-right" />
+            </Link>
+          )
+        }
       />
       <div className="flow-footer">
         <Link to={`/builder?project=${projectId}`}>
@@ -575,6 +586,18 @@ export function ProjectPage() {
       {settings && (
         <TestSettings projectId={projectId} config={d.config} close={() => setSettings(false)} />
       )}
+      {enableChecks && (
+        <EnableGitHubChecks
+          projectId={projectId}
+          close={() => setEnableChecks(false)}
+          onReady={() => {
+            setEnableChecks(false);
+            void q.refetch();
+            run.mutate();
+          }}
+        />
+      )}
+      {localCheck && <LocalCheck projectId={projectId} close={() => setLocalCheck(false)} />}
       {connect && (
         <ConnectRepository
           projectId={projectId}
@@ -594,10 +617,16 @@ function RunList({
   projectId,
   runs,
   title = "Recent runs",
+  emptyTitle = "No application activity recorded yet",
+  emptyDescription = "Source discovery lists possible operations. A recorded run appears when a test or your application actually exercises a supported operation.",
+  emptyAction,
 }: {
   projectId: string;
   runs: ApplicationRun[];
   title?: string;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  emptyAction?: ReactNode;
 }) {
   const [selected, setSelected] = useState<string[]>([]),
     [failed, setFailed] = useState(false),
@@ -642,10 +671,12 @@ function RunList({
         </div>
       </div>
       {!rows.length ? (
-        <Empty icon="wave-square" title={failed ? "No failed runs" : "Waiting for a recorded run"}>
-          {failed
-            ? "There are no failed runs in this history."
-            : "Run project tests, or send activity from your application. Source discovery alone does not create executions."}
+        <Empty
+          icon="wave-square"
+          title={failed ? "No failed application runs" : emptyTitle}
+          action={failed ? undefined : emptyAction}
+        >
+          {failed ? "There are no failed runs in this history." : emptyDescription}
         </Empty>
       ) : (
         <div className="flow-run-list">
@@ -705,7 +736,8 @@ interface OperationData extends Catalog {
 export function OperationPage() {
   const { projectId } = useWorkspace(),
     { operationKey = "" } = useParams(),
-    cache = useQueryClient();
+    cache = useQueryClient(),
+    testRequest = useRef({ caseId: "", id: crypto.randomUUID() });
   const q = useQuery({
     queryKey: ["operation", projectId, operationKey],
     queryFn: () =>
@@ -718,16 +750,26 @@ export function OperationPage() {
   const [newTest, setNewTest] = useState(false),
     [settings, setSettings] = useState(false),
     [notice, setNotice] = useState(""),
-    [pendingDelete, setPendingDelete] = useState<SavedTestCase | null>(null);
+    [pendingDelete, setPendingDelete] = useState<SavedTestCase | null>(null),
+    [localCase, setLocalCase] = useState<string | null>(null),
+    [enableCase, setEnableCase] = useState<string | null>(null);
   const test = useMutation({
-    mutationFn: (caseId: string) =>
-      integrationRequest<{ url: string }>(
+    mutationFn: (caseId: string) => {
+      if (testRequest.current.caseId !== caseId)
+        testRequest.current = { caseId, id: crypto.randomUUID() };
+      return integrationRequest<{ url: string }>(
         projectId,
         `operations/${encodeURIComponent(operationKey)}/test`,
         "POST",
-        { caseId },
-      ),
+        { caseId, requestId: testRequest.current.id },
+      );
+    },
+    onError: (error, caseId) => {
+      if (error instanceof ApiClientError && error.code === "CI_SETUP_REQUIRED")
+        setEnableCase(caseId);
+    },
     onSuccess: () => {
+      testRequest.current = { caseId: "", id: crypto.randomUUID() };
       setNotice("Test requested. Its check and recorded run will appear in this project.");
       void cache.invalidateQueries({ queryKey: ["catalog", projectId] });
     },
@@ -771,7 +813,7 @@ export function OperationPage() {
           {o.evidence === "linked"
             ? "Source linked to runtime evidence"
             : o.evidence === "source"
-              ? "Discovered in source · Not yet recorded"
+              ? "Source flow · Runtime recording optional"
               : "Runtime evidence · Source not linked"}
         </span>
         <span>
@@ -782,8 +824,11 @@ export function OperationPage() {
         <section className="flow-surface flow-operation-map">
           <div className="flow-section-heading">
             <div>
-              <h2>Inside this operation</h2>
-              <p>Direct calls found in source. This does not establish execution order.</p>
+              <h2>Source flow</h2>
+              <p>
+                Possible calls read from code. This view is available without running the
+                application.
+              </p>
             </div>
           </div>
           <div className="flow-entry-node">
@@ -795,7 +840,9 @@ export function OperationPage() {
               <strong>{o.name}</strong>
             </div>
           </div>
-          {o.calls.length > 0 ? (
+          {o.sourceFlow?.steps.length ? (
+            <SourceFlowTree flow={o.sourceFlow} file={o.file} />
+          ) : o.calls.length > 0 ? (
             <div className="flow-call-grid">
               {o.calls.map((name, i) => (
                 <div className="flow-call" key={i}>
@@ -806,10 +853,14 @@ export function OperationPage() {
             </div>
           ) : (
             <p className="flow-muted flow-space">
-              Imported or dynamic calls were not resolved in this scan. Recorded steps below show
-              actual runtime evidence.
+              No function calls were resolved for this entry point. Imported and dynamic
+              implementations may be outside this scan.
             </p>
           )}
+          <p className="flow-note flow-space">
+            Call relationships are inferred from source; they do not establish execution order or
+            prove that a branch ran. Imported and dynamic implementations are not expanded.
+          </p>
         </section>
       )}
       <section className="flow-section">
@@ -874,23 +925,27 @@ export function OperationPage() {
                   </button>
                   <button
                     className="btn primary"
-                    disabled={test.isPending || !d.repository?.runner_enabled}
-                    onClick={() => test.mutate(c.id)}
+                    disabled={
+                      test.isPending || (!!d.repository?.repository_id && !d.executionAvailable)
+                    }
+                    onClick={() => {
+                      if (d.executionProvider === "github" && !d.repository?.runner_enabled)
+                        setEnableCase(c.id);
+                      else if (d.executionAvailable) test.mutate(c.id);
+                      else if (!d.repository?.repository_id) setLocalCase(c.id);
+                    }}
                   >
                     <Icon name="play" />
-                    {test.isPending ? "Requesting…" : "Run test"}
+                    {!d.repository?.repository_id
+                      ? "Run locally"
+                      : test.isPending
+                        ? "Requesting…"
+                        : "Run test"}
                   </button>
                 </div>
               </article>
             ))}
           </div>
-        )}
-        {!!d.cases.length && !d.repository?.runner_enabled && (
-          <p className="flow-note">
-            GitHub execution needs the setup PR merged first. For a local project, run{" "}
-            <code>node /path/to/traceyard/agent/cli.mjs run . --case {d.cases[0]?.id}</code> from
-            your application folder.
-          </p>
         )}
       </section>
       <RunList projectId={projectId} runs={d.runs} title="Run history" />
@@ -907,6 +962,20 @@ export function OperationPage() {
       )}
       {settings && (
         <TestSettings projectId={projectId} config={d.config} close={() => setSettings(false)} />
+      )}
+      {enableCase && (
+        <EnableGitHubChecks
+          projectId={projectId}
+          close={() => setEnableCase(null)}
+          onReady={() => {
+            const id = enableCase;
+            setEnableCase(null);
+            test.mutate(id);
+          }}
+        />
+      )}
+      {localCase && (
+        <LocalCheck projectId={projectId} caseId={localCase} close={() => setLocalCase(null)} />
       )}
       {pendingDelete && (
         <Modal title="Delete this saved test?" close={() => setPendingDelete(null)}>
@@ -931,6 +1000,249 @@ export function OperationPage() {
     </div>
   );
 }
+interface CISetupResult {
+  state: "READY" | "PREPARING" | "AWAITING_MERGE" | "MERGING" | "BLOCKED" | "SETUP_REQUIRED";
+  prNumber?: number;
+  headSha?: string;
+  workflow?: string;
+  message?: string;
+}
+function EnableGitHubChecks({
+  projectId,
+  close,
+  onReady,
+}: {
+  projectId: string;
+  close: () => void;
+  onReady: () => void;
+}) {
+  const prepared = useRef(false),
+    finished = useRef(false),
+    cache = useQueryClient();
+  const setup = useQuery({
+    queryKey: ["ci-setup", projectId],
+    queryFn: async () => {
+      const result = await integrationRequest<CISetupResult>(
+        projectId,
+        "repository/setup",
+        prepared.current ? "GET" : "POST",
+      );
+      prepared.current = true;
+      return result;
+    },
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    retry: false,
+    refetchInterval: (q) =>
+      ["PREPARING", "MERGING"].includes(q.state.data?.state ?? "") ? 10000 : false,
+  });
+  const approve = useMutation({
+    mutationFn: () =>
+      integrationRequest<CISetupResult>(projectId, "repository/enable", "POST", {
+        prNumber: setup.data?.prNumber,
+        headSha: setup.data?.headSha,
+      }),
+    onSuccess: (result) => {
+      cache.setQueryData(["ci-setup", projectId], { ...setup.data, ...result });
+      void setup.refetch();
+    },
+  });
+  useEffect(() => {
+    if (
+      prepared.current &&
+      !setup.isFetching &&
+      !setup.error &&
+      setup.data?.state === "READY" &&
+      !finished.current
+    ) {
+      finished.current = true;
+      onReady();
+    }
+  }, [setup.data, setup.isFetching, setup.error, onReady]);
+  const busy =
+    setup.isPending || ["PREPARING", "MERGING", "READY"].includes(setup.data?.state ?? "");
+  return (
+    <Modal title="Enable GitHub checks" close={close}>
+      <div className="flow-local-check">
+        <p>Traceyard runs your project on GitHub and brings the results back here.</p>
+        {busy ? (
+          <p role="status">
+            <Icon name="circle-notch" />{" "}
+            {setup.data?.state === "MERGING"
+              ? "GitHub is processing the setup merge. Required checks and repository rules still apply."
+              : setup.data?.state === "READY"
+                ? "Starting your check…"
+                : "Preparing your setup change…"}
+          </p>
+        ) : (
+          <>
+            <div>
+              <h3>One workflow file</h3>
+              <p>
+                Enable checks adds or updates <code>.github/workflows/traceyard.yml</code>.
+                Traceyard handles the pull request and merge here when you approve.
+              </p>
+            </div>
+            <p>
+              The runner connects automatically and uses your GitHub Actions allowance. Each check
+              has a 10-minute limit.
+            </p>
+            {setup.data?.workflow && (
+              <details>
+                <summary>Review the workflow</summary>
+                <pre className="code">{setup.data.workflow}</pre>
+              </details>
+            )}
+            {setup.data?.state === "BLOCKED" && (
+              <p className="flow-notice" role="status">
+                {setup.data.message ??
+                  "GitHub requires reviews, checks or additional permissions before merging this setup."}
+              </p>
+            )}
+          </>
+        )}
+        <ErrorMessage error={setup.error || approve.error} />
+        <div className="dialog-actions">
+          <button className="btn" onClick={close}>
+            {busy ? "Close" : "Cancel"}
+          </button>
+          {setup.data?.headSha && !busy && (
+            <button
+              className="btn primary"
+              disabled={approve.isPending}
+              onClick={() => approve.mutate()}
+            >
+              {approve.isPending
+                ? "Requesting merge…"
+                : setup.data.state === "BLOCKED"
+                  ? "Retry merge"
+                  : "Enable and run"}
+            </button>
+          )}
+          {(setup.error || setup.data?.state === "SETUP_REQUIRED") && (
+            <button
+              className="btn"
+              disabled={setup.isFetching}
+              onClick={() => {
+                prepared.current = false;
+                void setup.refetch();
+              }}
+            >
+              Prepare again
+            </button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+function LocalCheck({
+  projectId,
+  caseId,
+  close,
+}: {
+  projectId: string;
+  caseId?: string;
+  close: () => void;
+}) {
+  const [copied, setCopied] = useState(false),
+    [commandCopied, setCommandCopied] = useState(false),
+    [copyError, setCopyError] = useState(false),
+    cache = useQueryClient();
+  const key = useMutation({
+    mutationFn: () =>
+      integrationRequest<{ token: string }>(projectId, "keys", "POST", {
+        name: "Local checks",
+        scopes: ["traces:write"],
+      }),
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: ["keys", projectId] });
+    },
+  });
+  const environment = `TRACEYARD_ORIGIN=${window.location.origin}\nTRACEYARD_KEY=${key.data?.token ?? "<create a project key below>"}\n`,
+    command =
+      "npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#a23df5c114e7302e76418309206150983255a3c8 -- traceyard run ." +
+      (caseId ? " --case " + caseId : "");
+  return (
+    <Modal title={caseId ? "Run this test locally" : "Run project checks locally"} close={close}>
+      <div className="flow-local-check">
+        <p>
+          Your computer runs the code. Traceyard receives the discoveries and results. No GitHub
+          pull request is needed.
+        </p>
+        <div>
+          <h3>1. Connect this project</h3>
+          <p>
+            In your application's folder, add <code>.env.traceyard</code> to <code>.gitignore</code>
+            . Save these values in <code>.env.traceyard</code>.
+          </p>
+          <pre className="code">{environment}</pre>
+          {!key.data ? (
+            <button className="btn" disabled={key.isPending} onClick={() => key.mutate()}>
+              {key.isPending ? "Creating…" : "Create project key"}
+            </button>
+          ) : (
+            <>
+              <button
+                className="btn"
+                onClick={() => {
+                  void navigator.clipboard
+                    .writeText(environment)
+                    .then(() => {
+                      setCopied(true);
+                      setCopyError(false);
+                    })
+                    .catch(() => setCopyError(true));
+                }}
+              >
+                {copied ? "Copied" : "Copy connection values"}
+              </button>
+              <p className="hint" role="status">
+                This key is shown once and expires in 90 days. Manage it in API keys & SDK.
+              </p>
+              {copyError && (
+                <p role="alert">
+                  Copy the values above manually; clipboard access was unavailable.
+                </p>
+              )}
+            </>
+          )}
+          <ErrorMessage error={key.error} />
+        </div>
+        <div>
+          <h3>2. Run from your application's folder</h3>
+          <p>
+            Use Node.js 22.12+ and Git. This command downloads the pinned runner on first use; npm
+            caches it afterward.
+          </p>
+          <pre className="code">{command}</pre>
+          <button
+            className="btn"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(command)
+                .then(() => setCommandCopied(true))
+                .catch(() => setCopyError(true));
+            }}
+          >
+            {commandCopied ? "Copied" : "Copy run command"}
+          </button>
+          <p>
+            The runner installs locked npm dependencies and runs{" "}
+            {caseId
+              ? "this saved request against your application"
+              : "your existing build and tests"}
+            . Use your local test environment. Each command has a 3-minute limit.
+          </p>
+        </div>
+        <p>
+          Keep this project open to see progress. Only supported activity exercised by the test
+          appears as recorded runs.
+        </p>
+      </div>
+    </Modal>
+  );
+}
 function TestSettings({
   projectId,
   config,
@@ -942,9 +1254,6 @@ function TestSettings({
 }) {
   const [value, setValue] = useState(config),
     cache = useQueryClient();
-  const upgrade = useMutation({
-    mutationFn: () => integrationRequest<{ url: string }>(projectId, "repository/upgrade", "POST"),
-  });
   const save = useMutation({
     mutationFn: () => integrationRequest(projectId, "runner-config", "PUT", value),
     onSuccess: () => {
@@ -959,25 +1268,6 @@ function TestSettings({
         These settings are used by the next runner. Keep provider keys and database credentials in
         your test environment; don’t paste them here.
       </p>
-      <div className="flow-upgrade">
-        <p className="flow-note">
-          Already installed an earlier runner? Propose an upgrade before using saved request tests.
-        </p>
-        <button
-          className="btn flow-space"
-          disabled={upgrade.isPending}
-          onClick={() => upgrade.mutate()}
-        >
-          {upgrade.isPending ? "Preparing PR…" : "Prepare runner upgrade PR"}
-        </button>
-        <ErrorMessage error={upgrade.error} />
-        {upgrade.data && (
-          <a className="btn flow-space" href={upgrade.data.url} target="_blank" rel="noreferrer">
-            Review runner upgrade
-            <Icon name="arrow-up-right-from-square" />
-          </a>
-        )}
-      </div>
       <form
         className="flow-form"
         onSubmit={(e) => {
@@ -1466,10 +1756,44 @@ export function ProjectCheckPage() {
       message: string;
       at: string;
     }[];
-  const phases = ["discovery", "install", "build", "test", "complete"].map((name) => ({
-    name,
-    event: [...events].reverse().find((e) => e.phase === name),
-  }));
+  const displayStatus = checkDisplayStatus(d.job, q.dataUpdatedAt);
+  const phases = [
+    ...(d.job.source === "github-pending" ? ["dispatch"] : []),
+    ...(d.job.source === "managed" ? ["checkout"] : []),
+    "discovery",
+    "install",
+    "build",
+    "test",
+    "complete",
+  ].map((name) => {
+    const event =
+      [...events].reverse().find((e) => e.phase === name) ??
+      (name === "complete" && !["RUNNING", "QUEUED"].includes(d.job.status)
+        ? {
+            phase: "complete",
+            status: d.job.status,
+            message:
+              d.job.source === "github"
+                ? "The runner has ended. Open GitHub logs for the final command output."
+                : "This check has ended. Review the reported stages above.",
+            at: d.job.updated_at,
+          }
+        : undefined);
+    return {
+      name,
+      event:
+        event?.status === "RUNNING" && !["RUNNING", "QUEUED"].includes(displayStatus)
+          ? {
+              ...event,
+              status: displayStatus === "SUCCEEDED" ? "SKIPPED" : displayStatus,
+              message:
+                displayStatus === "STALE"
+                  ? "No recent runner update. The outcome has not been confirmed."
+                  : "The check ended before a final update for this stage was received. See the result below.",
+            }
+          : event,
+    };
+  });
   return (
     <div className="flow-page">
       <Crumbs
@@ -1480,7 +1804,7 @@ export function ProjectCheckPage() {
       />
       <PageHead
         title="Project check"
-        description={`${d.job.commit_sha?.slice(0, 7) ?? "Local directory"} · ${stamp(d.job.updated_at)}`}
+        description={`${d.job.commit_sha?.slice(0, 7) ?? (d.job.source === "github-pending" ? "Waiting for GitHub" : "Local directory")} · ${stamp(d.job.updated_at)}`}
         actions={
           d.job.github_url && (
             <a className="btn" href={d.job.github_url} target="_blank" rel="noreferrer">
@@ -1493,22 +1817,41 @@ export function ProjectCheckPage() {
       <ErrorMessage error={cancel.error} />
       {cancel.isSuccess && (
         <p role="status" className="flow-notice">
-          Cancellation requested. Waiting for GitHub to confirm it has stopped.
+          {d.job.source === "managed"
+            ? "Check cancelled. Its discovered operations remain available."
+            : "Cancellation requested. Waiting for GitHub to confirm it has stopped."}
         </p>
       )}
-      {d.job.source === "github" && d.job.status === "RUNNING" && (
-        <button
-          className="btn flow-space"
-          disabled={cancel.isPending || cancel.isSuccess}
-          onClick={() => cancel.mutate()}
-        >
-          Cancel check
-        </button>
-      )}
+      {["github", "github-pending", "managed"].includes(d.job.source) &&
+        ["RUNNING", "QUEUED"].includes(d.job.status) && (
+          <button
+            className="btn flow-space"
+            disabled={cancel.isPending || cancel.isSuccess}
+            onClick={() => cancel.mutate()}
+          >
+            Cancel check
+          </button>
+        )}
       <div className="flow-run-facts">
-        <RunStatus value={d.job.status} />
-        <span>{d.job.source === "github" ? "GitHub runner" : "Local runner"}</span>
+        <RunStatus value={displayStatus} />
+        <span>
+          {d.job.source === "managed"
+            ? "Traceyard runner"
+            : ["github", "github-pending"].includes(d.job.source)
+              ? "GitHub runner"
+              : "Local runner"}
+        </span>
       </div>
+      {displayStatus === "STALE" && (
+        <p className="flow-notice" role="status">
+          {d.job.source === "github"
+            ? "No progress for over 15 minutes. This page checks GitHub automatically; open GitHub logs to verify the outcome."
+            : "No recent runner update. This check's outcome is unconfirmed. Traceyard will close an expired check without repeating it automatically."}{" "}
+          <button className="btn quiet" disabled={q.isFetching} onClick={() => void q.refetch()}>
+            Refresh status
+          </button>
+        </p>
+      )}
       <section className="flow-surface">
         <h2>Progress</h2>
         <ol className="flow-check-stages">
@@ -1523,7 +1866,9 @@ export function ProjectCheckPage() {
                         ? "circle-xmark"
                         : p.event.status === "RUNNING"
                           ? "circle-notch"
-                          : "circle-check"
+                          : p.event.status === "SUCCEEDED"
+                            ? "circle-check"
+                            : "circle"
                   }
                 />
               </span>
@@ -1532,6 +1877,8 @@ export function ProjectCheckPage() {
                   {
                     (
                       {
+                        dispatch: "Start GitHub runner",
+                        checkout: "Download repository",
                         discovery: "Read source",
                         install: "Install dependencies",
                         build: "Build application",
@@ -1550,8 +1897,32 @@ export function ProjectCheckPage() {
       </section>
       <RunList
         projectId={projectId}
-        runs={catalog.data?.runs.filter((r) => r.checkId === checkId) ?? []}
+        runs={catalog.data?.runs.filter((r) => r.checkId === d.job.id) ?? []}
         title="Runs recorded during this check"
+        emptyAction={
+          catalog.data?.operations[0] && (
+            <Link className="btn" to={operationPath(projectId, catalog.data.operations[0].key)}>
+              Explore source flow
+              <Icon name="arrow-right" />
+            </Link>
+          )
+        }
+        emptyTitle={
+          ["RUNNING", "QUEUED"].includes(displayStatus)
+            ? "No application activity recorded so far"
+            : "No application activity was recorded"
+        }
+        emptyDescription={
+          displayStatus === "STALE"
+            ? "The check’s outcome could not be confirmed. Review its status before starting another attempt."
+            : d.job.status === "FAILED"
+              ? "This project check failed. Review the failed stage above, correct it, then run Check project again. A failed check and a failed application run are different results; tests that stop before requests or mock those requests may record no application activity."
+              : d.job.status === "QUEUED"
+                ? "This check is waiting for an isolated runner. Your source operations are available now."
+                : d.job.status === "RUNNING"
+                  ? "The check is still running. Application activity appears here when its tests make supported runtime calls."
+                  : "The checks passed without exporting supported runtime activity. Source flows remain available from the project’s operations. A recorded run requires an actual supported execution."
+        }
       />
     </div>
   );

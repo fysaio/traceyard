@@ -1,5 +1,5 @@
 import { DomainError } from "../../shared/domain/errors";
-import { graphSchema, graphLayers } from "../../shared/workflow/graph";
+import { graphSchema, graphLayers, graphStepPolicy } from "../../shared/workflow/graph";
 import { DOCUMENT_WORKFLOW, validateDocumentInput } from "../../shared/workflow/document";
 import type { WorkflowCatalogEntry } from "../persistence/catalog";
 
@@ -56,11 +56,10 @@ export function assertCatalogMatchesRuntime(entry: WorkflowCatalogEntry): Workfl
           key: n.id,
           name: n.name,
           ordinal: i + 1,
-          maxAttempts: 1,
-          timeoutMs: n.type === "model" ? 120000 : n.type === "http" ? 30000 : 10000,
-          baseDelayMs: 0,
-          backoff: "fixed" as const,
-          maxDelayMs: 0,
+          maxAttempts: graphStepPolicy(n).retry.maxAttempts,
+          timeoutMs: graphStepPolicy(n).timeoutMs,
+          baseDelayMs: graphStepPolicy(n).retry.baseDelayMs,
+          backoff: graphStepPolicy(n).retry.backoff,
         })),
       validateInput: (value) => {
         if (value === undefined)

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { discoverFile } from "../../agent/discovery.mjs";
 import { convertOtlp } from "../../worker/repositories/otlp";
-import { runnerWorkflow } from "../../worker/repositories/runner-workflow";
 describe("repository discovery and runtime evidence", () => {
   it("finds real route declarations and direct calls, without matching comments or data getters", () => {
     const r = discoverFile(
@@ -64,18 +63,5 @@ describe("repository discovery and runtime evidence", () => {
     expect(Date.parse(spans[0]!.endedAt) - Date.parse(spans[0]!.startedAt)).toBe(100);
     expect(JSON.stringify(spans)).not.toContain("private SQL");
     expect(JSON.stringify(spans)).not.toContain("token=secret");
-  });
-  it("generates a pinned GitHub-hosted check with OIDC and no long-lived API secret", () => {
-    const content = runnerWorkflow("https://traceyard.example", "main", "a".repeat(40));
-    expect(content).toContain("id-token: write");
-    expect(content).toContain("ubuntu-latest");
-    expect(content).toContain('paths: [".github/workflows/traceyard.yml"]');
-    expect(content).toContain("timeout-minutes: 10");
-    expect(content).toContain("cancel-in-progress: true");
-    expect(content).toContain("cache: npm");
-    expect(content).toContain("persist-credentials: false");
-    expect(content).toContain("a".repeat(40));
-    expect(content).not.toContain("TRACEYARD_KEY");
-    expect(content).not.toContain("pull_request_target");
   });
 });

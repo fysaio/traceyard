@@ -64,6 +64,7 @@ import { assertCatalogMatchesRuntime } from "../workflows/registry";
 const DEDUPE_WINDOW_MS = 10_000;
 
 export interface LaunchInput {
+  parentRunId?: string;
   workflowId: string;
   projectId?: string;
   version?: number;
@@ -112,6 +113,11 @@ export async function launchRun(
     throw notFound("The requested workflow does not exist in this project.");
   }
   const runtime = assertCatalogMatchesRuntime(entry);
+  if (body.parentRunId) {
+    const source = await getRunForOwner(db, body.parentRunId, session.idHash, userId);
+    if (!source || source.project_id !== projectId || source.workflow_id !== entry.workflow.id)
+      throw notFound("The source execution was not found in this workflow and project.");
+  }
   if (entry.version.graph_json && body.scenario !== "success")
     throw badRequest(
       "UNSUPPORTED_FAULT",
@@ -137,6 +143,7 @@ export async function launchRun(
       version: entry.version.version,
       scenario: body.scenario,
       input: validatedInput,
+      ...(body.parentRunId ? { parentRunId: body.parentRunId } : {}),
     }),
   );
 
@@ -166,7 +173,7 @@ export async function launchRun(
         status: 200,
       };
     }
-  } else {
+  } else if (!body.parentRunId) {
     const recent = await db
       .prepare(
         `SELECT id FROM runs
@@ -273,7 +280,7 @@ export async function launchRun(
         ownerSessionHash: session.idHash,
         ownerUserId: userId,
         ownerIpHash: session.ipHash,
-        parentRunId: null,
+        parentRunId: body.parentRunId ?? null,
         retryOfRunId: null,
         idempotencyKey,
         inputHash,
@@ -428,7 +435,7 @@ async function reserveSandboxQuotas(
   const day = dayKey(now);
   const hour = hourKey(now);
   const dayExpiry = endOfUtcDay(now);
-  const hourExpiry = new Date(Date.parse(`${hour}:00:00.000Z`) + 2 * 60 * 60 * 1000).toISOString();
+  const hourExpiry = new Date(Date.parse(`${hour}:00:00.000Z`) + 60 * 60 * 1000).toISOString();
   const ipHourlyLimit = Math.max(12, config.sandbox.sessionHourlyLimit * 2);
 
   const buckets = [
@@ -789,10 +796,11 @@ export async function retryRun(
     requestId: string;
     config: AppConfig;
     userId?: string | null;
+    mode?: "restart" | "resume";
   },
 ): Promise<RetryRunResult> {
   const db = env.DB;
-  const { session, runId, requestId, config, userId = null } = options;
+  const { session, runId, requestId, config, userId = null, mode = "restart" } = options;
   const original = await getRunForOwner(db, runId, session.idHash, userId);
   if (original === null) throw notFound("The requested run was not found.");
   if (original.status !== "FAILED") {
@@ -844,6 +852,31 @@ export async function retryRun(
     json: r.connection_json,
   }));
   const runtime = assertCatalogMatchesRuntime(entry);
+  const checkpoints = new Map(
+    mode === "resume"
+      ? (await getSteps(db, original.id))
+          .filter(
+            (s) =>
+              s.status === "SUCCEEDED" && (entry.summary.graph || s.step_key !== "persist-result"),
+          )
+          .map((s) => [s.step_key, s] as const)
+      : [],
+  );
+  for (const checkpoint of checkpoints.values()) {
+    if (checkpoint.output_json === null)
+      throw conflict(
+        "CHECKPOINT_UNAVAILABLE",
+        "A completed step has no retained output. Restart the workflow instead.",
+      );
+    try {
+      JSON.parse(checkpoint.output_json);
+    } catch {
+      throw conflict(
+        "CHECKPOINT_UNAVAILABLE",
+        "A retained step output is invalid. Restart the workflow instead.",
+      );
+    }
+  }
   if (entry.version.version !== original.workflow_version) {
     throw conflict(
       "RETRY_VERSION_UNAVAILABLE",
@@ -883,6 +916,8 @@ export async function retryRun(
       httpConnections,
       run: {
         id: newRunId,
+        recoveryMode: mode,
+        effectScopeId: mode === "resume" ? (original.effect_scope_id ?? original.id) : newRunId,
         projectId: original.project_id,
         workflowId: original.workflow_id,
         workflowVersion: original.workflow_version,
@@ -907,6 +942,15 @@ export async function retryRun(
         name: step.name,
         ordinal: step.ordinal,
         maxAttempts: step.maxAttempts,
+        ...(checkpoints.has(step.key)
+          ? {
+              checkpoint: {
+                runId: original.id,
+                inputJson: checkpoints.get(step.key)!.input_json,
+                outputJson: checkpoints.get(step.key)!.output_json!,
+              },
+            }
+          : {}),
       })),
       dispatch: { id: dispatchId, availableAt: createdAt },
       idempotency: null,
@@ -914,12 +958,17 @@ export async function retryRun(
         {
           type: "run.created",
           level: "info",
-          message: "Retry run accepted and queued for execution.",
+          message:
+            mode === "resume"
+              ? "Recovery queued; completed steps will be reused."
+              : "Retry run accepted and queued for execution.",
           data: {
             workflow: entry.workflow.slug,
             workflowVersion: entry.version.version,
             scenario: original.scenario,
             retryOfRunId: original.id,
+            recoveryMode: mode,
+            reusedSteps: checkpoints.size,
           },
           dedupeKey: `${newRunId}:run.created`,
         },
@@ -937,7 +986,7 @@ export async function retryRun(
         action: "run.retried",
         targetType: "run",
         targetId: newRunId,
-        metadata: { originalRunId: original.id },
+        metadata: { originalRunId: original.id, recoveryMode: mode, reusedSteps: checkpoints.size },
         requestId,
       },
       retryLink: { originalRunId: original.id },
@@ -969,7 +1018,7 @@ export async function retryRun(
 function isUniqueIdempotencyConflict(error: unknown): boolean {
   return (
     error instanceof Error &&
-    /UNIQUE constraint failed: idempotency_records\.scope, idempotency_records\.key/u.test(
+    /UNIQUE constraint failed: (?:idempotency_records\.scope, idempotency_records\.key|runs\.owner_session_hash, runs\.idempotency_key)/u.test(
       error.message,
     )
   );

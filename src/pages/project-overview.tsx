@@ -3,11 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ProjectLink as Link } from "../components/project-link";
 import { Modal, Icon, ErrorMessage } from "../components/product-ui";
+import {
+  RepositoryPicker,
+  type RepositoryChoice,
+  type RepositoryChoices,
+} from "../components/repository-picker";
 import { integrationRequest, integrations } from "../lib/integrations-api";
 import type { ProjectSummary } from "../lib/api";
 import { useWorkspace, savePreference } from "../lib/workspace";
-import type { RepositoryRecord, RepositoryJob } from "../../shared/repository/contracts";
-import type { DiscoveredOperation } from "../../agent/discovery.mjs";
 type Activity = {
   id: string;
   name: string;
@@ -39,420 +42,6 @@ function Status({ value }: { value: string }) {
           ? "Not tested"
           : value.toLowerCase()}
     </span>
-  );
-}
-interface RepositoryData {
-  repository: RepositoryRecord | null;
-  jobs: RepositoryJob[];
-}
-export function ProjectOverview({ projectId }: { projectId: string }) {
-  const { projects } = useWorkspace(),
-    cache = useQueryClient();
-  const [connect, setConnect] = useState<"github" | "local" | null>(null),
-    [operation, setOperation] = useState<DiscoveredOperation | null>(null),
-    [notice, setNotice] = useState(""),
-    [selectedCheck, setSelectedCheck] = useState("");
-  const repo = useQuery({
-    queryKey: ["repository", projectId],
-    queryFn: () => integrationRequest<RepositoryData>(projectId, "repository"),
-    refetchInterval: 3000,
-  });
-  const recorded = useQuery({
-    queryKey: ["activity", projectId],
-    queryFn: () => integrationRequest<{ items: Activity[] }>(projectId, "activity"),
-    refetchInterval: 3000,
-  });
-  const hasRecording = !!recorded.data?.items.some((item) => item.source === "application");
-  const r = repo.data?.repository;
-  const scan = r?.scan_json
-    ? (JSON.parse(r.scan_json) as {
-        operations: DiscoveredOperation[];
-        filesScanned: number;
-        totalFiles?: number;
-        warnings: string[];
-      })
-    : null;
-  const refresh = () => cache.invalidateQueries({ queryKey: ["repository", projectId] });
-  const action = useMutation({
-    mutationFn: (kind: "scan" | "setup" | "run" | "analyze") =>
-      integrationRequest<{ url?: string }>(projectId, "repository/" + kind, "POST"),
-    onSuccess: (result, kind) => {
-      setNotice(
-        result.url
-          ? "Request sent. Follow the GitHub link below for progress."
-          : kind === "scan"
-            ? "Source discovery started."
-            : "Source discovery and project checks are starting.",
-      );
-      void refresh();
-    },
-  });
-  const checksBusy =
-    repo.data?.jobs.some(
-      (j) => j.status === "RUNNING" && repo.dataUpdatedAt - Date.parse(j.updated_at) < 15 * 60000,
-    ) ||
-    (r?.check_setup_state === "QUEUED" &&
-      repo.dataUpdatedAt - Date.parse(r.check_setup_updated_at ?? "") < 10 * 60000);
-  const setupBusy =
-    r?.check_setup_state === "PREPARING" &&
-    repo.dataUpdatedAt - Date.parse(r.check_setup_updated_at ?? "") < 5 * 60000;
-  const setupStalled = r?.check_setup_state === "PREPARING" && !setupBusy;
-  return (
-    <>
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">
-            {r?.repository_id ? "GitHub repository" : r ? "Local project" : "Your application"}
-          </p>
-          <h1>{r?.full_name ?? projects.find((p) => p.id === projectId)?.name ?? "Project"}</h1>
-          <p>Understand what runs. Find the failure. Check the fix.</p>
-        </div>
-        <div className="actions">
-          {r?.repository_id ? (
-            <>
-              {r.setup_pr_url && !r.runner_enabled ? (
-                <a className="btn primary" href={r.setup_pr_url} target="_blank" rel="noreferrer">
-                  Review setup PR <Icon name="arrow-up-right-from-square" />
-                </a>
-              ) : (
-                <button
-                  className="btn primary"
-                  disabled={
-                    action.isPending || r.status === "DISCOVERING" || !!checksBusy || setupBusy
-                  }
-                  onClick={() => action.mutate(r.runner_enabled ? "analyze" : "setup")}
-                >
-                  <Icon name={checksBusy ? "circle-notch" : "play"} />
-                  {checksBusy
-                    ? "Checks in progress"
-                    : r.runner_enabled
-                      ? "Check project"
-                      : setupBusy
-                        ? "Preparing checks…"
-                        : "Set up project checks"}
-                </button>
-              )}
-            </>
-          ) : (
-            <button className="btn" onClick={() => setConnect("github")}>
-              <i className="fa-brands fa-github" aria-hidden="true" />
-              Connect repository
-            </button>
-          )}
-        </div>
-      </div>
-      <ErrorMessage error={repo.error || action.error} />
-      {notice && <p role="status">{notice}</p>}
-      {action.data?.url && (
-        <a className="btn section" href={action.data.url} target="_blank" rel="noreferrer">
-          Open GitHub progress <Icon name="arrow-up-right-from-square" />
-        </a>
-      )}
-      {!r && !repo.isPending && !hasRecording && (
-        <section className="project-onboarding">
-          <div className="workflow-icon">
-            <i className="fa-brands fa-github" aria-hidden="true" />
-          </div>
-          <div>
-            <h2>
-              {hasRecording ? "Your application is recording." : "Start with your existing code."}
-            </h2>
-            <p>
-              {hasRecording
-                ? "Connect its source to discover supported entry points and set up project checks. Your recorded runs are already available below."
-                : "Select a repository. Traceyard creates your project, discovers supported operations and prepares its first test run."}
-            </p>
-            <div className="actions section">
-              <button className="btn primary" onClick={() => setConnect("github")}>
-                Connect GitHub repository <Icon name="arrow-right" />
-              </button>
-              <button className="btn" onClick={() => setConnect("local")}>
-                Connect a local project
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-      {r?.repository_id && (
-        <section className="project-preparation section" aria-label="Project setup progress">
-          <div className="preparation-step" role="status">
-            <Icon
-              name={
-                r.status === "DISCOVERING"
-                  ? "circle-notch"
-                  : r.status === "FAILED"
-                    ? "circle-xmark"
-                    : "circle-check"
-              }
-            />
-            <div>
-              <h2>
-                {r.status === "DISCOVERING"
-                  ? "Finding operations"
-                  : r.status === "FAILED"
-                    ? "Source scan needs attention"
-                    : "Source discovered"}
-              </h2>
-              <p>
-                {r.status === "DISCOVERING"
-                  ? scan
-                    ? `${scan.filesScanned} of ${scan.totalFiles ?? scan.filesScanned} source files read. Operations appear below as they are found.`
-                    : "Reading supported routes and jobs. You can leave this page and return."
-                  : "Source shows possible operations. Tests provide evidence of what actually runs."}
-              </p>
-            </div>
-            {r.status !== "DISCOVERING" && (
-              <button
-                className="btn"
-                disabled={action.isPending}
-                onClick={() => action.mutate("scan")}
-              >
-                Refresh source
-              </button>
-            )}
-          </div>
-          <div className="preparation-step" role="status">
-            <Icon
-              name={
-                r.check_setup_error
-                  ? "circle-xmark"
-                  : checksBusy || setupBusy
-                    ? "circle-notch"
-                    : r.runner_enabled
-                      ? "circle-check"
-                      : "code-pull-request"
-              }
-            />
-            <div>
-              <h2>
-                {r.check_setup_error || setupStalled
-                  ? "Checks need attention"
-                  : checksBusy
-                    ? "Running project checks"
-                    : r.runner_enabled
-                      ? "Project checks connected"
-                      : r.setup_pr_url
-                        ? "Approve the first test run"
-                        : setupBusy
-                          ? "Preparing project checks"
-                          : "Run your first checks"}
-              </h2>
-              <p>
-                {(setupStalled
-                  ? "Setup took too long. Retry to resume the existing setup."
-                  : r.check_setup_error) ??
-                  (r.runner_enabled
-                    ? checksBusy
-                      ? "GitHub is preparing or running your existing build and tests. Progress appears below."
-                      : "Check project refreshes source and runs existing tests together."
-                    : r.setup_pr_url
-                      ? "Merge the setup PR once. GitHub will scan, build and run your existing tests automatically."
-                      : setupBusy || r.status === "DISCOVERING"
-                        ? "Traceyard prepares a setup PR while source discovery continues."
-                        : "Set up project checks to prepare the installation PR.")}
-              </p>
-            </div>
-            {(r.check_setup_error || setupStalled) && (
-              <button
-                className="btn"
-                disabled={action.isPending}
-                onClick={() => action.mutate(r.runner_enabled ? "run" : "setup")}
-              >
-                Retry checks
-              </button>
-            )}
-          </div>
-          <p className="hint">
-            One short-lived GitHub job · 10-minute limit · Later checks run on request. GitHub
-            Actions usage belongs to the repository owner.
-          </p>
-        </section>
-      )}
-      {r?.last_error && (
-        <p className="request-error" role="alert">
-          {r.last_error}
-        </p>
-      )}
-      {scan && (
-        <section className="section">
-          <div className="section-head">
-            <div>
-              <h2>Discovered operations</h2>
-              <p className="hint">
-                {scan.filesScanned} files scanned · Source discovery shows possible paths. Runs
-                below show what actually happened.
-              </p>
-            </div>
-            {r?.commit_sha && <span className="quiet-meta">Commit {r.commit_sha.slice(0, 7)}</span>}
-          </div>
-          <div className="operation-grid">
-            {scan.operations.map((o) => (
-              <button className="operation-card" key={o.id} onClick={() => setOperation(o)}>
-                <span className="node-type">
-                  {o.kind === "http" ? "HTTP entry point" : "Background job"}
-                </span>
-                <strong>{o.name}</strong>
-                <span className="quiet-meta">
-                  {o.file}:{o.line}
-                </span>
-                <span className="text-link">
-                  Inspect source <Icon name="arrow-right" />
-                </span>
-              </button>
-            ))}
-          </div>
-          {!scan.operations.length && r?.status !== "DISCOVERING" && (
-            <p className="connected-panel">
-              No supported entry points found. This scanner recognises conventional
-              Express/Hono/Fastify routes, Next.js API handlers, Deno.serve and selected job
-              declarations. Existing recorded runs remain available below.
-            </p>
-          )}
-          {scan.warnings.map((warning, i) => (
-            <p key={i} className="hint section">
-              {warning}
-            </p>
-          ))}
-        </section>
-      )}
-      {!!repo.data?.jobs.length && (
-        <section className="section">
-          <h2>Project checks</h2>
-          <p className="hint">
-            Build and test results for a specific code version. These are separate from requests
-            made by your application.
-          </p>
-          <div className="check-runs">
-            {repo.data.jobs.map((job) => (
-              <CheckRun
-                key={job.id}
-                job={job}
-                inspect={() => {
-                  setSelectedCheck(job.id);
-                  document.getElementById("project-activity")?.scrollIntoView({ block: "start" });
-                }}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-      <ProjectActivity
-        key={selectedCheck || "all"}
-        projectId={projectId}
-        checkRun={selectedCheck}
-        clearCheck={() => setSelectedCheck("")}
-      />
-      <div className="project-secondary">
-        <Link className="text-link" to="/builder">
-          Build a workflow inside Traceyard <Icon name="arrow-right" />
-        </Link>
-        {(!r || !r.repository_id) && (
-          <button className="text-link" onClick={() => setConnect("local")}>
-            Local setup instructions
-          </button>
-        )}
-        <Link className="text-link" to="/settings/developer">
-          API keys & connection settings
-        </Link>
-      </div>
-      {connect && (
-        <ConnectRepository
-          projectId={projectId}
-          mode={connect}
-          close={() => setConnect(null)}
-          connected={() => {
-            setConnect(null);
-            void refresh();
-          }}
-        />
-      )}
-      {operation && (
-        <Modal title={operation.name} close={() => setOperation(null)}>
-          <p className="hint">Discovered in source. This is not a record of an execution.</p>
-          <p className="section">
-            <strong>
-              {operation.file}:{operation.line}
-            </strong>
-          </p>
-          {r?.repository_id && r.commit_sha && (
-            <a
-              className="btn section"
-              target="_blank"
-              rel="noreferrer"
-              href={
-                "https://github.com/" +
-                r.full_name +
-                "/blob/" +
-                r.commit_sha +
-                "/" +
-                operation.file.split("/").map(encodeURIComponent).join("/") +
-                "#L" +
-                operation.line
-              }
-            >
-              Open this code version <Icon name="arrow-up-right-from-square" />
-            </a>
-          )}
-          <h3 className="section">Direct calls found in this handler</h3>
-          {operation.calls.length ? (
-            <ul className="source-calls">
-              {operation.calls.map((name) => (
-                <li key={name}>{name}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="hint">
-              No direct calls resolved. Imported or dynamic relationships may need runtime evidence.
-            </p>
-          )}
-          <p className="hint section">
-            Project tests exercise the configured test suite. Individual operation tests require a
-            test case that reaches this handler.
-          </p>
-        </Modal>
-      )}
-    </>
-  );
-}
-function CheckRun({ job, inspect }: { job: RepositoryJob; inspect: () => void }) {
-  const events = JSON.parse(job.events_json) as {
-    phase: string;
-    status: string;
-    message: string;
-    at: string;
-  }[];
-  return (
-    <article className="check-run">
-      <div className="section-head">
-        <div>
-          <h3>
-            {job.source === "github" ? "GitHub checks" : "Local checks"} ·{" "}
-            {job.commit_sha?.slice(0, 7) ?? "Uncommitted directory"}
-          </h3>
-          <p className="hint">{new Date(job.updated_at).toLocaleString()}</p>
-        </div>
-        <Status value={job.status} />
-      </div>
-      <ol className="check-events">
-        {events.map((e, i) => (
-          <li key={i}>
-            <Status value={e.status} />
-            <div>
-              <strong>{e.phase}</strong>
-              <p>{e.message}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
-      <button className="btn section" onClick={inspect}>
-        View recorded application runs <Icon name="arrow-right" />
-      </button>
-      {job.github_url && (
-        <a className="text-link" href={job.github_url} target="_blank" rel="noreferrer">
-          Build logs and progress on GitHub <Icon name="arrow-up-right-from-square" />
-        </a>
-      )}
-    </article>
   );
 }
 export function ProjectActivity({
@@ -702,24 +291,23 @@ export function ConnectRepository({
     cache = useQueryClient(),
     navigate = useNavigate();
   const q = useQuery({
-    queryKey: ["github-repositories"],
+    queryKey: ["github-repositories", session.user!.id],
     queryFn: async () => {
-      const r = await fetch("/api/repositories");
+      const r = await fetch("/api/repositories", { credentials: "same-origin" });
       const body = (await r.json()) as {
-        data: {
-          configured: boolean;
-          installUrl: string | null;
-          items: { id: number; name: string; installationId: number }[];
-        };
+        data: RepositoryChoices;
         error?: { message: string };
       };
       if (!r.ok) throw Error(body.error?.message ?? "Repositories could not be loaded.");
       return body.data;
     },
     enabled: !local,
+    refetchOnWindowFocus: true,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
   const connect = useMutation({
-    mutationFn: async (r: { id: number; installationId: number }) => {
+    mutationFn: async (r: RepositoryChoice) => {
       if (attachToProject && projectId) {
         await integrationRequest(projectId, "repository", "POST", {
           repositoryId: r.id,
@@ -733,6 +321,7 @@ export function ConnectRepository({
       }
       const response = await fetch("/api/repositories/connect", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repositoryId: r.id, installationId: r.installationId }),
       });
@@ -745,6 +334,7 @@ export function ConnectRepository({
       return body.data.project;
     },
     onSuccess: (project) => {
+      void cache.invalidateQueries({ queryKey: ["workspace-projects"] });
       cache.setQueryData<ProjectSummary[]>(["projects", session.user!.id], (old) => [
         ...(old ?? []).filter((p) => p.id !== project.id),
         project,
@@ -758,8 +348,9 @@ export function ConnectRepository({
   const env = "TRACEYARD_ORIGIN=" + window.location.origin + "\nTRACEYARD_KEY=<your project key>\n";
   return (
     <Modal
-      title={local ? "Connect your local project" : "Connect a GitHub repository"}
+      title={local ? "Connect your local project" : "Connect a repo"}
       close={close}
+      className={local ? "" : "repository-dialog"}
     >
       {local ? (
         <>
@@ -795,68 +386,19 @@ export function ConnectRepository({
           </p>
         </>
       ) : (
-        <>
-          <p>
-            Choose a repository to create or open its project. Source discovery starts in the
-            background. Traceyard also prepares a setup PR; merging it runs the first checks on
-            GitHub. Later checks run on request.
-          </p>
-          <ErrorMessage error={q.error || connect.error} />
-          {q.isPending ? (
-            <p role="status">Loading repositories…</p>
-          ) : q.data?.configured ? (
-            <>
-              <div className="repository-choices section">
-                {q.data.items.map((r) => (
-                  <button
-                    key={r.id}
-                    className="repository-choice"
-                    disabled={connect.isPending}
-                    onClick={() => connect.mutate(r)}
-                  >
-                    <i className="fa-brands fa-github" aria-hidden="true" />
-                    <strong>{r.name}</strong>
-                    <span>{connect.isPending ? "Connecting…" : "Connect"}</span>
-                    <Icon name="arrow-right" />
-                  </button>
-                ))}
-              </div>
-              {!q.data.items.length && (
-                <p className="section">
-                  No repositories available. Install Traceyard below, select a personal repository,
-                  then refresh.
-                </p>
-              )}
-              {q.data.installUrl && (
-                <a
-                  className="btn primary section"
-                  href={q.data.installUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Install Traceyard on GitHub
-                </a>
-              )}
-              <button className="btn section" onClick={() => void q.refetch()}>
-                Refresh repositories
-              </button>
-            </>
-          ) : (
-            <div className="activity-empty section">
-              <h3>GitHub connection needs server setup</h3>
-              <p>
-                The Traceyard deployment needs its GitHub App credentials, signed webhook and pinned
-                runner version before repositories can be listed.
-              </p>
-              <a className="text-link" href="/repository-setup">
-                Deployment setup instructions <Icon name="arrow-up-right-from-square" />
-              </a>
-            </div>
-          )}
-          <button className="text-link section" onClick={() => setLocal(true)}>
-            Connect a local project instead
-          </button>
-        </>
+        <RepositoryPicker
+          data={q.data}
+          loading={q.isPending}
+          refreshing={q.isFetching}
+          error={q.error || connect.error}
+          connectingId={connect.isPending ? connect.variables?.id : undefined}
+          onConnect={(repo) => connect.mutate(repo)}
+          onRefresh={() => {
+            connect.reset();
+            void q.refetch();
+          }}
+          onLocal={() => setLocal(true)}
+        />
       )}
     </Modal>
   );
@@ -882,9 +424,9 @@ export function RepositorySetup() {
           <code>https://YOUR_TRACEYARD_HOST/api/github/webhook</code>.
         </p>
         <p className="section">
-          Repository permissions: Contents, Pull requests, Workflows and Actions — read/write.
-          Metadata is read-only. Subscribe to Installation and Workflow run events. This version
-          supports personal GitHub installations.
+          Repository permissions: Contents and Metadata — read-only. Subscribe to Push events.
+          Legacy GitHub Actions checks can also use Actions read permission. This version supports
+          personal GitHub installations.
         </p>
         <h3 className="section">Deployment environment</h3>
         <pre className="code">{`PUBLIC_APP_ORIGIN=https://YOUR_TRACEYARD_HOST
@@ -892,17 +434,19 @@ GITHUB_APP_ID=<GitHub App ID>
 GITHUB_APP_SLUG=<GitHub App slug>
 GITHUB_APP_PRIVATE_KEY=<PKCS#8 RSA private key, stored as a secret>
 GITHUB_APP_WEBHOOK_SECRET=<matching webhook secret>
-TRACEYARD_RUNNER_REF=<40-character commit containing the runner>`}</pre>
+`}</pre>
         <p className="section">
           Keep these values in the deployment’s secret store. The GitHub App is separate from the
-          OAuth app used for sign-in. Apply migration 0008 and deploy the
-          RepositoryDiscoveryWorkflow binding.
+          OAuth app used for sign-in. Apply migrations through 0013 and deploy the standard Worker
+          configuration for free hosting. Repository checks can run locally and send results here;
+          hosted execution is an optional separate deployment.
         </p>
         <h3 className="section">Then connect a repository</h3>
         <p>
-          Install the app on selected personal repositories, return to Project, choose Connect
-          repository and refresh the list. Discovery starts in the background. Set up project tests
-          creates a reviewable installation PR; merging it starts GitHub-hosted checks.
+          Install the app on selected personal repositories, return to Project, choose Connect repo
+          and refresh the list. Existing personal installations are detected automatically.
+          Discovery starts in the background. Choose Run locally to record checks from your
+          computer. No setup PR is required.
         </p>
         <p className="hint section">
           Detailed setup, permissions, supported runtimes and limits are in docs/REPOSITORY_SETUP.md

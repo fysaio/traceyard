@@ -8,7 +8,11 @@ const sdk = new NodeSDK({
   resourceDetectors: [envDetector],
   traceExporter: new OTLPTraceExporter(),
   instrumentations: [
-    getNodeAutoInstrumentations({ "@opentelemetry/instrumentation-fs": { enabled: false } }),
+    getNodeAutoInstrumentations({
+      "@opentelemetry/instrumentation-fs": { enabled: false },
+      "@opentelemetry/instrumentation-net": { enabled: false },
+      "@opentelemetry/instrumentation-dns": { enabled: false },
+    }),
   ],
 });
 try {

@@ -298,7 +298,9 @@ describe("workflow execution", () => {
     const byKey = new Map(steps.map((step) => [step.step_key, step]));
     expect(byKey.get("validate-input")?.attempt_count).toBe(1);
     expect(byKey.get("normalize-content")?.attempt_count).toBe(1);
-    expect(byKey.get("extract-insights")?.attempt_count).toBe(1);
+    // Recovery must claim a newer fenced generation. Completed earlier steps
+    // are not replayed; generation 1 cannot reclaim its own RUNNING fence.
+    expect(byKey.get("extract-insights")?.attempt_count).toBe(2);
     expect(byKey.get("validate-output")?.attempt_count).toBe(1);
     expect(byKey.get("persist-result")?.attempt_count).toBe(1);
 

@@ -48,7 +48,7 @@ export class TraceyardClient {
     return result.data;
   }
   launch(
-    input: { workflowId: string; version?: number; input: unknown },
+    input: { workflowId: string; version?: number; input: unknown; parentRunId?: string },
     idempotencyKey = crypto.randomUUID(),
   ) {
     return this.request(
@@ -60,6 +60,14 @@ export class TraceyardClient {
   }
   run(id: string) {
     return this.request("/runs/" + encodeURIComponent(id));
+  }
+  retry(id: string, mode: "resume" | "restart" = "resume") {
+    return this.request("/runs/" + encodeURIComponent(id) + "/retry", "POST", { mode });
+  }
+  events(id: string, after = 0) {
+    return this.request(
+      "/runs/" + encodeURIComponent(id) + "/events?after=" + after + "&limit=200",
+    );
   }
   cancel(id: string) {
     return this.request("/runs/" + encodeURIComponent(id) + "/cancel", "POST");

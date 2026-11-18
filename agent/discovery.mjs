@@ -1,7 +1,8 @@
 import { parse } from "@babel/parser";
+import { sourceDefinitions, sourceFlow } from "./source-flow.mjs";
 
 // A conservative source index. A discovered entry point is not proof of execution.
-export function discoverFile(file, source) {
+export function discoverFile(file, source, { includeFlow = true } = {}) {
   const operations = [];
   let ast;
   try {
@@ -29,7 +30,13 @@ export function discoverFile(file, source) {
         ? `${name(n.object)}.${name(n.property)}`
         : "";
   const functions = new Map();
+  const definitions = includeFlow ? sourceDefinitions(ast.program) : null;
   visit(ast, (n) => {
+    if (["AssignmentExpression", "UpdateExpression"].includes(n.type)) {
+      const target = n.left ?? n.argument;
+      if (target.type === "Identifier" && definitions?.has(target.name))
+        definitions.set(target.name, null);
+    }
     if (n.type === "FunctionDeclaration" && n.id) functions.set(n.id.name, n);
     if (
       n.type === "VariableDeclarator" &&
@@ -40,12 +47,13 @@ export function discoverFile(file, source) {
   });
   function add(n, operationName, kind, handler) {
     const target = handler?.type === "Identifier" ? functions.get(handler.name) : handler;
+    const analysis = includeFlow ? sourceFlow(target, definitions) : null;
     const calls = new Set();
-    if (target)
+    if (!analysis && target)
       visit(target.body, (child) => {
         if (child.type === "CallExpression") {
           const value = name(child.callee);
-          if (value && !value.startsWith("console.")) calls.add(value);
+          if (value && !value.startsWith("console.")) calls.add(value.slice(0, 150));
         }
       });
     const line = n.loc?.start.line ?? 1;
@@ -55,7 +63,8 @@ export function discoverFile(file, source) {
       kind,
       file,
       line,
-      calls: [...calls].slice(0, 12),
+      calls: analysis?.calls ?? [...calls].slice(0, 12),
+      ...(analysis ? { sourceFlow: analysis.flow } : {}),
       evidence: "source",
     });
   }

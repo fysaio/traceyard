@@ -280,6 +280,7 @@ export const api = {
     input: {
       workflowId: string;
       projectId?: string;
+      parentRunId?: string;
       version?: number;
       input: unknown;
       scenario: FailureScenario;
@@ -297,9 +298,10 @@ export const api = {
       method: "POST",
     }).then((body) => body.data),
 
-  retry: (id: string): Promise<RetryRunResult> =>
+  retry: (id: string, mode: "restart" | "resume" = "restart"): Promise<RetryRunResult> =>
     request<RetryRunResult>(`/api/runs/${encodeURIComponent(id)}/retry`, {
       method: "POST",
+      body: JSON.stringify({ mode }),
     }).then((body) => body.data),
 };
 

@@ -6,9 +6,12 @@ const args = process.argv.slice(2),
   command = args.shift(),
   id = args[0]?.startsWith("--") ? undefined : args.shift();
 const usage =
-  "Usage: node scripts/traceyard.mjs run <workflow-id> --input input.json [--version 1] [--idempotency-key key]\n       node scripts/traceyard.mjs inspect <run-id>\n       node scripts/traceyard.mjs cancel <run-id>\n       node scripts/traceyard.mjs list [--cursor cursor]\nSet TRACEYARD_ORIGIN and TRACEYARD_KEY in your server environment.";
+  "Usage: node scripts/traceyard.mjs run <workflow-id> --input input.json [--version 1] [--idempotency-key key]\n       node scripts/traceyard.mjs inspect <run-id>\n       node scripts/traceyard.mjs cancel <run-id>\n       node scripts/traceyard.mjs resume <run-id>\n       node scripts/traceyard.mjs restart <run-id>\n       node scripts/traceyard.mjs list [--cursor cursor]\nSet TRACEYARD_ORIGIN and TRACEYARD_KEY in your server environment.";
 async function main() {
-  if (!["run", "inspect", "cancel", "list"].includes(command) || (command !== "list" && !id))
+  if (
+    !["run", "inspect", "cancel", "resume", "restart", "list"].includes(command) ||
+    (command !== "list" && !id)
+  )
     throw Error(usage);
   const options = new Map();
   for (let i = 0; i < args.length; i += 2) {
@@ -43,6 +46,11 @@ async function main() {
       "Content-Type": "application/json",
       "Idempotency-Key": options.get("--idempotency-key") ?? randomUUID(),
     };
+  } else if (["resume", "restart"].includes(command)) {
+    path += "/" + encodeURIComponent(id) + "/retry";
+    method = "POST";
+    body = { mode: command };
+    headers["Content-Type"] = "application/json";
   } else if (command === "inspect") path += "/" + encodeURIComponent(id);
   else if (command === "cancel") {
     path += "/" + encodeURIComponent(id) + "/cancel";

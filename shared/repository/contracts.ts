@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { testResultSchema } from "./workspace";
+import { sourceFlowSchema } from "./source-flow";
 const path = z
   .string()
   .min(1)
@@ -13,6 +14,7 @@ export const operationSchema = z
     file: path,
     line: z.number().int().min(1),
     calls: z.array(z.string().max(150)).max(12),
+    sourceFlow: sourceFlowSchema.optional(),
     evidence: z.literal("source"),
   })
   .strict();
@@ -34,6 +36,8 @@ export const reportSchema = z
   .strict();
 export type RepositoryReport = z.infer<typeof reportSchema>;
 export interface RepositoryRecord {
+  ci_setup_json?: string | null;
+  scan_id?: string | null;
   project_id: string;
   repository_id: number | null;
   full_name: string;
@@ -42,10 +46,19 @@ export interface RepositoryRecord {
   commit_sha: string | null;
   status: string;
   scan_json: string | null;
+  scan_progress_json?: string | null;
   last_error: string | null;
   setup_pr_url: string | null;
   runner_enabled: number;
-  check_setup_state: "NOT_STARTED" | "PREPARING" | "AWAITING_MERGE" | "READY" | "QUEUED" | "FAILED";
+  check_setup_state:
+    | "NOT_STARTED"
+    | "PREPARING"
+    | "AWAITING_MERGE"
+    | "READY"
+    | "QUEUED"
+    | "FAILED"
+    | "MERGING"
+    | "BLOCKED";
   check_setup_error: string | null;
   check_setup_updated_at: string | null;
   last_dispatch_at: string | null;
