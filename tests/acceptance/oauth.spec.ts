@@ -121,7 +121,10 @@ test("MCP connects first and grants project access later in the browser", async 
     expect(first.isError).toBe(true);
     const pending = first.structuredContent as { status: string; browserUrl: string };
     expect(pending.status).toBe("PROJECT_ACCESS_REQUIRED");
-    await page.goto(pending.browserUrl);
+    const access = new URL(pending.browserUrl);
+    expect(access.origin).toBe(new URL(metadata.resource).origin);
+    // The acceptance worker advertises a synthetic public origin.
+    await page.goto(access.pathname + access.search);
     const row = page.locator("form").filter({ hasText: "OAuth browser selection" });
     await row.getByRole("button", { name: "Allow access" }).click();
     await expect(row.getByRole("button", { name: "Remove access" })).toBeVisible();
