@@ -187,13 +187,13 @@ export function ProjectsPage() {
   const [connect, setConnect] = useState(false),
     [search, setSearch] = useState("");
   const hasConnectedRepo = q.data?.items.some((p) => Boolean(p.repository));
-  const items =
-    q.data?.items.filter((p) => {
-      if (!hasConnectedRepo && !p.repository && p.name === "Main project" && p.runs === 0) {
-        return false;
-      }
-      return (p.repository ?? p.name).toLowerCase().includes(search.toLowerCase());
-    }) ?? [];
+  const availableProjects =
+    q.data?.items.filter(
+      (p) => hasConnectedRepo || p.repository || p.name !== "Main project" || p.runs !== 0,
+    ) ?? [];
+  const items = availableProjects.filter((p) =>
+    (p.repository ?? p.name).toLowerCase().includes(search.toLowerCase()),
+  );
   return (
     <div className="flow-page">
       <p className="flow-kicker">Your workspace</p>
@@ -201,13 +201,15 @@ export function ProjectsPage() {
         title="Repositories"
         description="Connect a GitHub repository to investigate its code."
         actions={
-          <button className="btn primary" onClick={() => setConnect(true)}>
-            <Icon name="plus" />
-            Connect repo
-          </button>
+          availableProjects.length > 0 && (
+            <button className="btn primary" onClick={() => setConnect(true)}>
+              <Icon name="plus" />
+              Connect repo
+            </button>
+          )
         }
       />
-      {!!items.length && (
+      {!!availableProjects.length && (
         <div className="flow-toolbar">
           <label className="flow-search">
             <Icon name="magnifying-glass" />
