@@ -25,9 +25,9 @@ export function WorkspaceShell({
       if (id) savePreference("project:" + session.user!.id, id);
       return id;
     }),
-    [menu, setMenu] = useState<"projects" | "create" | "account" | "search" | "connect" | null>(
-      null,
-    ),
+    [menu, setMenu] = useState<
+      "projects" | "create" | "account" | "search" | "connect" | "tools" | null
+    >(null),
     [name, setName] = useState("");
   const projects = q.data ?? [],
     connectedProjects = projects.filter((p) => Boolean(p.repository)),
@@ -107,18 +107,17 @@ export function WorkspaceShell({
     >
       <div className={"product-shell " + (studio ? "studio-mode" : "")}>
         <header className="product-header">
+          <a className="skip-link" href="#workspace-content">
+            Skip to content
+          </a>
           <Link className="brand" to="/">
             Traceyard<span>.</span>
           </Link>
           <nav aria-label="Main navigation">
             {[
               ["/investigations", "Investigations", "magnifying-glass"],
-              ["/connections", "Connections", "plug"],
-              ["/workflows", "Workflows", "diagram-project"],
-              ["/executions", "Executions", "play"],
-              ["/traces", "Traces", "wave-square"],
-              ["/approvals", "Approvals", "check-double"],
               ["/projects", "Repositories", "code-branch"],
+              ["/connections", "Connections", "plug"],
             ].map(([path, label, icon]) => (
               <NavLink
                 key={path}
@@ -136,6 +135,21 @@ export function WorkspaceShell({
                 <span>{label}</span>
               </NavLink>
             ))}
+            <button
+              className={
+                /^\/(workflows|workflow|builder|studio|template|executions|traces|approvals|gateway|laboratory)(\/|$)/.test(
+                  location.pathname,
+                )
+                  ? "workspace-tools active"
+                  : "workspace-tools"
+              }
+              aria-haspopup="dialog"
+              onClick={() => setMenu("tools")}
+            >
+              <Icon name="layer-group" />
+              <span>Tools</span>
+              <Icon name="chevron-down" />
+            </button>
           </nav>
           <div className="header-tools">
             <button
@@ -171,7 +185,11 @@ export function WorkspaceShell({
             </button>
           </div>
         </header>
-        <main className={"product-main " + (studio ? "studio-main" : "")}>
+        <main
+          id="workspace-content"
+          tabIndex={-1}
+          className={"product-main " + (studio ? "studio-main" : "")}
+        >
           {q.isPending ? (
             <p className="loading-state" role="status">
               Loading your projects…
@@ -196,16 +214,78 @@ export function WorkspaceShell({
           ) : !project && !["/", "/projects"].includes(location.pathname) ? (
             <section className="first-project">
               <Icon name="folder-open" />
-              <h1>Create your first project.</h1>
-              <p>A project keeps your workflows, executions and connected application together.</p>
-              <button className="btn primary" onClick={() => setMenu("create")}>
-                Create project
+              <h1>Connect your first repository.</h1>
+              <p>Choose a GitHub repository to start investigating its code and tests.</p>
+              <button className="btn primary" onClick={() => setMenu("connect")}>
+                Connect repository
               </button>
             </section>
           ) : (
             children(projectId)
           )}
         </main>
+        {menu === "tools" && (
+          <Modal title="Workspace tools" close={() => setMenu(null)} className="tools-dialog">
+            <p className="hint">
+              Investigations handle repository tests. These tools support workflows and application
+              monitoring.
+            </p>
+            <div className="tool-menu-grid">
+              {[
+                [
+                  "/workflows",
+                  "Workflows",
+                  "diagram-project",
+                  "Build and run a workflow, or start from a template.",
+                ],
+                [
+                  "/executions",
+                  "Workflow runs",
+                  "play",
+                  "Inspect workflow steps and recover interrupted work.",
+                ],
+                [
+                  "/traces",
+                  "Runtime traces",
+                  "wave-square",
+                  "Inspect activity sent by a connected application.",
+                ],
+                [
+                  "/approvals",
+                  "Approvals",
+                  "check-double",
+                  "Review workflow actions waiting for your decision.",
+                ],
+                [
+                  "/gateway",
+                  "Model gateway",
+                  "shuffle",
+                  "Configure model routing and provider credentials.",
+                ],
+                [
+                  "/laboratory",
+                  "Workflow experiments",
+                  "flask",
+                  "Compare workflow behavior under controlled scenarios.",
+                ],
+              ].map(([path, title, icon, description]) => (
+                <Link
+                  className="tool-menu-item"
+                  to={path!}
+                  key={path}
+                  onClick={() => setMenu(null)}
+                >
+                  <Icon name={icon!} />
+                  <span>
+                    <strong>{title}</strong>
+                    <small>{description}</small>
+                  </span>
+                  <Icon name="arrow-right" />
+                </Link>
+              ))}
+            </div>
+          </Modal>
+        )}
         {menu === "projects" && (
           <Modal
             title="Projects"

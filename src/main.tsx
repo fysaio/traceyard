@@ -14,6 +14,7 @@ import "./styles/product-restoration.css";
 import "./styles/project-experience.css";
 import "./styles/repository-connection.css";
 import "./styles/investigations.css";
+import "./styles/product-completion.css";
 import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
 import "@fortawesome/fontawesome-free/css/solid.min.css";
 import "@fortawesome/fontawesome-free/css/brands.min.css";

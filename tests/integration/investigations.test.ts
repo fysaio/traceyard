@@ -82,6 +82,27 @@ async function source(a: { projectId: string }) {
     .run();
 }
 describe("shared investigations", () => {
+  it("refuses the wrong connected repository before creating an investigation", async () => {
+    const a = await account();
+    await source(a);
+    const response = await call(a, `/api/projects/${a.projectId}/investigations`, {
+      question: "Inspect my local repository",
+      expectedRepository: "example/other",
+    });
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "REPOSITORY_MISMATCH",
+    );
+    const list = await readSuccess<{ items: Investigation[] }>(
+      await call(a, `/api/projects/${a.projectId}/investigations`),
+    );
+    expect(list.items).toHaveLength(0);
+    const accepted = await call(a, `/api/projects/${a.projectId}/investigations`, {
+      question: "Inspect my local repository",
+      expectedRepository: "example/app",
+    });
+    expect(accepted.status).toBe(201);
+  });
   it("pins a source snapshot and exposes bounded evidence without application keys", async () => {
     const a = await account();
     await source(a);
@@ -199,7 +220,10 @@ describe("shared investigations", () => {
   });
 });
 
-async function connectedSource(a: { projectId: string; userId?: string }, defaultCommit = "a".repeat(40)) {
+async function connectedSource(
+  a: { projectId: string; userId?: string },
+  defaultCommit = "a".repeat(40),
+) {
   const at = new Date().toISOString();
   const identity = a.userId
     ? await env.DB.prepare(
@@ -292,7 +316,8 @@ describe("explicit commit selection", () => {
       .run();
 
     const commitSha = "d".repeat(40);
-    const dispatches: { path: string; body: { ref: string; inputs: { run_request: string } } }[] = [];
+    const dispatches: { path: string; body: { ref: string; inputs: { run_request: string } } }[] =
+      [];
     const workflow = runnerWorkflow(configured.PUBLIC_APP_ORIGIN!, DEFAULT_RUNNER_REF);
 
     const fetcher: typeof fetch = async (input, init) => {
@@ -490,12 +515,24 @@ describe("explicit commit selection", () => {
       testPath: "tests/unit/api-client.test.ts",
     });
 
-    const first = await beginInvestigation(configured, a.userId, a.projectId, req, mockGitHub(commitSha));
+    const first = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      req,
+      mockGitHub(commitSha),
+    );
     await env.DB.prepare("UPDATE project_repositories SET commit_sha=? WHERE project_id=?")
       .bind("d".repeat(40), a.projectId)
       .run();
 
-    const second = await beginInvestigation(configured, a.userId, a.projectId, req, mockGitHub(commitSha));
+    const second = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      req,
+      mockGitHub(commitSha),
+    );
     expect(second.id).toBe(first.id);
     expect(second.snapshot.commit).toBe(commitSha);
 
@@ -577,7 +614,14 @@ describe("explicit commit selection", () => {
     await env.DB.prepare(
       "INSERT INTO investigation_recordings(id,investigation_id,project_id,request_id,manifest_json,eligible,created_at) VALUES(?,?,?,?,?,0,?)",
     )
-      .bind("rcd_" + "f".repeat(32), prev.id, a.projectId, attempt.requestId, manifest, new Date().toISOString())
+      .bind(
+        "rcd_" + "f".repeat(32),
+        prev.id,
+        a.projectId,
+        attempt.requestId,
+        manifest,
+        new Date().toISOString(),
+      )
       .run();
 
     await expect(
@@ -621,7 +665,14 @@ describe("explicit commit selection", () => {
     await env.DB.prepare(
       "INSERT INTO investigation_recordings(id,investigation_id,project_id,request_id,manifest_json,eligible,created_at) VALUES(?,?,?,?,?,1,?)",
     )
-      .bind("rcd_" + "e".repeat(32), prev.id, a.projectId, attempt.requestId, manifest, new Date().toISOString())
+      .bind(
+        "rcd_" + "e".repeat(32),
+        prev.id,
+        a.projectId,
+        attempt.requestId,
+        manifest,
+        new Date().toISOString(),
+      )
       .run();
 
     const replayInv = await beginInvestigation(

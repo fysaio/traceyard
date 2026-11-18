@@ -12,6 +12,7 @@ import { nowIso } from "../lib/time";
 import { conflict, notFound } from "../api/errors";
 import { operationKey } from "../repositories/catalog";
 import { getRepositoryIndex } from "./repository-index-service";
+import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
 
 interface Row {
   id: string;
@@ -116,10 +117,40 @@ export async function getInvestigation(
     )
     .bind(id)
     .all<{ id: string; eligible: number; createdAt: string }>();
+  const latest = await db
+    .prepare(
+      "SELECT report_json FROM investigation_attempts WHERE investigation_id=? AND report_json IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1",
+    )
+    .bind(id)
+    .first<{ report_json: string }>();
+  const report = latest ? (JSON.parse(latest.report_json) as InvestigationReport) : null;
+  const verifications = await db
+    .prepare(
+      "SELECT id,baseline_id AS baselineId,candidate_id AS candidateId,candidate_commit AS candidateCommit,created_at AS createdAt FROM investigation_verifications WHERE project_id=? AND (baseline_id=? OR candidate_id=?) ORDER BY created_at DESC,id DESC LIMIT 5",
+    )
+    .bind(projectId, id, id)
+    .all<NonNullable<Investigation["verifications"]>[number]>();
   return {
     ...view(row, evidence.results),
     attempts: attempts.results,
     recordings: recordings.results.map((r) => ({ ...r, eligible: !!r.eligible })),
+    ...(report
+      ? {
+          execution: {
+            status: report.status,
+            commit: report.commit,
+            command: report.command,
+            counts: report.counts,
+            durationMs: report.durationMs,
+            exitCode: report.exitCode,
+            failures: report.failures
+              .slice(0, 3)
+              .map((failure) => ({ ...failure, message: failure.message.slice(0, 2000) })),
+            coverage: report.coverage,
+          },
+        }
+      : {}),
+    verifications: verifications.results,
   };
 }
 export async function listInvestigations(db: D1Database, userId: string, projectId: string) {

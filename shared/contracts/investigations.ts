@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { repositoryPathSchema } from "./repository-index";
+import type { InvestigationReport } from "./investigation-execution";
 
 const reference = z.string().trim().min(1).max(200);
+export const investigationRepositorySchema = z
+  .string()
+  .max(200)
+  .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/);
 export const investigationTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("source"), operationKey: reference.optional() }).strict(),
   z.object({ kind: z.literal("check"), ref: reference }).strict(),
@@ -17,6 +22,7 @@ export const investigationRequestSchema = z
       .regex(/^rcd_[a-f0-9]{32}$/)
       .optional(),
     testPath: repositoryPathSchema.optional(),
+    expectedRepository: investigationRepositorySchema.optional(),
     commit: z
       .string()
       .regex(/^[a-f0-9]{40}$/)
@@ -71,6 +77,17 @@ export interface Investigation {
     createdAt: string;
   }[];
   recordings?: { id: string; eligible: boolean; createdAt: string }[];
+  execution?: Pick<
+    InvestigationReport,
+    "status" | "commit" | "command" | "counts" | "durationMs" | "exitCode" | "failures" | "coverage"
+  >;
+  verifications?: {
+    id: string;
+    baselineId: string;
+    candidateId: string;
+    candidateCommit: string;
+    createdAt: string;
+  }[];
   createdAt: string;
   updatedAt: string;
   browserPath: string;
