@@ -317,7 +317,12 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
         .bind(who.runId, who.projectId)
         .first<{ snapshot_json: string }>();
       if (!snapshot) throw notFound("Managed check snapshot not found.");
-      return c.json(data(c, JSON.parse(snapshot.snapshot_json).manifest));
+      return c.json(
+        data(c, {
+          ...JSON.parse(snapshot.snapshot_json).manifest,
+          capabilities: { repositoryIndex: true },
+        }),
+      );
     }
     if (requestId) {
       const row = await c.env.DB.prepare(
@@ -334,7 +339,9 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
       if (!bound)
         throw badRequest("REQUEST_ALREADY_BOUND", "This test request belongs to another run.");
       await bindGitHubDispatch(c.env, who.projectId, requestId, who.runId!, who.sha!);
-      return c.json(data(c, JSON.parse(row.snapshot_json)));
+      return c.json(
+        data(c, { ...JSON.parse(row.snapshot_json), capabilities: { repositoryIndex: true } }),
+      );
     }
     const config = await c.env.DB.prepare(
       "SELECT config_json FROM repository_runner_configs WHERE project_id=?",
@@ -360,6 +367,7 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
       ];
     }
     const manifest = {
+      capabilities: { repositoryIndex: true },
       config: runnerConfigSchema.parse(config ? JSON.parse(config.config_json) : {}),
       cases,
     };

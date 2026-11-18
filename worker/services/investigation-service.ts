@@ -11,6 +11,7 @@ import { randomId, sha256Hex } from "../lib/crypto";
 import { nowIso } from "../lib/time";
 import { conflict, notFound } from "../api/errors";
 import { operationKey } from "../repositories/catalog";
+import { getRepositoryIndex } from "./repository-index-service";
 
 interface Row {
   id: string;
@@ -138,7 +139,12 @@ export async function inspectEvidence(
     totalChars: text.length,
   };
 }
-async function collect(db: D1Database, projectId: string, target: InvestigationTarget) {
+async function collect(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  target: InvestigationTarget,
+) {
   const evidence: Omit<InvestigationEvidence, "id">[] = [];
   const repo = await db
     .prepare(
@@ -189,6 +195,32 @@ async function collect(db: D1Database, projectId: string, target: InvestigationT
       ? "Select an operation or investigate an existing failed check."
       : "Connect a repository or refresh source discovery.";
     if (operations.length > 30) limitations.push("The evidence contains the first 30 operations.");
+    const index = await getRepositoryIndex(
+      db,
+      userId,
+      projectId,
+      target.operationKey ? operations[0]?.file : undefined,
+      snapshot.commit ?? undefined,
+    );
+    if (index) {
+      snapshot.commit = index.commit;
+      snapshot.filesScanned = index.coverage.scanned;
+      snapshot.warnings = index.coverage.warnings;
+      evidence.push({
+        kind: "source",
+        basis: "source",
+        title: "Repository packages and related tests",
+        ...bounded(index),
+      });
+      const tests = target.operationKey ? index.relatedTests : index.files.filter((f) => f.isTest);
+      summary += ` Indexed ${index.fileCount} source/test files across ${index.packages.length} package(s); ${tests.length} test file(s) in this view.`;
+      if (tests.length)
+        nextAction = "Run a selected existing test in an available execution environment.";
+      if (index.truncated)
+        limitations.push(
+          "The index view is paginated; not all file records are included in this evidence.",
+        );
+    }
   } else if (target.kind === "check") {
     const check = await db
       .prepare(
@@ -317,7 +349,7 @@ export async function createInvestigation(
       );
     return getInvestigation(db, userId, projectId, previous.id);
   }
-  const result = await collect(db, projectId, request.target),
+  const result = await collect(db, userId, projectId, request.target),
     id = randomId("inv"),
     now = nowIso();
   const statements = [
