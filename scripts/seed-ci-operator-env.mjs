@@ -4,6 +4,8 @@ if (process.env.CI !== "true") throw Error("This fixture is for clean CI checkou
 await writeFile(
   new URL("../.dev.vars", import.meta.url),
   [
+    'APP_VERSION="operator-version"',
+    'SANDBOX_DAILY_RUN_LIMIT="1"',
     'GITHUB_APP_ID="999"',
     'GITHUB_APP_SLUG="ci-operator-fixture"',
     'GITHUB_APP_PRIVATE_KEY="test-only-invalid-key"',
