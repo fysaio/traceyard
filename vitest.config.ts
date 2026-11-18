@@ -26,7 +26,9 @@ export default defineConfig(async () => {
         {
           plugins: [
             cloudflareTest({
-              wrangler: { configPath: "./wrangler.jsonc" },
+              // Resolve local-variable files beside the test config, never the operator config.
+              wrangler: { configPath: "./tests/wrangler.jsonc" },
+              remoteBindings: false,
               miniflare: {
                 bindings: {
                   TEST_MODE: "true",

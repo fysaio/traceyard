@@ -1,0 +1,64 @@
+// Local integration tests only. No production credentials or resources.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "traceyard-integration-test",
+  "main": "../worker/index.ts",
+  "compatibility_date": "2026-11-13",
+  "upload_source_maps": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "traceyard-integration-test-db",
+      "database_id": "00000000-0000-0000-0000-000000000008",
+      "migrations_dir": "../migrations",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "queue": "traceyard-integration-test-executions",
+        "binding": "EXECUTION_QUEUE",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "traceyard-integration-test-executions",
+        "max_batch_size": 10,
+        "max_batch_timeout": 1,
+        "max_retries": 4,
+      },
+    ],
+  },
+  "workflows": [
+    {
+      "name": "traceyard-repository-discovery-integration-test",
+      "binding": "REPOSITORY_DISCOVERY",
+      "class_name": "RepositoryDiscoveryWorkflow",
+    },
+    {
+      "name": "traceyard-run-execution-integration-test",
+      "binding": "RUN_WORKFLOW",
+      "class_name": "RunExecutionWorkflow",
+      "concurrency": {
+        "limit": 8,
+      },
+      "default_retention": {
+        "success_retention": "1 day",
+        "error_retention": "3 days",
+      },
+    },
+  ],
+  "vars": {
+    "APP_VERSION": "0.1.0",
+    "SOURCE_SCAN_FILE_LIMIT": "16",
+    "SOURCE_SCAN_FILE_BYTES": "16000",
+    "SANDBOX_DAILY_RUN_LIMIT": "100",
+    "SANDBOX_SESSION_HOURLY_LIMIT": "6",
+    "SANDBOX_SESSION_DAILY_LIMIT": "20",
+    "SANDBOX_GLOBAL_CONCURRENCY_LIMIT": "8",
+    "RUN_RETENTION_DAYS": "30",
+  },
+  "secrets": {
+    "required": [],
+  },
+}
