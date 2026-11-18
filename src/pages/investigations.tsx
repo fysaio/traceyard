@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ProjectLink as Link } from "../components/project-link";
-import { ErrorMessage, Icon } from "../components/product-ui";
+import { ErrorMessage, Icon, Modal } from "../components/product-ui";
 import { useWorkspace } from "../lib/workspace";
 import { investigations } from "../lib/investigations-api";
 import { integrationRequest } from "../lib/integrations-api";
@@ -11,6 +11,7 @@ import { ConnectRepository } from "./project-overview";
 import { EnableGitHubChecks } from "./project-experience";
 import type { Investigation } from "../../shared/contracts/investigations";
 import type { Catalog } from "../../shared/repository/workspace";
+import { ExecutionSummary } from "../components/execution-summary";
 
 function ExistingTest({
   projectId,
@@ -54,9 +55,21 @@ function ExistingTest({
   );
 }
 function State({ value }: { value: string }) {
+  const labels: Record<string, string> = {
+    EVIDENCE_READY: "Evidence ready",
+    EXECUTING: "Running",
+    ANALYZING: "Analyzing",
+    PASSED: "Repair verified",
+    REVIEW_TEST_CHANGES: "Review test changes",
+    INCONCLUSIVE: "Needs review",
+    BLOCKED: "Needs attention",
+    CANCELLED: "Cancelled",
+    SUCCEEDED: "Passed",
+    FAILED: "Failed",
+  };
   return (
     <span className={"status " + value.toLowerCase()}>
-      {value.toLowerCase().replaceAll("_", " ")}
+      {labels[value] ?? value.toLowerCase().replaceAll("_", " ")}
     </span>
   );
 }
@@ -71,8 +84,17 @@ export function InvestigationsPage() {
     [mode, setMode] = useState<"execute" | "analyze">("execute"),
     [capture, setCapture] = useState(false),
     [testPath, setTestPath] = useState(""),
+    [commit, setCommit] = useState(""),
     [connect, setConnect] = useState(false),
     [key, setKey] = useState(newIdempotencyKey);
+  const catalog = useQuery({
+    queryKey: ["catalog", projectId],
+    queryFn: () => integrationRequest<Catalog>(projectId, "catalog"),
+    enabled: !!project?.repository,
+  });
+  const ready =
+    catalog.data?.executionAvailable &&
+    (catalog.data.executionProvider === "managed" || catalog.data.repository?.runner_enabled !== 0);
   const q = useQuery({
     queryKey: ["investigations", projectId],
     queryFn: () => investigations.list(projectId),
@@ -84,8 +106,10 @@ export function InvestigationsPage() {
       investigations.create(projectId, {
         question,
         mode,
-        captureInteractions: capture,
-        testPath: testPath || undefined,
+        captureInteractions: mode === "execute" && capture,
+        testPath: mode === "execute" ? testPath || undefined : undefined,
+        expectedRepository: project?.repository ?? undefined,
+        commit: mode === "execute" ? commit || undefined : undefined,
         requestKey: key,
       }),
     onSuccess: (inv) => {
@@ -99,10 +123,13 @@ export function InvestigationsPage() {
         <div>
           <p className="eyebrow">{project?.repository ?? project?.name ?? "Your workspace"}</p>
           <h1>What’s breaking?</h1>
-          <p>Run a focused check. Keep the evidence. Verify the repair.</p>
+          <p>
+            Investigate your code here or from your coding agent. Every result stays with its source
+            revision.
+          </p>
         </div>
         <Link to="/connections" className="btn">
-          <Icon name="plug" /> Connections
+          <Icon name="plug" /> Project setup
         </Link>
       </div>
       {!project?.repository ? (
@@ -118,88 +145,139 @@ export function InvestigationsPage() {
           </p>
         </section>
       ) : (
-        <form
-          className="investigation-composer connected-panel"
-          onSubmit={(e) => {
-            e.preventDefault();
-            create.mutate();
-          }}
-        >
-          <label htmlFor="investigation-question">Describe the problem</label>
-          <textarea
-            id="investigation-question"
-            required
-            minLength={3}
-            maxLength={1000}
-            rows={3}
-            placeholder="Why does the checkout test fail after a retry?"
-            value={question}
-            onChange={(e) => {
-              setQuestion(e.target.value);
-              setKey(newIdempotencyKey());
-            }}
-          />
-          <div className="investigation-submit">
-            <div className="segmented" role="group" aria-label="Investigation mode">
-              {(
-                [
-                  ["execute", "Run a focused test"],
-                  ["analyze", "Inspect evidence"],
-                ] as const
-              ).map(([value, name]) => (
-                <button
-                  type="button"
-                  key={value}
-                  aria-pressed={mode === value}
-                  className={mode === value ? "selected" : ""}
-                  onClick={() => {
-                    setMode(value);
-                    setKey(newIdempotencyKey());
-                  }}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-            <button className="btn primary" disabled={create.isPending}>
-              {create.isPending ? "Starting…" : "Investigate"}
-              <Icon name="arrow-right" />
-            </button>
+        <>
+          <div className="readiness-strip">
+            <span>
+              <Icon name="code-branch" />
+              {project.repository}
+            </span>
+            <span>
+              <span className={ready ? "readiness-dot ready" : "readiness-dot"} />
+              {catalog.isPending
+                ? "Checking test execution…"
+                : ready
+                  ? "Test execution enabled"
+                  : "Test execution needs setup"}
+            </span>
+            {!ready && !catalog.isPending && (
+              <Link className="text-link" to="/connections">
+                Finish setup <Icon name="arrow-right" />
+              </Link>
+            )}
           </div>
-          <p className="hint">
-            {mode === "execute"
-              ? "Runs an existing test using your connected executor. GitHub execution uses your Actions allowance."
-              : "Reads retained code and runtime evidence without running your application."}
-          </p>
-          <details className="disclosure">
-            <summary>Test and recording options</summary>
-            <ExistingTest
-              projectId={projectId}
-              value={testPath}
-              onChange={(value) => {
-                setTestPath(value);
+          <ErrorMessage error={catalog.error} />
+          <form
+            className="investigation-composer connected-panel"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create.mutate();
+            }}
+          >
+            <label htmlFor="investigation-question">Describe the problem</label>
+            <textarea
+              id="investigation-question"
+              required
+              minLength={3}
+              maxLength={1000}
+              rows={3}
+              placeholder="Why does the checkout test fail after a retry?"
+              value={question}
+              onChange={(e) => {
+                setQuestion(e.target.value);
                 setKey(newIdempotencyKey());
               }}
             />
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={capture}
-                disabled={mode !== "execute"}
-                onChange={(e) => {
-                  setCapture(e.target.checked);
+            <div className="investigation-submit">
+              <div className="segmented" role="group" aria-label="Investigation mode">
+                {(
+                  [
+                    ["execute", "Run a focused test"],
+                    ["analyze", "Inspect evidence"],
+                  ] as const
+                ).map(([value, name]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    aria-pressed={mode === value}
+                    className={mode === value ? "selected" : ""}
+                    onClick={() => {
+                      setMode(value);
+                      setKey(newIdempotencyKey());
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="btn primary"
+                disabled={create.isPending || (mode === "execute" && !ready)}
+              >
+                {create.isPending ? "Starting…" : "Investigate"}
+                <Icon name="arrow-right" />
+              </button>
+            </div>
+            <p className="hint">
+              {mode === "execute"
+                ? "Runs an existing test using your connected executor. GitHub execution uses your Actions allowance."
+                : "Reads retained code and runtime evidence without running your application."}
+            </p>
+            {mode === "execute" && !ready && !catalog.isPending && (
+              <p className="hint">
+                You can inspect source evidence now, or{" "}
+                <Link className="text-link" to="/connections">
+                  enable test execution
+                </Link>{" "}
+                first.
+              </p>
+            )}
+            <details className="disclosure">
+              <summary>Test and recording options</summary>
+              <ExistingTest
+                projectId={projectId}
+                value={testPath}
+                onChange={(value) => {
+                  setTestPath(value);
                   setKey(newIdempotencyKey());
                 }}
-              />{" "}
-              Retain supported JSON interactions for isolated replay
-            </label>
-            <p className="hint">
-              Optional capture retains application bodies. Headers and credential values are
-              omitted. Incomplete recordings cannot replay.
-            </p>
-          </details>
-          <ErrorMessage error={create.error} />
-        </form>
+              />
+              <label htmlFor="investigation-commit">Source commit (optional)</label>
+              <input
+                id="investigation-commit"
+                value={commit}
+                disabled={mode !== "execute"}
+                pattern="[a-f0-9]{40}"
+                maxLength={40}
+                placeholder="Full pushed commit SHA"
+                onChange={(e) => {
+                  setCommit(e.target.value.trim());
+                  setKey(newIdempotencyKey());
+                }}
+              />
+              <p className="hint">
+                Leave empty to use the indexed repository revision. A pushed commit selects another
+                revision; local edits are not uploaded.
+              </p>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={capture}
+                  disabled={mode !== "execute"}
+                  onChange={(e) => {
+                    setCapture(e.target.checked);
+                    setKey(newIdempotencyKey());
+                  }}
+                />{" "}
+                Retain supported JSON interactions for isolated replay
+              </label>
+              <p className="hint">
+                Optional capture retains application bodies. Headers and credential values are
+                omitted. Incomplete recordings cannot replay.
+              </p>
+            </details>
+            <ErrorMessage error={create.error} />
+          </form>
+        </>
       )}
       <section className="section">
         <div className="section-head">
@@ -228,6 +306,16 @@ export function InvestigationsPage() {
                     {i.snapshot.commit ? i.snapshot.commit.slice(0, 7) : "Source revision unknown"}{" "}
                     · {i.finding.basis === "observed" ? "Recorded evidence" : "Source analysis"}
                   </span>
+                  {i.createdAt && (
+                    <time className="investigation-time" dateTime={i.createdAt}>
+                      {new Date(i.createdAt).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </time>
+                  )}
                 </div>
                 <State value={i.status} />
                 <Icon name="arrow-right" />
@@ -306,6 +394,10 @@ function Evidence({
   );
 }
 export function InvestigationPage() {
+  const { id } = useParams();
+  return <InvestigationDetail key={id} />;
+}
+function InvestigationDetail() {
   const { id = "" } = useParams(),
     { projectId } = useWorkspace(),
     cache = useQueryClient(),
@@ -341,7 +433,7 @@ export function InvestigationPage() {
       }),
     onSuccess: (i) => navigate(i.browserPath),
   });
-  const verificationId = params.get("verification") ?? "";
+  const verificationId = params.get("verification") ?? q.data?.verifications?.[0]?.id ?? "";
   const verification = useQuery({
     queryKey: ["verification", projectId, verificationId],
     queryFn: () => investigations.verification(projectId, verificationId),
@@ -380,15 +472,28 @@ export function InvestigationPage() {
           <h1>{i.question}</h1>
           <p className="hint">{i.id}</p>
         </div>
-        <State value={i.status} />
+        <State
+          value={i.status === "EVIDENCE_READY" && i.execution ? i.execution.status : i.status}
+        />
       </div>
       <section className="connected-panel finding-panel" aria-labelledby="finding-title">
         <p className="eyebrow">
-          {i.finding.basis === "observed" ? "Recorded finding" : "Source analysis"}
+          {busy(i)
+            ? "Execution in progress"
+            : i.finding.basis === "observed"
+              ? "Recorded finding"
+              : "Source analysis"}
         </p>
         <h2 id="finding-title">{busy(i) ? "The focused check is running" : "What we found"}</h2>
-        <p className="finding-summary">{i.finding.summary}</p>
-        {i.finding.nextAction && <p>{i.finding.nextAction}</p>}
+        <p className="finding-summary">
+          {busy(i)
+            ? "Waiting for the current execution to report its result."
+            : i.execution && i.status === "EVIDENCE_READY"
+              ? `${i.execution.counts.passed} passed, ${i.execution.counts.failed} failed across the selected checks.`
+              : i.finding.summary}
+        </p>
+        {i.execution && <ExecutionSummary execution={i.execution} />}
+        {i.finding.nextAction && !busy(i) && <p>{i.finding.nextAction}</p>}
         {busy(i) && (
           <>
             <p role="status" className="hint">
@@ -415,7 +520,11 @@ export function InvestigationPage() {
         <code title={i.snapshot.commit ?? "Unknown source revision"}>
           {i.snapshot.commit ? i.snapshot.commit.slice(0, 12) : "Revision unknown"}
         </code>
-        <span>{i.snapshot.filesScanned} indexed files</span>
+        <span>
+          {i.snapshot.filesScanned
+            ? `${i.snapshot.filesScanned} indexed files`
+            : "No source index attached to this revision"}
+        </span>
       </div>
       {[...i.snapshot.warnings, ...i.finding.limitations].length > 0 && (
         <details className="disclosure">
@@ -438,8 +547,32 @@ export function InvestigationPage() {
             <>
               <State value={verification.data.verdict} />
               <p>{verification.data.summary}</p>
-              <Link className="btn" to={"/investigations/" + verification.data.candidateId}>
-                Open candidate evidence
+              <dl className="result-facts">
+                <div>
+                  <dt>Candidate revision</dt>
+                  <dd>
+                    <code title={verification.data.candidateCommit}>
+                      {verification.data.candidateCommit.slice(0, 12)}
+                    </code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Changed tests or fixtures</dt>
+                  <dd>{verification.data.changedTests.length}</dd>
+                </div>
+              </dl>
+              <Link
+                className="btn"
+                to={
+                  "/investigations/" +
+                  (id === verification.data.candidateId
+                    ? verification.data.baselineId
+                    : verification.data.candidateId)
+                }
+              >
+                {id === verification.data.candidateId
+                  ? "Open original failure"
+                  : "Open candidate evidence"}
               </Link>
               {verification.data.changedTests.length > 0 && (
                 <p>Changed tests or fixtures: {verification.data.changedTests.join(", ")}</p>
@@ -577,31 +710,38 @@ interface Grant {
 }
 export function ConnectionsPage() {
   const { projectId, projects } = useWorkspace(),
-    cache = useQueryClient(),
-    [connect, setConnect] = useState(false),
+    cache = useQueryClient();
+  const [connect, setConnect] = useState(false),
     [setup, setSetup] = useState(false),
-    [copied, setCopied] = useState<"endpoint" | "antigravity" | null>(null),
-    [copyError, setCopyError] = useState("");
+    [client, setClient] = useState<"chatgpt" | "antigravity" | "other">("chatgpt"),
+    [copied, setCopied] = useState(""),
+    [copyError, setCopyError] = useState(""),
+    [revokeTarget, setRevokeTarget] = useState<Grant | null>(null);
   const project = projects.find((p) => p.id === projectId),
     endpoint = window.location.origin + "/mcp";
-  const antigravitySetup = `Add a remote MCP server named traceyard to my Antigravity global MCP configuration. Use serverUrl ${endpoint}. Preserve every existing server and setting. The configuration is at ~/.gemini/config/mcp_config.json (under USERPROFILE on Windows). Save the configuration, then tell me how to reload the server and click Authenticate in Customizations > Installed > MCP Servers. During Traceyard consent I should choose ${project?.repository ?? project?.name ?? "the project I want to debug"}. Let me complete browser consent and any authorization-code entry in Antigravity myself.`;
-  const copy = (value: string, kind: "endpoint" | "antigravity") => {
+  const antigravitySetup = `Add a remote MCP server named traceyard to my Antigravity global MCP configuration. Use serverUrl ${endpoint}. Preserve every existing server and setting. The configuration is at ~/.gemini/config/mcp_config.json (under USERPROFILE on Windows). Save the configuration, then tell me how to reload the server and click Authenticate in Customizations > Installed > MCP Servers. During Traceyard consent I should choose ${project?.repository ?? project?.name ?? "my project"}. Let me complete browser consent and any authorization-code entry myself.`;
+  const copy = (value: string) => {
     void navigator.clipboard
       .writeText(value)
       .then(() => {
-        setCopied(kind);
+        setCopied(value);
         setCopyError("");
       })
-      .catch(() => setCopyError("Clipboard access is unavailable. Use the text shown below."));
+      .catch(() =>
+        setCopyError("Clipboard access is unavailable. Select and copy the text below."),
+      );
   };
   const catalog = useQuery({
     queryKey: ["catalog", projectId],
     queryFn: () => integrationRequest<Catalog>(projectId, "catalog"),
     enabled: !!project?.repository,
+    refetchOnWindowFocus: true,
   });
   const grants = useQuery({
     queryKey: ["agent-connections", projectId],
     queryFn: () => integrationRequest<{ items: Grant[] }>(projectId, "agent-connections"),
+    refetchOnWindowFocus: true,
+    refetchInterval: (q) => (q.state.data?.items.some((g) => !g.revoked_at) ? false : 15000),
   });
   const revoke = useMutation({
     mutationFn: (id: string) =>
@@ -611,108 +751,224 @@ export function ConnectionsPage() {
         "POST",
         {},
       ),
-    onSuccess: () => cache.invalidateQueries({ queryKey: ["agent-connections", projectId] }),
+    onSuccess: () => {
+      setRevokeTarget(null);
+      void cache.invalidateQueries({ queryKey: ["agent-connections", projectId] });
+    },
   });
+  const ready =
+    catalog.data?.executionAvailable &&
+    (catalog.data.executionProvider === "managed" || catalog.data.repository?.runner_enabled !== 0);
+  const authorized = grants.data?.items.filter((g) => !g.revoked_at) ?? [];
   return (
     <div className="connections-page">
       <div className="page-head">
         <div>
-          <h1>Connections</h1>
-          <p>Connect the repository once. Investigate from your coding agent or this app.</p>
+          <p className="eyebrow">{project?.repository ?? project?.name}</p>
+          <h1>Project setup</h1>
+          <p>
+            Connect your repository and enable tests. Add your coding agent whenever you’re ready.
+          </p>
         </div>
-        <Link className="btn" to="/investigations">
-          Investigate a problem
+        <Link className="btn primary" to="/investigations">
+          Open investigations <Icon name="arrow-right" />
         </Link>
       </div>
-      <section className="connected-panel">
-        <div className="section-head">
-          <h2>Repository</h2>
-          <State value={project?.repository ? "CONNECTED" : "NOT_CONNECTED"} />
-        </div>
-        <p>{project?.repository ?? "Choose a repository from your GitHub account."}</p>
-        {project?.repository ? (
-          <Link className="btn" to={"/projects/" + projectId}>
-            Repository details
-          </Link>
-        ) : (
-          <button className="btn primary" onClick={() => setConnect(true)}>
-            Connect repository
-          </button>
-        )}
-      </section>
-      <section className="connected-panel section">
-        <h2>Test execution</h2>
-        {catalog.isPending && project?.repository ? (
-          <p role="status">Checking execution connection…</p>
-        ) : (
-          <>
-            <p>
-              {catalog.data?.executionAvailable
-                ? catalog.data.executionProvider === "managed" ||
-                  !!catalog.data.repository?.runner_enabled
-                  ? `${catalog.data.executionProvider === "managed" ? "Managed" : "GitHub"} execution is enabled. Availability is checked when a test launches.`
-                  : "GitHub execution is available. Review the repository workflow to enable tests."
-                : "Source analysis is available after repository scanning. Running tests also needs an executor."}
-            </p>
-            {project?.repository && catalog.data?.executionProvider !== "managed" && (
-              <button className="btn" onClick={() => setSetup(true)}>
-                Review GitHub execution setup
+      <ol className="connection-checklist" aria-label="Project readiness">
+        <li>
+          <Icon name={project?.repository ? "circle-check" : "circle"} />
+          <span>
+            <strong>Repository</strong>
+            <small>{project?.repository ? "Connected" : "Choose a repository"}</small>
+          </span>
+        </li>
+        <li>
+          <Icon name={ready ? "circle-check" : "circle"} />
+          <span>
+            <strong>Test execution</strong>
+            <small>
+              {catalog.isPending && project?.repository
+                ? "Checking…"
+                : ready
+                  ? "Enabled"
+                  : "Setup needed"}
+            </small>
+          </span>
+        </li>
+        <li>
+          <Icon name={authorized.length ? "circle-check" : "circle"} />
+          <span>
+            <strong>Coding agent</strong>
+            <small>
+              {authorized.length
+                ? `${authorized.length} authorized`
+                : "Optional · use the app directly"}
+            </small>
+          </span>
+        </li>
+      </ol>
+      <div className="connection-layout">
+        <div className="connection-foundations">
+          <section className="connected-panel">
+            <div className="section-head">
+              <h2>Repository</h2>
+              <State value={project?.repository ? "CONNECTED" : "NOT_CONNECTED"} />
+            </div>
+            <p>{project?.repository ?? "Choose a repository from your GitHub account."}</p>
+            {project?.repository ? (
+              <Link className="btn" to={"/projects/" + projectId}>
+                Repository details
+              </Link>
+            ) : (
+              <button className="btn primary" onClick={() => setConnect(true)}>
+                Connect repository
               </button>
             )}
-          </>
-        )}
-        <p className="hint">
-          GitHub execution requires a reviewed workflow file and uses your Actions allowance.
-          Production runtime tracing is optional for source and test investigations.
-        </p>
-        <ErrorMessage error={catalog.error} />
-      </section>
+          </section>
+          <section className="connected-panel section">
+            <div className="section-head">
+              <h2>Test execution</h2>
+              {ready && <State value="ENABLED" />}
+            </div>
+            {catalog.isPending && project?.repository ? (
+              <p role="status">Checking execution connection…</p>
+            ) : (
+              <p>
+                {ready
+                  ? `${catalog.data?.executionProvider === "managed" ? "Managed" : "GitHub Actions"} execution is enabled for this repository.`
+                  : project?.repository
+                    ? "Enable the reviewed execution workflow to run repository tests."
+                    : "Connect a repository before configuring test execution."}
+              </p>
+            )}
+            {project?.repository && catalog.data?.executionProvider !== "managed" && (
+              <button className={ready ? "btn" : "btn primary"} onClick={() => setSetup(true)}>
+                {ready ? "Review execution setup" : "Set up test execution"}
+              </button>
+            )}
+            <p className="hint">
+              GitHub execution uses your Actions allowance. You can inspect indexed source without
+              enabling it.
+            </p>
+            <ErrorMessage error={catalog.error} />
+            {catalog.isError && (
+              <button className="btn" onClick={() => void catalog.refetch()}>
+                Check again
+              </button>
+            )}
+          </section>
+        </div>
+        <section className="connected-panel agent-setup">
+          <div className="section-head">
+            <h2>Use your coding agent</h2>
+            {authorized.length > 0 && <State value="AUTHORIZED" />}
+          </div>
+          <p>
+            Authorize access to this project. Your agent and this app share the same investigations
+            and results.
+          </p>
+          <div className="segmented client-picker" role="group" aria-label="Coding agent">
+            {(
+              [
+                ["chatgpt", "ChatGPT Work"],
+                ["antigravity", "Antigravity"],
+                ["other", "Other client"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                aria-pressed={client === value}
+                className={client === value ? "selected" : ""}
+                onClick={() => {
+                  setClient(value);
+                  setCopied("");
+                  setCopyError("");
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mcp-endpoint">
+            <code>{endpoint}</code>
+            <button className="btn" onClick={() => copy(endpoint)}>
+              {copied === endpoint ? "Copied" : "Copy MCP URL"}
+            </button>
+          </div>
+          {client === "chatgpt" ? (
+            <ol className="setup-instructions">
+              <li>
+                In ChatGPT, open <strong>Plugins → + → Add custom MCP server</strong>.
+              </li>
+              <li>
+                Name it <strong>Traceyard</strong>, paste the MCP URL and choose{" "}
+                <strong>OAuth</strong>. Create and install the plugin.
+              </li>
+              <li>
+                Complete browser authorization and choose{" "}
+                <strong>{project?.repository ?? project?.name}</strong>. In Work, select{" "}
+                <strong>@Traceyard</strong> and ask it to inspect the connected project.
+              </li>
+            </ol>
+          ) : client === "antigravity" ? (
+            <div>
+              <p>Ask Antigravity to add the server without changing your existing connections.</p>
+              <button className="btn" onClick={() => copy(antigravitySetup)}>
+                {copied === antigravitySetup ? "Copied" : "Copy Antigravity setup request"}
+              </button>
+              <ol className="setup-instructions">
+                <li>Paste the setup request into Antigravity.</li>
+                <li>
+                  Open <strong>Customizations → Installed → MCP Servers</strong> and choose{" "}
+                  <strong>Authenticate</strong> for Traceyard.
+                </li>
+                <li>
+                  Complete browser authorization for{" "}
+                  <strong>{project?.repository ?? project?.name}</strong>. If asked, paste the
+                  callback code into Antigravity.
+                </li>
+              </ol>
+              <details className="disclosure">
+                <summary>View setup request</summary>
+                <p className="setup-request">{antigravitySetup}</p>
+              </details>
+            </div>
+          ) : (
+            <ol className="setup-instructions">
+              <li>Add a remote HTTP MCP server using the URL above.</li>
+              <li>
+                Choose OAuth and complete browser authorization for{" "}
+                <strong>{project?.repository ?? project?.name}</strong>.
+              </li>
+              <li>
+                Ask your agent to use Traceyard’s <code>inspect</code> tool with{" "}
+                <code>section: capabilities</code> before its first investigation.
+              </li>
+            </ol>
+          )}
+          {copyError && <p role="status">{copyError}</p>}
+          <p className="hint">
+            No API key is needed. Your client must support remote HTTP MCP with OAuth.
+          </p>
+        </section>
+      </div>
       <section className="connected-panel section">
-        <h2>Use your coding agent</h2>
-        <p>
-          Connect once, then ask your coding agent to investigate with Traceyard. It can read
-          findings and run focused checks for the project you approve.
-        </p>
-        <details className="disclosure">
-          <summary>Connect with Antigravity</summary>
-          <p>Ask Antigravity to add the connection while keeping your existing servers.</p>
-          <button className="btn" onClick={() => copy(antigravitySetup, "antigravity")}>
-            {copied === "antigravity" ? "Setup request copied" : "Copy Antigravity setup request"}
-          </button>
-          <ol>
-            <li>Paste the request into an Antigravity chat and review its configuration update.</li>
-            <li>In Customizations → Installed → MCP Servers, choose Authenticate for Traceyard.</li>
-            <li>
-              Choose this Traceyard project in the browser and connect. If Antigravity asks for a
-              code, paste the callback page’s code into Antigravity to finish.
-            </li>
-          </ol>
-          <p className="hint">An Unauthorized status means authentication has not finished yet.</p>
-          <details>
-            <summary>View setup request</summary>
-            <p>{antigravitySetup}</p>
-          </details>
-        </details>
-        <div className="mcp-endpoint">
-          <code>{endpoint}</code>
-          <button className="btn" onClick={() => copy(endpoint, "endpoint")}>
-            {copied === "endpoint" ? "Copied" : "Copy MCP URL"}
+        <div className="section-head">
+          <h2>Authorized agents</h2>
+          <button
+            className="btn"
+            disabled={grants.isFetching}
+            onClick={() => void grants.refetch()}
+          >
+            <Icon name="arrows-rotate" />
+            {grants.isFetching ? "Checking…" : "Refresh status"}
           </button>
         </div>
-        {copyError && <p role="status">{copyError}</p>}
         <p className="hint">
-          No API key to paste. Your coding agent must support remote HTTP MCP with OAuth.
+          Access is limited to this project. An authorization remains listed when its client is
+          closed.
         </p>
-        <details className="disclosure">
-          <summary>Example agent request</summary>
-          <p>
-            “Use Traceyard to investigate why the checkout retry test fails. Inspect the finding,
-            repair the relevant code, then verify the candidate commit.”
-          </p>
-        </details>
-      </section>
-      <section className="section">
-        <h2>Authorized agents</h2>
         {grants.isPending ? (
           <p role="status">Loading agents…</p>
         ) : grants.isError ? (
@@ -722,15 +978,28 @@ export function ConnectionsPage() {
             <article className="stat-row" key={g.id}>
               <div>
                 <strong>{g.name}</strong>
-                <p className="hint">{JSON.parse(g.scopes_json).join(", ")}</p>
+                <p className="hint">
+                  {(JSON.parse(g.scopes_json) as string[])
+                    .map(
+                      (scope) =>
+                        ({
+                          "investigations:read": "Read evidence",
+                          "investigations:run": "Run tests",
+                          "runs:recover": "Recover workflows",
+                        })[scope] ?? scope,
+                    )
+                    .join(" · ")}
+                </p>
               </div>
               {g.revoked_at ? (
                 <span className="hint">Revoked</span>
               ) : (
                 <button
                   className="btn"
-                  disabled={revoke.isPending}
-                  onClick={() => revoke.mutate(g.id)}
+                  onClick={() => {
+                    revoke.reset();
+                    setRevokeTarget(g);
+                  }}
                 >
                   Revoke access
                 </button>
@@ -738,18 +1007,17 @@ export function ConnectionsPage() {
             </article>
           ))
         ) : (
-          <p className="hint">Agents appear here after you authorize a connection.</p>
+          <p>No agents authorized yet. Complete the connection above, then refresh this status.</p>
         )}
-        <ErrorMessage error={revoke.error} />
       </section>
       <details className="disclosure section">
-        <summary>Production tracing and advanced connections</summary>
+        <summary>Runtime tracing and advanced connections</summary>
         <p>
-          Attach a deployed application when you need production traces. These are separate from
-          repository access and test execution.
+          Connect a running application to inspect its runtime traces. Repository tests and MCP do
+          not require runtime instrumentation.
         </p>
         <Link className="btn" to="/connect">
-          Connect runtime tracing
+          Set up runtime tracing
         </Link>
       </details>
       {connect && (
@@ -773,6 +1041,26 @@ export function ConnectionsPage() {
             void catalog.refetch();
           }}
         />
+      )}
+      {revokeTarget && (
+        <Modal title="Revoke agent access?" close={() => setRevokeTarget(null)}>
+          <p>
+            {revokeTarget.name} will lose access to this project. You can authorize it again later.
+          </p>
+          <ErrorMessage error={revoke.error} />
+          <div className="dialog-actions">
+            <button className="btn" onClick={() => setRevokeTarget(null)}>
+              Keep access
+            </button>
+            <button
+              className="btn primary"
+              disabled={revoke.isPending}
+              onClick={() => revoke.mutate(revokeTarget.id)}
+            >
+              {revoke.isPending ? "Revoking…" : "Revoke access"}
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -6,11 +6,21 @@ Coding agents can use the authenticated remote MCP endpoint to create shared inv
 
 Create and publish a workflow, run it with JSON input, inspect each step and recover failed work. The browser, API, SDK and CLI use the same execution engine. Repository discovery and GitHub checks supply supporting source and test evidence; they are optional for running Traceyard workflows.
 
+## Use the hosted app
+
+1. Open [Traceyard](https://traceyard.pilotsaviour229.workers.dev) and continue with GitHub.
+2. Connect a repository. In **Connections**, review and enable its GitHub Actions workflow if you want to run tests. Repository rules may require approval of that one-time change.
+3. Describe a problem in **Investigations** and choose an existing test, or inspect indexed source without running code.
+4. To work from your coding agent, follow its OAuth connection steps in **Connections**. No local Traceyard configuration file or pasted server key is required. Authorize the same repository project in the client.
+5. Open the retained result to see its exact executed revision and failures. Verify the repair through your agent, or enter the pushed candidate commit in the app. The original failure and verification stay linked when reopened.
+
+Repository access, test execution and agent authorization are separate readiness states. An authorized agent can be closed or offline; the app does not label a saved authorization as a live connection. Execution currently supports focused Vitest tests in npm repositories. Other frameworks are not silently treated as supported.
+
 ## Product flow
 
 **Question → Focused test → Finding → Verified repair.** Investigations are the landing workspace. Connect a GitHub repository, ask about a failure, inspect bounded evidence and verify the candidate commit. Connections shows repository access, execution availability and OAuth agent grants. Eligible JSON interactions can replay on the network-disabled Docker executor; see [supported replay](docs/REPLAY.md).
 
-The existing workflow engine remains available under Workflows. Executions has a project-scoped, paginated ledger with status filters; Traces and Approvals are available directly in the navigation. A repository connection is not required to create a project and execute a workflow.
+The workflow engine and runtime monitoring remain available under **Tools**. **Workflow runs** has a project-scoped, paginated ledger with status filters; repository test results remain in Investigations. A repository connection is not required to create a project and execute a workflow.
 
 Studio publishes immutable workflow versions. Runs capture their input, model routes and HTTP destinations. Independent ready steps can run together; conditional paths are recorded explicitly. The execution inspector shows retained inputs, outputs, errors, attempts and events, with JSON export.
 
@@ -87,6 +97,8 @@ The existing shared admission budget still applies: 100 runs/day, 8 active execu
 Runs and external spans retain 30 days by default; audit events retain 90. Trace views show the latest 100 traces and up to 1,000 external spans per trace. Redaction covers known credential field names and common token patterns; callers must avoid sending unnecessary sensitive attributes. Projects are owner-scoped. Team roles, arbitrary user code, specialized CRM/search adapters, OpenTelemetry OTLP ingestion, and a published package registry are outside this build.
 
 ## Validation and deployment
+
+After one-time CI credential setup, successful main checks trigger the production release automatically. See [production release](docs/PRODUCTION_RELEASE.md). Deployment credentials are separate from using the hosted product.
 
 ```bash
 npm test

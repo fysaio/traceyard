@@ -35,7 +35,12 @@ export function SettingsLayout({ account }: { account: ReactNode }) {
             ["developer", "API keys & SDK"],
             ["automations", "Schedules & webhooks"],
           ].map(([id, name]) => (
-            <NavLink key={id} to={"/settings/" + id}>
+            <NavLink
+              key={id}
+              to={
+                "/settings/" + id + (projectId ? "?project=" + encodeURIComponent(projectId) : "")
+              }
+            >
               {name}
             </NavLink>
           ))}

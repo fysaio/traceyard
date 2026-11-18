@@ -109,7 +109,6 @@ html {
   max-width: 1180px;
   margin: 0 auto;
   padding-bottom: max(40px, env(safe-area-inset-bottom));
-  animation: flow-arrive 180ms ease-out;
 }
 @keyframes flow-arrive {
   from {
