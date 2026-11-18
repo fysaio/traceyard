@@ -50,6 +50,7 @@ test("native consent form preserves Origin, selects one project and completes MC
   page,
   baseURL,
 }) => {
+  test.setTimeout(150000);
   const { project, client, verifier, callback, metadata } = await openConsent(page);
   let submissions = 0;
   page.on("request", (r) => {
@@ -83,22 +84,38 @@ test("native consent form preserves Origin, selects one project and completes MC
   expect(tokenResponse.status()).toBe(200);
   const token = await tokenResponse.json();
   const sdk = new Client({ name: "browser-acceptance", version: "1" });
+  const errors: Error[] = [];
+  sdk.onerror = (error) => errors.push(error);
+  let gets = 0;
   let resolveGet!: (status: number) => void;
   const backgroundGet = new Promise<number>((resolve) => {
     resolveGet = resolve;
   });
+  // A strict GET consumer reproduces the installed Antigravity behavior:
+  // 405 is a failure, and an immediately closed 200 is also a failure.
+  const stream = await fetch(baseURL + "/mcp", {
+    headers: { Authorization: "Bearer " + token.access_token, Accept: "text/event-stream" },
+  });
+  expect(stream.status).toBe(200);
+  const reader = stream.body!.getReader();
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain(": connected");
   try {
     await sdk.connect(
       new StreamableHTTPClientTransport(new URL(baseURL + "/mcp"), {
         requestInit: { headers: { Authorization: "Bearer " + token.access_token } },
         fetch: async (input, init) => {
           const response = await fetch(input, init);
-          if (init?.method === "GET") resolveGet(response.status);
+          if (init?.method === "GET") {
+            gets++;
+            resolveGet(response.status);
+            if (response.status !== 200)
+              throw new Error("standalone SSE stream: " + response.statusText);
+          }
           return response;
         },
       }),
     );
-    expect(await backgroundGet).toBe(405);
+    expect(await backgroundGet).toBe(200);
     expect((await sdk.listTools()).tools.map((tool) => tool.name)).toEqual([
       "investigate",
       "inspect",
@@ -121,7 +138,53 @@ test("native consent form preserves Origin, selects one project and completes MC
     );
     expect(retained.status()).toBe(200);
     expect((await retained.json()).data.projectId).toBe(project.id);
+    // Stay idle beyond typical proxy timeouts, then call tools on that connection.
+    // Each read must be another heartbeat, never EOF; the SDK must not retry GET.
+    for (let i = 0; i < 5; i++) {
+      const frame = await reader.read();
+      expect(frame.done).toBe(false);
+      expect(new TextDecoder().decode(frame.value)).toContain(": keep-alive");
+    }
+    expect((await sdk.listTools()).tools).toHaveLength(4);
+    expect(gets).toBe(1);
+    expect(errors).toEqual([]);
+    await sdk.close();
+    const next = new Client({ name: "browser-reconnect", version: "1" });
+    try {
+      await next.connect(
+        new StreamableHTTPClientTransport(new URL(baseURL + "/mcp"), {
+          requestInit: { headers: { Authorization: "Bearer " + token.access_token } },
+        }),
+      );
+      const inspected = await next.callTool({
+        name: "inspect",
+        arguments: { investigationId: id, section: "status" },
+      });
+      expect(inspected.isError).not.toBe(true);
+    } finally {
+      await next.close();
+    }
+    const grantsResponse = await page.request.get(
+      `${baseURL}/api/projects/${project.id}/agent-connections`,
+    );
+    const grants = (await grantsResponse.json()).data.items;
+    const grant = grants.find((g: { name: string }) => g.name === "Browser acceptance agent");
+    expect(grant).toBeTruthy();
+    expect(
+      (
+        await page.request.post(
+          `${baseURL}/api/projects/${project.id}/agent-connections/${grant.id}/revoke`,
+        )
+      ).status(),
+    ).toBe(200);
+    expect((await reader.read()).done).toBe(true);
+    const denied = await fetch(baseURL + "/mcp", {
+      headers: { Authorization: "Bearer " + token.access_token, Accept: "text/event-stream" },
+    });
+    expect(denied.status).toBe(401);
+    await denied.body?.cancel();
   } finally {
+    await reader.cancel();
     await sdk.close();
   }
 });
