@@ -1,5 +1,6 @@
 import { ProjectActivity } from "./project-overview";
 import { ProjectLink as Link } from "../components/project-link";
+import { Icon } from "../components/product-ui";
 import { useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
