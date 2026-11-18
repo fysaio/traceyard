@@ -44,7 +44,7 @@ Reviewed bootstrap: [`6bfde2973ff92f322b6d575e60a3212e2474bbcc`](https://github.
 
 ## Production rollout
 
-Code merge and production deployment are separate. This workspace has no authenticated Cloudflare session. Production deployment and live private-repository/OAuth acceptance therefore require the existing operator's authenticated Cloudflare environment. No new GitHub/provider secrets should be pasted into chat.
+Code merge and production deployment are separate. On 18 November the operator deployed `7cf9c401a5d1a1e5e3689003736068b05c3fbf66`, migrations through 0022 and the reviewed runner from the existing authenticated Cloudflare environment. A live GitHub sign-in, repository connection and inferred focused test succeeded; see [the acceptance record](LIVE_INVESTIGATION_ACCEPTANCE_2026-11-18.md). Live external MCP authorization, repair verification and replay remain open. This workspace itself still has no authenticated Cloudflare session. No new GitHub/provider secrets should be pasted into chat.
 
 From a clean `main` checkout after the PR checks pass:
 
