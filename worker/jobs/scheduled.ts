@@ -9,6 +9,7 @@ import { reconcileExecutionLeases } from "../persistence/admission";
 import {
   failDispatch,
   listDispatchesForReconciliation,
+  MAX_DISPATCH_ATTEMPTS,
   reopenStaleClaims,
 } from "../persistence/dispatches";
 import {
@@ -128,9 +129,6 @@ async function republishPendingDispatches(env: Env): Promise<number> {
         .run();
       continue;
     }
-    if (dispatch.attempt_count >= 5) {
-      continue;
-    }
     await publishDispatch(env, env.DB, dispatch, "scheduled-reconciler");
     republished += 1;
   }
@@ -143,11 +141,13 @@ async function failExhaustedDispatches(env: Env): Promise<number> {
     `SELECT d.*, r.id AS joined_run_id
          FROM execution_dispatches d
          JOIN runs r ON r.id = d.run_id
-        WHERE d.status IN ('PENDING', 'PUBLISHED')
-          AND d.attempt_count >= 6
+        WHERE d.status = 'PENDING'
+          AND d.attempt_count >= ?
           AND r.status = 'QUEUED'
         LIMIT 25`,
-  ).all<DispatchRow>();
+  )
+    .bind(MAX_DISPATCH_ATTEMPTS)
+    .all<DispatchRow>();
   let failed = 0;
 
   for (const dispatch of result.results) {

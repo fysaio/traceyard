@@ -410,6 +410,12 @@ describe("authenticated remote MCP", () => {
       arguments: { investigationId: body.data.id },
     });
     expect(denied.isError).toBe(true);
+    const deniedStatus = await remote.c.callTool({
+      name: "inspect",
+      arguments: { investigationId: body.data.id, section: "status" },
+    });
+    expect(deniedStatus.isError).toBe(true);
+    expect(deniedStatus.structuredContent).toMatchObject({ code: "NOT_FOUND" });
     await remote.c.close();
     const grants = await apiFetch(`/api/projects/${a.projectId}/agent-connections`, {
       headers: { cookie: a.cookie },

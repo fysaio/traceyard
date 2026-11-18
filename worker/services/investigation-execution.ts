@@ -166,15 +166,11 @@ export async function startInvestigationExecution(
   fetcher: typeof fetch = fetch,
 ) {
   const inv = await getInvestigation(env.DB, userId, projectId, id);
-  const attempts = await env.DB.prepare(
-    "SELECT id FROM investigation_attempts WHERE investigation_id=?",
-  )
-    .bind(id)
-    .all();
-  if (inv.status === "EXECUTING" || (options.initial && attempts.results.length)) return inv;
+  const attemptCount = inv.attempts.length;
+  if (inv.status === "EXECUTING" || (options.initial && attemptCount)) return inv;
   if (inv.status === "CANCELLED")
     throw conflict("INVESTIGATION_CANCELLED", "Start a new investigation after cancellation.");
-  if (attempts.results.length >= 3)
+  if (attemptCount >= 3)
     throw conflict(
       "INVESTIGATION_ATTEMPT_LIMIT",
       "This investigation reached its three-attempt budget. Its evidence remains available.",
