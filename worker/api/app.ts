@@ -1,6 +1,7 @@
 import { workspaceRoutes } from "./routes/workspace";
 import { investigationRoutes } from "./routes/investigations";
 import { repositoryIndexRoutes } from "./routes/repository-index";
+import { investigationExecutionRoutes } from "./routes/investigation-execution";
 import { activityRoutes } from "./routes/activity";
 import { createRepositoryRoutes } from "./routes/repositories";
 import { httpRoutes } from "./routes/http-connections";
@@ -50,6 +51,7 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
   app.route("/api", projectRoutes);
   app.route("/api", investigationRoutes);
   app.route("/api", repositoryIndexRoutes(options.githubFetch));
+  app.route("/api", investigationExecutionRoutes(options.githubFetch));
   app.route("/api", activityRoutes);
   app.route("/api", workspaceRoutes(options.githubFetch));
   app.route("/api", createRepositoryRoutes(options.githubFetch));
