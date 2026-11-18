@@ -18,6 +18,13 @@ beforeAll(async () => {
  */
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare("DELETE FROM mcp_request_limits"),
+    env.DB.prepare("DELETE FROM mcp_access_tokens"),
+    env.DB.prepare("DELETE FROM mcp_refresh_tokens"),
+    env.DB.prepare("DELETE FROM oauth_codes"),
+    env.DB.prepare("DELETE FROM mcp_grants"),
+    env.DB.prepare("DELETE FROM oauth_consents"),
+    env.DB.prepare("DELETE FROM oauth_clients"),
     env.DB.prepare("DELETE FROM investigation_verifications"),
     env.DB.prepare("DELETE FROM investigation_attempts"),
     env.DB.prepare("DELETE FROM repository_index_files"),

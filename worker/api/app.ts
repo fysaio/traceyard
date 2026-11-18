@@ -3,6 +3,8 @@ import { investigationRoutes } from "./routes/investigations";
 import { repositoryIndexRoutes } from "./routes/repository-index";
 import { investigationExecutionRoutes } from "./routes/investigation-execution";
 import { verificationRoutes } from "./routes/verifications";
+import { oauthRoutes } from "../mcp/oauth-routes";
+import { handleMcp } from "../mcp/server";
 import { activityRoutes } from "./routes/activity";
 import { createRepositoryRoutes } from "./routes/repositories";
 import { httpRoutes } from "./routes/http-connections";
@@ -47,6 +49,20 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
   app.use("/api/*", sameOriginMiddleware());
   app.use("/api/*", sessionMiddleware());
   app.use("/api/*", authSessionMiddleware());
+  app.use("/oauth/authorize", sameOriginMiddleware());
+  app.use("/oauth/authorize", sessionMiddleware());
+  app.use("/oauth/authorize", authSessionMiddleware());
+  app.options("/mcp", (c) => {
+    c.header("Access-Control-Allow-Origin", "*");
+    c.header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    c.header(
+      "Access-Control-Allow-Headers",
+      "Authorization,Content-Type,Accept,MCP-Protocol-Version,MCP-Session-Id",
+    );
+    return c.body(null, 204);
+  });
+  app.all("/mcp", handleMcp);
+  app.route("/", oauthRoutes());
 
   app.route("/api", createAuthRoutes(options.githubFetch));
   app.route("/api", projectRoutes);
