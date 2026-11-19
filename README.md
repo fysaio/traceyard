@@ -19,6 +19,8 @@ If the failure does not reproduce, **Check for flakiness** can run three fresh c
 
 Focused Jest runs are also available for supported npm packages. The flakiness check uses Vitest.
 
+[Record a browser journey](docs/BROWSER_JOURNEYS.md) to compare a user flow on two browser builds and review the result on a pull request.
+
 ## More
 
 [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [MIT license](LICENSE)

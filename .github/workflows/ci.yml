@@ -124,3 +124,49 @@ jobs:
         run: npm test
       - name: Windows production release build
         run: npm run build
+
+  browser-replay:
+    name: Offline browser replay on historical app builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_SHA: 2f3815ff34379fc2c40691e44fab3d565843dff8
+      FIX_SHA: db61d48b2af4ae2670c2a4258bdeaa64d40246ec
+      WRANGLER_SEND_METRICS: "false"
+      WRANGLER_SEND_ERROR_REPORTS: "false"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Build both app revisions
+        run: |
+          for revision in "$BASE_SHA" "$FIX_SHA"; do
+            git worktree add --detach "$RUNNER_TEMP/$revision" "$revision"
+            (
+              cd "$RUNNER_TEMP/$revision"
+              npm ci --no-audit --no-fund
+              npm run build
+            )
+          done
+      - name: Build offline replay image
+        run: docker build -f runner/browser.Dockerfile -t traceyard-browser .
+      - name: Record and replay the expired sign-in journey
+        run: >-
+          node scripts/verify-browser-workflow.mjs "$BASE_SHA" "$FIX_SHA"
+          "$RUNNER_TEMP/$BASE_SHA/dist/client" "$RUNNER_TEMP/$FIX_SHA/dist/client"
+          "$PWD/test-results/historical-browser"
+      - name: Retain historical browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: historical-browser-replay
+          path: test-results/historical-browser/
+          retention-days: 7
+          if-no-files-found: ignore

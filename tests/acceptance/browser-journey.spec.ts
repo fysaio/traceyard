@@ -104,6 +104,7 @@ test("browser journey reuses a captured response and reports a fix or missing ev
     const { stdout: capture } = await run("browser-fixtures", draft, recording, origin);
     expect(JSON.parse(capture)).toEqual({
       ...scenario,
+      exchanges: [],
       responses: { "/api/cart": { subtotal: 39, delivery: 3 } },
     });
     await writeFile(journey, capture);
