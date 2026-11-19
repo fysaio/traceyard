@@ -8,14 +8,7 @@ import { handleMcp } from "../mcp/server";
 import { recordingRoutes } from "./routes/recordings";
 import { activityRoutes } from "./routes/activity";
 import { createRepositoryRoutes } from "./routes/repositories";
-import { httpRoutes } from "./routes/http-connections";
-import { automationRoutes } from "./routes/automations";
-import { experimentRoutes } from "./routes/experiments";
-import { approvalRoutes } from "./routes/approvals";
-import { gatewayRoutes } from "./routes/gateway";
 import { traceRoutes } from "./routes/traces";
-import { developerRoutes } from "./routes/developer";
-import { studioRoutes } from "./routes/studio";
 import { Hono } from "hono";
 
 import type { ApiFailure } from "../../shared/contracts/api";
@@ -32,11 +25,7 @@ import {
 } from "./middleware";
 import { createAuthRoutes } from "./routes/auth";
 import { healthRoutes } from "./routes/health";
-import { overviewRoutes } from "./routes/overview";
 import { projectRoutes } from "./routes/projects";
-import { runRoutes } from "./routes/runs";
-import { sandboxRoutes } from "./routes/sandbox";
-import { workflowRoutes } from "./routes/workflows";
 
 function failure(requestId: string, code: string, message: string, details?: unknown): ApiFailure {
   return { error: { code, message, requestId, ...(details === undefined ? {} : { details }) } };
@@ -80,18 +69,7 @@ export function createApp(options: { githubFetch?: typeof fetch } = {}): Hono<Ap
   app.route("/api", activityRoutes);
   app.route("/api", workspaceRoutes(options.githubFetch));
   app.route("/api", createRepositoryRoutes(options.githubFetch));
-  app.route("/api", studioRoutes);
-  app.route("/api", httpRoutes);
   app.route("/api", traceRoutes);
-  app.route("/api", gatewayRoutes);
-  app.route("/api", approvalRoutes);
-  app.route("/api", automationRoutes);
-  app.route("/api", experimentRoutes);
-  app.route("/api", developerRoutes);
-  app.route("/api", workflowRoutes);
-  app.route("/api", runRoutes);
-  app.route("/api", overviewRoutes);
-  app.route("/api", sandboxRoutes);
 
   app.notFound((c) => {
     let requestId = "unknown";

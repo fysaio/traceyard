@@ -1,13 +1,11 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
-import type { SandboxStatus } from "../../shared/contracts/api";
 import { isoFromNow, nowIso } from "../../worker/lib/time";
 import { getDispatchByRunId } from "../../worker/persistence/dispatches";
-import { getFlag } from "../../worker/persistence/quotas";
 import { getRunRow } from "../../worker/persistence/runs";
 import { runScheduledJobs } from "../../worker/jobs/scheduled";
-import { apiFetch, createSession, launchRun, readFailure, readSuccess, seedRun } from "./helpers";
+import { createSession, seedRun } from "./helpers";
 
 describe("scheduled reconciliation", () => {
   it("republishes a pending dispatch and closes one whose run already started", async () => {
@@ -141,55 +139,5 @@ describe("scheduled reconciliation", () => {
       .bind(runId)
       .first<{ count: number }>();
     expect(Number(events?.count)).toBe(0);
-  });
-
-  it("opens the sandbox circuit breaker after repeated infrastructure failures", async () => {
-    const session = await createSession();
-    for (let index = 0; index < 3; index += 1) {
-      const { runId } = await seedRun({ session, status: "FAILED" });
-      await env.DB.prepare(
-        `UPDATE runs SET error_class = 'EXECUTION_INFRASTRUCTURE', completed_at = ?
-          WHERE id = ?`,
-      )
-        .bind(nowIso(), runId)
-        .run();
-    }
-
-    const summary = await runScheduledJobs(env);
-    expect(summary.circuitOpened).toBe(true);
-
-    const openUntil = await getFlag(env.DB, "sandbox_circuit_open_until");
-    expect(openUntil).not.toBeNull();
-    expect(Date.parse(openUntil!)).toBeGreaterThan(Date.now());
-
-    const sandbox = await readSuccess<SandboxStatus>(await apiFetch("/api/sandbox", {}, session));
-    expect(sandbox.enabled).toBe(false);
-    expect(sandbox.circuitOpenUntil).toBe(openUntil);
-
-    const rejected = await launchRun(session, {
-      input: {
-        title: "Circuit test",
-        document: "This document is long enough to pass validation.",
-      },
-    });
-    expect(rejected.response.status).toBe(503);
-    expect((await readFailure(rejected.response)).code).toBe("SANDBOX_CIRCUIT_OPEN");
-    expect(rejected.response.headers.get("retry-after")).not.toBeNull();
-  });
-
-  it("honours the global sandbox disable flag", async () => {
-    const session = await createSession();
-    await env.DB.prepare(
-      `UPDATE system_flags SET value = 'false' WHERE key = 'sandbox_enabled'`,
-    ).run();
-
-    const rejected = await launchRun(session, {
-      input: {
-        title: "Disabled test",
-        document: "This document is long enough to pass validation.",
-      },
-    });
-    expect(rejected.response.status).toBe(503);
-    expect((await readFailure(rejected.response)).code).toBe("SANDBOX_DISABLED");
   });
 });

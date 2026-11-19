@@ -130,23 +130,21 @@ test("connected developer investigates, inspects bounded evidence and opens agen
     );
   }
   await page.getByLabel("Test file").fill(execution.command.testPath);
+  await page.getByText("Use a GitHub Actions link instead").click();
   await page
-    .getByLabel("GitHub Actions link (optional)")
+    .getByLabel("GitHub Actions link")
     .fill("https://github.com/example/app/actions/runs/10/job/20");
-  await page.getByRole("button", { name: "Use tested commit" }).click();
+  await page.getByRole("button", { name: "Use this commit" }).click();
   await expect(page.getByLabel("Failing commit")).toHaveValue(snapshot.commit);
   await expect(page.getByText(/PR merge commit from the/)).toBeVisible();
-  await page.getByRole("button", { name: "Run failing test", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
   await expect(page).toHaveURL(/investigations\/inv_browser\?project=prj_browser/);
   await page.getByRole("button", { name: /Focused test execution/ }).click();
-  await expect(
-    page.locator(".evidence-reader").getByText("Expected 42, received 41"),
-  ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Next portion" })).toBeDisabled();
-  await expect(page.getByRole("heading", { name: "Verify a repair" })).toBeVisible();
-  await page.getByRole("link", { name: "Connections", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Use your coding agent" })).toBeVisible();
+  await expect(page.locator("#evidence pre").getByText("Expected 42, received 41")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Verify a fix" })).toBeVisible();
+  await page.getByRole("link", { name: "Agents", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
   await expect(page.getByText("http://localhost:5173/mcp", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -212,13 +210,13 @@ test("a CI link prefills the exact Pytest case in its connected repository", asy
   });
   await page.goto("/investigations?" + query.toString());
   await expect(page.getByLabel("Test file")).toHaveValue("");
-  await page.getByRole("button", { name: "Open the connected repository" }).click();
+  await page.getByRole("button", { name: "Open repository" }).click();
   await expect(page.getByLabel("Test file")).toHaveValue(testPath);
   await expect(page.getByLabel("Pytest case (optional)")).toHaveValue(testCase);
   await expect(page.getByLabel("Failing commit")).toHaveValue(commit);
   expect(submissions).toBe(0);
-  await page.getByRole("button", { name: "Run failing test", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
+  await page.getByRole("button", { name: "Run test", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
   expect(submissions).toBe(1);
 });
 
@@ -228,7 +226,7 @@ test("local account opens a real persisted investigation and returns to the same
   await page.goto("/__acceptance/account");
   await page.getByRole("button", { name: "Open local test account" }).click();
   await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Start with your repository" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Start with a repository" })).toBeVisible();
   const projects = await (await page.request.get("/api/projects")).json();
   const project = projects.data.items[0];
   expect(project.id).toBeTruthy();
@@ -238,19 +236,14 @@ test("local account opens a real persisted investigation and returns to the same
   expect(response.status()).toBe(201);
   const { data } = await response.json();
   await page.goto(data.browserPath);
-  await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Investigation result" })).toBeVisible();
   await expect(
-    page.getByText("Inspect retained repository evidence", { exact: true }),
-  ).toBeHidden();
-  await page.getByText("Original question", { exact: true }).click();
-  await expect(
-    page.getByText("Inspect retained repository evidence", { exact: true }),
+    page.getByRole("heading", { level: 1, name: "Inspect retained repository evidence" }),
   ).toBeVisible();
-  await page.getByRole("link", { name: "← Investigations" }).click();
+  await page.getByRole("link", { name: "Investigations", exact: true }).first().click();
   await expect(
-    page.getByText("Inspect retained repository evidence", { exact: true }),
+    page.getByText("Inspect retained repository evidence", { exact: true }).first(),
   ).toBeVisible();
 });
 
@@ -340,9 +333,9 @@ test("reopening a baseline restores its repair verdict and readable execution ev
       .getByRole("region", { name: "Test execution result" })
       .getByText("Expected 42, received 41", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open candidate evidence" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "Open after evidence" })).toHaveAttribute(
     "href",
-    "/investigations/inv_candidate?project=prj_browser&evidence=evd_candidate#retained-evidence",
+    "/investigations/inv_candidate?project=prj_browser&evidence=evd_candidate#evidence",
   );
   await page.reload();
   await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
@@ -417,61 +410,23 @@ test("incomplete execution setup blocks test launch while source analysis remain
     r.fulfill(json(inv)),
   );
   await page.goto("/investigations?project=prj_browser");
-  await expect(page.getByRole("button", { name: "Run failing test", exact: true })).toBeDisabled();
-  await expect(page.getByText("GitHub workflow needs an update", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Review workflow change" }).click();
-  const dialog = page.getByRole("dialog", { name: "Review GitHub workflow setup" });
+  await expect(page.getByRole("button", { name: "Run test", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Update the GitHub workflow" }).click();
+  const dialog = page.getByRole("dialog", { name: "Run tests in GitHub Actions" });
   await expect(dialog.getByText("name: Reviewed workflow")).toBeVisible();
   expect(setupWrites).toBe(0);
-  await dialog.getByRole("button", { name: "Create setup PR" }).click();
-  await expect(dialog.getByRole("link", { name: "Open setup PR on GitHub" })).toHaveAttribute(
+  await dialog.getByRole("button", { name: "Open pull request" }).click();
+  await expect(dialog.getByRole("link", { name: "Open pull request" })).toHaveAttribute(
     "href",
     "https://github.com/example/app/pull/1",
   );
   expect(setupWrites).toBe(1);
   await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
-  await page.getByRole("button", { name: "Inspect evidence", exact: true }).click();
-  await page.getByLabel("What should Traceyard inspect?").fill(inv.question);
+  await page.getByRole("button", { name: "Ask about the code", exact: true }).click();
+  await page.getByLabel("What should Traceyard look into?").fill(inv.question);
   await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Investigate", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
-});
-
-test("workspace tools keep workflow runs distinct and preserve the selected project", async ({
-  page,
-}) => {
-  await page.route("**/api/auth/session", (r) =>
-    r.fulfill(
-      json({
-        user: { id: "usr_browser", login: "browser", name: "Browser" },
-        sessions: [],
-        githubSignInAvailable: true,
-      }),
-    ),
-  );
-  await page.route("**/api/projects", (r) =>
-    r.fulfill(json({ items: [{ id: "prj_browser", name: "Browser", repository: "example/app" }] })),
-  );
-  await page.route("**/api/projects/prj_browser/catalog", (r) =>
-    r.fulfill(json({ executionAvailable: true, executionProvider: "github" })),
-  );
-  await page.route("**/api/projects/prj_browser/investigations", (r) =>
-    r.fulfill(json({ items: [] })),
-  );
-  await page.route("**/api/projects/prj_browser/repository/index?kind=tests", (r) =>
-    r.fulfill(json(null)),
-  );
-  await page.route("**/api/runs?*", (r) => r.fulfill(json({ items: [], nextCursor: null })));
-  await page.goto("/investigations?project=prj_browser");
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("link", { name: /Workflow runs/ }).click();
-  await expect(page).toHaveURL(/executions\?project=prj_browser/);
-  await expect(page.getByRole("heading", { name: "Workflow runs", exact: true })).toBeVisible();
-  await expect(page.getByText(/Repository test results live in Investigations/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Repository test investigations" })).toHaveAttribute(
-    "href",
-    "/investigations?project=prj_browser",
-  );
+  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
 });
 
 test("a new account can open agent setup before choosing a repository", async ({ page }) => {
@@ -487,16 +442,15 @@ test("a new account can open agent setup before choosing a repository", async ({
   await page.route("**/api/projects", (r) => r.fulfill(json({ items: [] })));
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Start with your repository" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Start with a repository" })).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);
-  await page.getByRole("link", { name: "Agent setup" }).click();
-  await expect(page.getByRole("heading", { name: "Connect a coding agent" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Copy MCP URL" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Manage agent access" })).toHaveAttribute(
+  await page.getByRole("link", { name: "Agents" }).click();
+  await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy URL" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Manage access" })).toHaveAttribute(
     "href",
     "/oauth/connections",
   );
-  await expect(page.getByRole("button", { name: "Connect repository" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
@@ -511,20 +465,10 @@ test("a regular local user can open every workspace destination on desktop and m
   await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
   const routes = [
     "investigations",
-    "connections",
-    "projects",
-    "workflows",
-    "executions",
-    "traces",
-    "approvals",
-    "gateway",
-    "laboratory",
-    "connect",
+    "repositories",
+    "agents",
     "settings/account",
-    "settings/projects",
     "settings/appearance",
-    "settings/developer",
-    "settings/automations",
   ];
   for (const width of [1440, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 960 });
@@ -533,12 +477,6 @@ test("a regular local user can open every workspace destination on desktop and m
       await expect(page.getByRole("main")).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.getByRole("status")).toHaveCount(0);
-      if (route === "approvals") {
-        await expect(page.getByRole("link", { name: "Open workflows" })).toHaveAttribute(
-          "href",
-          /^\/workflows\b/,
-        );
-      }
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
         `${route} at ${width}px`,
@@ -549,50 +487,4 @@ test("a regular local user can open every workspace destination on desktop and m
     }
   }
   expect(errors).toEqual([]);
-});
-
-test("a user creates a template workflow, publishes it, runs real input and reopens its persisted output", async ({
-  page,
-}, testInfo) => {
-  test.setTimeout(120000);
-  await page.goto("/__acceptance/account");
-  await page.getByRole("button", { name: "Open local test account" }).click();
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("link", { name: /^Workflows/ }).click();
-  await page.getByRole("tab", { name: "Templates", exact: true }).click();
-  await page.getByRole("link", { name: /Parallel processing/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "Parallel processing", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Templates", exact: true }).click();
-  await expect(page).toHaveURL(/workflows\?tab=templates/);
-  await page.getByRole("link", { name: /Parallel processing/ }).click();
-  await page.getByRole("button", { name: "Use template", exact: true }).click();
-  await page.getByRole("button", { name: "Publish version", exact: true }).click();
-  await page.getByRole("button", { name: "Run v1", exact: true }).click();
-  await page.getByLabel("JSON input", { exact: true }).fill(
-    JSON.stringify({
-      customer: { name: "Acceptance customer" },
-      order: { id: "order-acceptance", total: 42 },
-    }),
-  );
-  await page.getByRole("button", { name: "Start execution", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Output is ready", exact: true })).toBeVisible({
-    timeout: 30000,
-  });
-  const output = page.locator(".result-output > pre");
-  await expect(output).toContainText("Acceptance customer");
-  await expect(output).toContainText("order-acceptance");
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Output is ready", exact: true })).toBeVisible();
-  await expect(output).toContainText("order-acceptance");
-  for (const width of [1440, 390]) {
-    await page.setViewportSize({ width, height: 960 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-      true,
-    );
-    const path = testInfo.outputPath(`persisted-workflow-result-${width}.png`);
-    await page.screenshot({ path, fullPage: true });
-    await testInfo.attach(`persisted-workflow-result-${width}`, { path, contentType: "image/png" });
-  }
 });

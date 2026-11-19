@@ -5,8 +5,7 @@ export interface WorkspaceState {
   projects: ProjectSummary[];
   projectId: string;
   selectProject: (id: string) => void;
-  openCreateProject: () => void;
-  openProjects: () => void;
+  openConnect: () => void;
 }
 export const WorkspaceContext = createContext<WorkspaceState | null>(null);
 export function useWorkspace() {
