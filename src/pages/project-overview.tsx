@@ -289,9 +289,21 @@ export function ConnectRepository({
   destination?: "investigate";
 }) {
   const [local, setLocal] = useState(mode === "local");
-  const { session } = useWorkspace(),
+  const { session, projects } = useWorkspace(),
     cache = useQueryClient(),
     navigate = useNavigate();
+  const connectedProjects = Object.fromEntries(
+    projects.filter((p) => p.repository).map((p) => [p.repository!.toLowerCase(), p.id]),
+  );
+  function openExisting(id: string) {
+    savePreference("project:" + session.user!.id, id);
+    navigate(
+      destination === "investigate"
+        ? "/investigations?project=" + encodeURIComponent(id)
+        : "/projects/" + encodeURIComponent(id),
+    );
+    connected();
+  }
   const q = useQuery({
     queryKey: ["github-repositories", session.user!.id],
     queryFn: async () => {
@@ -398,6 +410,8 @@ export function ConnectRepository({
           refreshing={q.isFetching}
           error={q.error || connect.error}
           connectingId={connect.isPending ? connect.variables?.id : undefined}
+          connectedProjects={connectedProjects}
+          onOpen={openExisting}
           onConnect={(repo) => connect.mutate(repo)}
           onRefresh={() => {
             connect.reset();
