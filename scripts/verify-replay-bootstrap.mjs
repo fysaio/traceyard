@@ -19,7 +19,7 @@ const root = await mkdtemp(join(tmpdir(), "traceyard-replay-bootstrap-")),
 const collector = createServer(async (request, response) => {
   response.setHeader("Content-Type", "application/json");
   if (request.method === "GET") {
-    assert.equal(request.headers["x-traceyard-runner-protocol"], "2");
+    assert.equal(request.headers["x-traceyard-runner-protocol"], "3");
     response.end(
       JSON.stringify({
         data: {
