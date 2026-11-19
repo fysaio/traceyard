@@ -29,9 +29,13 @@ import { repositoryPathSchema } from "../../shared/contracts/repository-index";
 import type { Catalog } from "../../shared/repository/workspace";
 
 const STATE: Record<string, [label: string, tone: Tone]> = {
-  EVIDENCE_READY: ["Evidence ready", "neutral"],
+  EVIDENCE_READY: ["Done", "neutral"],
+  OVERVIEW: ["Overview", "neutral"],
+  BLOCKED_ATTEMPT: ["Blocked", "warn"],
+  QUEUED: ["Queued", "running"],
+  RUNNING: ["Running", "running"],
   EXECUTING: ["Running", "running"],
-  ANALYZING: ["Analyzing", "running"],
+  ANALYZING: ["Reading code", "running"],
   PENDING: ["Running", "running"],
   PASSED: ["Fixed", "pass"],
   REVIEW_TEST_CHANGES: ["Passed, tests changed", "warn"],
@@ -46,6 +50,19 @@ function State({ value }: { value: string }) {
   const [label, tone] = STATE[value] ?? [value.toLowerCase().replaceAll("_", " "), "neutral"];
   return <Badge tone={tone}>{label}</Badge>;
 }
+
+const isOverview = (i: Investigation) =>
+  i.finding.basis === "source" &&
+  i.target.kind === "source" &&
+  !i.execution &&
+  !i.outcome &&
+  !i.attempts?.length;
+const kindLabel = (i: Investigation) => (isOverview(i) ? "Code overview" : "Test run");
+/** One status per row: the test result once there is one, otherwise the investigation state. */
+const listStatus = (i: Investigation) =>
+  i.status === "EVIDENCE_READY"
+    ? (i.outcome ?? i.execution?.status ?? (isOverview(i) ? "OVERVIEW" : i.status))
+    : i.status;
 
 const busy = (i: Investigation | undefined) =>
   i?.status === "EXECUTING" || i?.status === "ANALYZING";
@@ -92,10 +109,8 @@ function TestFileField({
       </datalist>
       <span className="field-hint">
         {index.data?.truncated
-          ? "Suggestions show the first 100 indexed tests. Any path from the repository root works."
-          : required
-            ? "Path from the repository root. Vitest, Jest and Pytest are supported."
-            : "Leave blank to let Traceyard pick the closest test."}
+          ? "Suggestions show the first 100 tests. Any path in the repository works."
+          : "Path from the top of the repository. Vitest, Jest and Pytest work."}
       </span>
       <ErrorMessage error={index.error} />
     </label>
@@ -105,7 +120,7 @@ function TestFileField({
 function PytestCaseField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <label className="field">
-      <span className="field-label">Pytest case (optional)</span>
+      <span className="field-label">Test name (optional)</span>
       <input
         className="mono"
         value={value}
@@ -115,7 +130,7 @@ function PytestCaseField({ value, onChange }: { value: string; onChange: (v: str
         placeholder="TestCheckout::test_total[wallet]"
       />
       <span className="field-hint">
-        The part after the file in the node ID. Blank runs the whole file.
+        For example TestCheckout::test_total. Leave blank to run the whole file.
       </span>
     </label>
   );
@@ -141,13 +156,12 @@ export function InvestigationsPage() {
     ? projects.find((p) => p.repository?.toLowerCase() === ciRepository.toLowerCase())
     : undefined;
   const prefill = ciProject?.id === projectId && !!projectId;
-  const [question, setQuestion] = useState(""),
-    [mode, setMode] = useState<"execute" | "analyze">("execute"),
-    [capture, setCapture] = useState(false),
-    [testPath, setTestPath] = useState(prefill ? (ciTest ?? "") : ""),
+  const picked = repositoryPathSchema.safeParse(params.get("test")).data;
+  const [testPath, setTestPath] = useState(prefill ? (ciTest ?? "") : (picked ?? "")),
     [testCase, setTestCase] = useState(prefill ? (ciCase ?? "") : ""),
     [commit, setCommit] = useState(prefill ? (ciCommit ?? "") : ""),
     [ciUrl, setCiUrl] = useState(""),
+    [useCiLink, setUseCiLink] = useState(false),
     [setup, setSetup] = useState(false),
     [key, setKey] = useState(newIdempotencyKey);
   const fresh = () => setKey(newIdempotencyKey());
@@ -176,13 +190,12 @@ export function InvestigationsPage() {
   const create = useMutation({
     mutationFn: () =>
       investigations.create(projectId, {
-        question: question.trim() || `Reproduce ${testPath}`,
-        mode,
-        captureInteractions: mode === "execute" && capture && !python,
-        testPath: mode === "execute" ? testPath || undefined : undefined,
-        testCase: mode === "execute" && python ? testCase.trim() || undefined : undefined,
+        question: `Reproduce ${testPath}`,
+        mode: "execute",
+        testPath: testPath || undefined,
+        testCase: python ? testCase.trim() || undefined : undefined,
         expectedRepository: project?.repository ?? undefined,
-        commit: mode === "execute" ? commit || undefined : undefined,
+        commit: commit || undefined,
         requestKey: key,
       }),
     onSuccess: (inv) => {
@@ -194,6 +207,7 @@ export function InvestigationsPage() {
     mutationFn: (url: string) => investigations.resolveCi(projectId, url),
     onSuccess: (revision) => {
       setCommit(revision.commit);
+      setUseCiLink(false);
       fresh();
     },
   });
@@ -209,7 +223,7 @@ export function InvestigationsPage() {
       <div className="section-head">
         <h2 className="section-title">Recent</h2>
         <Link className="text-link" to="/agents">
-          Run these from your coding agent
+          Use with your agent
         </Link>
       </div>
       {q.isPending ? (
@@ -230,16 +244,10 @@ export function InvestigationsPage() {
               <div className="row-main">
                 <strong className="truncate">{i.question}</strong>
                 <span className="muted truncate">
-                  {[
-                    shortSha(i.snapshot.commit),
-                    i.finding.basis === "observed" ? "Test run" : "Code analysis",
-                    formatTime(i.createdAt),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {[kindLabel(i), formatTime(i.createdAt)].join(" · ")}
                 </span>
               </div>
-              <State value={i.status} />
+              <State value={listStatus(i)} />
               <Icon name="chevron-right" />
             </Link>
           ))}
@@ -305,42 +313,13 @@ export function InvestigationsPage() {
               create.mutate();
             }}
           >
-            <div className="composer-head">
-              <div className="segmented" role="group" aria-label="Investigation mode">
-                {(
-                  [
-                    ["execute", "Run a test"],
-                    ["analyze", "Ask about the code"],
-                  ] as const
-                ).map(([value, name]) => (
-                  <button
-                    type="button"
-                    key={value}
-                    aria-pressed={mode === value}
-                    onClick={() => {
-                      setMode(value);
-                      fresh();
-                    }}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-              {mode === "execute" &&
-                (checkingSetup ? (
-                  <span className="muted">Checking setup…</span>
-                ) : ready ? (
-                  <Badge tone="pass">Ready to run</Badge>
-                ) : null)}
-            </div>
-
-            {mode === "execute" && !ready && !checkingSetup && (
+            {!ready && !checkingSetup && (
               <div className="notice">
                 <Icon name="alert" />
                 <span>
                   {usesGitHub
                     ? "Tests run in your GitHub Actions. Merge one small workflow file to turn this on."
-                    : "Hosted test execution isn’t available on this server. You can still ask about the code."}
+                    : "Running tests isn’t available on this server yet."}
                 </span>
                 {usesGitHub && (
                   <button type="button" className="btn" onClick={() => setSetup(true)}>
@@ -351,136 +330,112 @@ export function InvestigationsPage() {
             )}
             <ErrorMessage error={catalog.error || githubSetup.error} />
 
-            {mode === "execute" && ready && (
-              <div className="stack">
-                <TestFileField
-                  projectId={projectId}
-                  required
-                  value={testPath}
-                  onChange={(value) => {
-                    setTestPath(value);
-                    setTestCase("");
-                    fresh();
-                  }}
-                />
-                {python && (
-                  <PytestCaseField
-                    value={testCase}
-                    onChange={(value) => {
-                      setTestCase(value);
-                      fresh();
-                    }}
-                  />
-                )}
-                <label className="field">
-                  <span className="field-label">Failing commit</span>
-                  <input
-                    id="investigation-commit"
-                    className="mono"
+            {checkingSetup ? (
+              <Spinner label="Checking setup…" />
+            ) : (
+              ready && (
+                <div className="stack">
+                  <TestFileField
+                    projectId={projectId}
                     required
-                    value={commit}
-                    pattern={SHA}
-                    maxLength={40}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="Full 40-character SHA"
-                    onChange={(e) => {
-                      setCommit(e.target.value.trim().toLowerCase());
+                    value={testPath}
+                    onChange={(value) => {
+                      setTestPath(value);
+                      setTestCase("");
                       fresh();
                     }}
                   />
-                  <span className="field-hint">
-                    {prefill
-                      ? "Filled in from CI. Review it before running."
-                      : ci.data && ci.data.commit === commit
-                        ? `${ci.data.kind} from the CI job checkout.`
-                        : "The commit must be pushed. Local changes aren’t uploaded."}
-                  </span>
-                </label>
-                <details className="disclosure">
-                  <summary>
-                    <Icon name="chevron-right" />
-                    Use a GitHub Actions link instead
-                  </summary>
-                  <div className="inline-field">
-                    <input
-                      id="investigation-ci-link"
-                      aria-label="GitHub Actions link"
-                      placeholder="https://github.com/owner/repo/actions/runs/…"
-                      value={ciUrl}
-                      onChange={(e) => {
-                        setCiUrl(e.target.value);
-                        ci.reset();
+                  {python && (
+                    <PytestCaseField
+                      value={testCase}
+                      onChange={(value) => {
+                        setTestCase(value);
+                        fresh();
                       }}
-                      disabled={ci.isPending}
                     />
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={!ciUrl.trim() || ci.isPending}
-                      onClick={() => ci.mutate(ciUrl.trim())}
-                    >
-                      {ci.isPending ? "Reading…" : "Use this commit"}
-                    </button>
-                  </div>
-                  <ErrorMessage error={ci.error} />
-                </details>
-                {!python && (
-                  <details className="disclosure">
-                    <summary>
-                      <Icon name="chevron-right" />
-                      Record network calls for replay
-                    </summary>
-                    <label className="check">
+                  )}
+                  {useCiLink ? (
+                    <div className="field">
+                      <span className="field-label">GitHub Actions link</span>
+                      <div className="inline-field">
+                        <input
+                          id="investigation-ci-link"
+                          aria-label="GitHub Actions link"
+                          placeholder="https://github.com/owner/repo/actions/runs/…"
+                          value={ciUrl}
+                          onChange={(e) => {
+                            setCiUrl(e.target.value);
+                            ci.reset();
+                          }}
+                          disabled={ci.isPending}
+                        />
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={!ciUrl.trim() || ci.isPending}
+                          onClick={() => ci.mutate(ciUrl.trim())}
+                        >
+                          {ci.isPending ? "Reading…" : "Use this run"}
+                        </button>
+                      </div>
+                      <span className="field-hint">
+                        Paste the link to the failed run. Traceyard reads the commit from it.{" "}
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setUseCiLink(false)}
+                        >
+                          Enter the commit instead
+                        </button>
+                      </span>
+                      <ErrorMessage error={ci.error} />
+                    </div>
+                  ) : (
+                    <label className="field">
+                      <span className="field-label">Commit where it failed</span>
                       <input
-                        type="checkbox"
-                        checked={capture}
+                        id="investigation-commit"
+                        className="mono"
+                        required
+                        value={commit}
+                        pattern={SHA}
+                        maxLength={40}
+                        spellCheck={false}
+                        autoComplete="off"
+                        placeholder="Full commit SHA"
                         onChange={(e) => {
-                          setCapture(e.target.checked);
+                          setCommit(e.target.value.trim().toLowerCase());
                           fresh();
                         }}
                       />
-                      <span>
-                        Keep supported JSON responses so the test can replay offline. Headers and
-                        credentials are never stored.
+                      <span className="field-hint">
+                        {prefill
+                          ? "Filled in from CI. Check it before running."
+                          : ci.data && ci.data.commit === commit
+                            ? "Taken from the GitHub Actions run."
+                            : "It has to be pushed to GitHub."}{" "}
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setUseCiLink(true)}
+                        >
+                          Paste a GitHub Actions link instead
+                        </button>
                       </span>
                     </label>
-                  </details>
-                )}
-              </div>
-            )}
-
-            {mode === "analyze" && (
-              <label className="field">
-                <span className="field-label">What should Traceyard look into?</span>
-                <textarea
-                  required
-                  minLength={3}
-                  maxLength={1000}
-                  rows={3}
-                  placeholder="Why does checkout submit the order twice on retry?"
-                  value={question}
-                  onChange={(e) => {
-                    setQuestion(e.target.value);
-                    fresh();
-                  }}
-                />
-                <span className="field-hint">
-                  Reads indexed code and saved evidence. Nothing is executed.
-                </span>
-              </label>
+                  )}
+                </div>
+              )
             )}
 
             <ErrorMessage error={create.error} />
             <div className="composer-foot">
-              <span className="muted">
-                {mode === "execute" && usesGitHub ? "Runs use your GitHub Actions minutes." : ""}
-              </span>
+              <span className="muted">{usesGitHub ? "Uses your GitHub Actions minutes." : ""}</span>
               <button
                 className="btn primary"
-                disabled={create.isPending || ci.isPending || (mode === "execute" && !ready)}
+                disabled={create.isPending || ci.isPending || useCiLink || !ready}
               >
-                {create.isPending ? "Starting…" : mode === "execute" ? "Run test" : "Investigate"}
+                {create.isPending ? "Starting…" : "Run test"}
                 <Icon name={create.isPending ? "spinner" : "arrow-right"} />
               </button>
             </div>
@@ -554,8 +509,6 @@ function InvestigationDetail() {
     navigate = useNavigate(),
     [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(params.get("evidence") ?? ""),
-    [testPath, setTestPath] = useState(""),
-    [testCase, setTestCase] = useState(""),
     [commit, setCommit] = useState(""),
     [flakeCommit, setFlakeCommit] = useState<string | null>(null),
     [setup, setSetup] = useState(false);
@@ -568,16 +521,6 @@ function InvestigationDetail() {
     cache.setQueryData(["investigation", projectId, id], i);
     void cache.invalidateQueries({ queryKey: ["investigations", projectId] });
   };
-  const execute = useMutation({
-    mutationFn: () =>
-      investigations.execute(
-        projectId,
-        id,
-        testPath || undefined,
-        testPath.endsWith(".py") ? testCase.trim() || undefined : undefined,
-      ),
-    onSuccess: update,
-  });
   const cancel = useMutation({
     mutationFn: () => investigations.cancel(projectId, id),
     onSuccess: update,
@@ -649,7 +592,8 @@ function InvestigationDetail() {
       verification.data.candidateRun?.status === "SUCCEEDED");
   const flakeResults = !!i.execution?.flakeRuns;
   const isCandidate = id === verification.data?.candidateId;
-  const limits = [...new Set([...i.snapshot.warnings, ...i.finding.limitations])];
+  const overview = isOverview(i);
+  const output = overview ? [] : i.evidence;
   const evidenceHref = (runId: string, evidenceId?: string | null) =>
     `/investigations/${runId}?project=${encodeURIComponent(projectId)}${evidenceId ? `&evidence=${encodeURIComponent(evidenceId)}#evidence` : ""}`;
 
@@ -657,30 +601,36 @@ function InvestigationDetail() {
     <div className="page">
       <BackLink />
       <PageHeader
-        eyebrow={flakeResults ? "Flakiness check" : "Investigation"}
+        eyebrow={flakeResults ? "Flakiness check" : kindLabel(i)}
         title={<span className="clamp-2">{i.question}</span>}
         description={
           <span className="meta">
             {i.snapshot.repository && <span>{i.snapshot.repository}</span>}
-            <code title={i.snapshot.commit ?? "Unknown revision"}>
-              {shortSha(i.snapshot.commit, 12) ?? "revision unknown"}
-            </code>
-            {!!i.snapshot.filesScanned && (
-              <span>{i.snapshot.filesScanned.toLocaleString()} files indexed</span>
+            {i.snapshot.commit && (
+              <code title={i.snapshot.commit}>{shortSha(i.snapshot.commit)}</code>
             )}
           </span>
         }
         actions={
-          !flakeResults && (
+          !flakeResults &&
+          !overview && (
             <State
-              value={i.status === "EVIDENCE_READY" && i.execution ? i.execution.status : i.status}
+              value={
+                verification.data?.verdict === "PASSED"
+                  ? "PASSED"
+                  : i.status === "EVIDENCE_READY"
+                    ? (i.execution?.status ?? (overview ? "OVERVIEW" : i.status))
+                    : i.status
+              }
             />
           )
         }
       />
       <div className="stack-lg">
         <section className="card stack" aria-labelledby="finding-title">
-          <h2 id="finding-title">{running ? "Running the test" : "What happened"}</h2>
+          <h2 id="finding-title">
+            {running ? "Running the test" : overview ? "What Traceyard found" : "What happened"}
+          </h2>
           {(!i.execution || running || i.status !== "EVIDENCE_READY") && (
             <p className="finding">
               {running ? "Waiting for the result. You can leave this page." : i.finding.summary}
@@ -691,29 +641,21 @@ function InvestigationDetail() {
             <div className="notice">
               <Icon name="alert" />
               <span>
-                <strong>Inconclusive.</strong>{" "}
+                <strong>The test passed this time.</strong>{" "}
                 {earlierFailure
-                  ? "The latest run passed after an earlier failure."
-                  : "The test passed at the failing commit."}{" "}
-                {python
-                  ? "Check the commit and the selected case."
-                  : "Check the commit and test file, or check for flakiness below."}
+                  ? "It failed on an earlier attempt, so it may be flaky."
+                  : python
+                    ? "Check the commit and the test name."
+                    : "Check the commit and the test file."}
               </span>
             </div>
           )}
-          {i.finding.nextAction && !running && !i.execution && (
+          {overview && <TestsFound projectId={projectId} />}
+          {i.finding.nextAction && !running && !i.execution && !overview && (
             <p className="muted">{i.finding.nextAction}</p>
           )}
-          {(running ||
-            (failed && !running && !verificationId) ||
-            (i.status === "BLOCKED" && i.finding.code === "CI_SETUP_REQUIRED")) && (
+          {(running || (i.status === "BLOCKED" && i.finding.code === "CI_SETUP_REQUIRED")) && (
             <div className="actions">
-              {failed && !running && !verificationId && (
-                <a className="btn primary" href="#verify">
-                  Verify a fix
-                  <Icon name="arrow-right" />
-                </a>
-              )}
               {running && (
                 <button className="btn" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
                   {cancel.isPending ? "Cancelling…" : "Cancel"}
@@ -732,7 +674,7 @@ function InvestigationDetail() {
         {verificationId && (
           <section className="card stack" aria-labelledby="verification-title">
             <div className="section-head">
-              <h2 id="verification-title">Fix verification</h2>
+              <h2 id="verification-title">Your fix</h2>
               {verification.data && (
                 <Badge tone={STATE[verification.data.verdict]?.[1] ?? "neutral"}>
                   {verification.data.label}
@@ -766,22 +708,16 @@ function InvestigationDetail() {
                         <span className="field-label">{name}</span>
                         {run && <State value={run.status} />}
                       </div>
-                      <code>{(run?.commit ?? fallback)?.slice(0, 12)}</code>
+                      <code>{(run?.commit ?? fallback)?.slice(0, 7)}</code>
+                      {run?.failure && <pre className="code">{run.failure.message}</pre>}
                       {run && (
-                        <>
-                          <code className="muted">
-                            {run.testPath}
-                            {run.testCase && "::" + run.testCase}
-                          </code>
-                          {run.failure && <pre className="code">{run.failure.message}</pre>}
-                          <a
-                            className="text-link"
-                            aria-label={`Open ${name.toLowerCase()} evidence`}
-                            href={evidenceHref(runId, run.evidenceId)}
-                          >
-                            Open evidence
-                          </a>
-                        </>
+                        <a
+                          className="text-link"
+                          aria-label={`Open ${name.toLowerCase()} evidence`}
+                          href={evidenceHref(runId, run.evidenceId)}
+                        >
+                          See output
+                        </a>
                       )}
                     </div>
                   ))}
@@ -790,8 +726,9 @@ function InvestigationDetail() {
                   <div className="notice">
                     <Icon name="alert" />
                     <span>
-                      The fix changed {verification.data.changedTests.length} test or fixture{" "}
-                      {verification.data.changedTests.length === 1 ? "file" : "files"}:{" "}
+                      The fix also changed {verification.data.changedTests.length} test{" "}
+                      {verification.data.changedTests.length === 1 ? "file" : "files"}. Check that
+                      the test still tests the right thing:{" "}
                       {verification.data.changedTests.map((path, n) => (
                         <span key={path}>
                           {n > 0 && ", "}
@@ -800,13 +737,6 @@ function InvestigationDetail() {
                       ))}
                     </span>
                   </div>
-                )}
-                {verification.data.limitations.length > 0 && (
-                  <ul className="bullets muted">
-                    {verification.data.limitations.map((l) => (
-                      <li key={l}>{l}</li>
-                    ))}
-                  </ul>
                 )}
               </>
             )}
@@ -823,10 +753,10 @@ function InvestigationDetail() {
             }}
           >
             <div>
-              <h2>Verify a fix</h2>
+              <h2>{verificationId ? "Try another fix" : "Verify a fix"}</h2>
               <p className="muted">
-                Push your fix, then paste its commit. Traceyard runs the same test under the same
-                conditions.
+                Push your fix to GitHub and paste its commit here. Traceyard runs the same test
+                again.
               </p>
             </div>
             <div className="inline-field">
@@ -840,7 +770,7 @@ function InvestigationDetail() {
                 autoComplete="off"
                 value={commit}
                 onChange={(e) => setCommit(e.target.value.trim().toLowerCase())}
-                placeholder="Full 40-character SHA"
+                placeholder="Commit SHA of your fix"
               />
               <button className="btn primary" disabled={verify.isPending}>
                 {verify.isPending ? "Starting…" : "Verify"}
@@ -850,55 +780,53 @@ function InvestigationDetail() {
           </form>
         )}
 
-        {!running &&
+        {flakePrompt &&
+          !running &&
           !flakeResults &&
           !python &&
           i.execution?.command.testPath &&
           i.snapshot.commit &&
           i.status === "EVIDENCE_READY" &&
           !isCandidate && (
-            <details className="card disclosure" open={flakePrompt || undefined}>
-              <summary>
-                <Icon name="chevron-right" />
-                Check for flakiness
-              </summary>
-              <form
-                className="stack"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  flake.mutate();
-                }}
-              >
+            <form
+              className="card stack"
+              onSubmit={(e) => {
+                e.preventDefault();
+                flake.mutate();
+              }}
+            >
+              <div>
+                <h2>Check if it’s flaky</h2>
                 <p className="muted">
-                  Runs the test three times at each commit, each from a fresh checkout. Takes up to
-                  about 10 minutes plus queue time.
+                  Runs the test 3 times at the failing commit and 3 times at your fix. Takes about
+                  10 minutes.
                 </p>
-                <div className="inline-field">
-                  <input
-                    aria-label="Candidate commit for flakiness check"
-                    className="mono"
-                    required
-                    pattern={SHA}
-                    maxLength={40}
-                    spellCheck={false}
-                    value={flakeCommit ?? verification.data?.candidateCommit ?? commit}
-                    placeholder="Fix commit SHA"
-                    onChange={(e) => setFlakeCommit(e.target.value.trim().toLowerCase())}
-                  />
-                  <button className="btn" disabled={flake.isPending}>
-                    Run 6 attempts
-                  </button>
-                </div>
-                <ErrorMessage error={flake.error} />
-              </form>
-            </details>
+              </div>
+              <div className="inline-field">
+                <input
+                  aria-label="Candidate commit for flakiness check"
+                  className="mono"
+                  required
+                  pattern={SHA}
+                  maxLength={40}
+                  spellCheck={false}
+                  value={flakeCommit ?? verification.data?.candidateCommit ?? commit}
+                  placeholder="Commit SHA of your fix"
+                  onChange={(e) => setFlakeCommit(e.target.value.trim().toLowerCase())}
+                />
+                <button className="btn" disabled={flake.isPending}>
+                  Run 6 times
+                </button>
+              </div>
+              <ErrorMessage error={flake.error} />
+            </form>
           )}
 
-        {!!i.evidence.length && (
+        {!!output.length && (
           <section className="stack" id="evidence">
-            <h2 className="section-title">Evidence</h2>
+            <h2 className="section-title">Output</h2>
             <div className="list">
-              {i.evidence.map((e) => (
+              {output.map((e) => (
                 <div key={e.id} className="row-group">
                   <button
                     className="row link"
@@ -909,12 +837,9 @@ function InvestigationDetail() {
                       <Icon name="chevron-right" />
                     </span>
                     <div className="row-main">
-                      <strong className="truncate">{e.title}</strong>
+                      <strong className="truncate">{outputTitle(e.title)}</strong>
                     </div>
-                    <span className="muted">
-                      {e.basis === "observed" ? "Recorded" : "Source"}
-                      {e.truncated ? " · truncated" : ""}
-                    </span>
+                    <span className="muted">{selected === e.id ? "Hide" : "Show"}</span>
                   </button>
                   {selected === e.id && (
                     <div className="row-panel">
@@ -933,8 +858,8 @@ function InvestigationDetail() {
               <h2>Recorded network calls</h2>
               <p className="muted">
                 {r.eligible
-                  ? "This test can replay offline using the recorded responses."
-                  : "This recording is incomplete, so it can’t replay."}
+                  ? "This test can run again offline using the recorded responses."
+                  : "This recording is incomplete, so it can’t be replayed."}
               </p>
               <ErrorMessage error={replay.error} />
             </div>
@@ -950,91 +875,30 @@ function InvestigationDetail() {
           </section>
         ))}
 
-        {(limits.length > 0 ||
-          !!i.attempts?.length ||
-          (!running && !flakeResults && i.status !== "CANCELLED")) && (
-          <div className="stack-sm">
-            {limits.length > 0 && (
-              <details className="disclosure">
-                <summary>
-                  <Icon name="chevron-right" />
-                  Limits of this evidence ({limits.length})
-                </summary>
-                <ul className="bullets muted">
-                  {limits.map((l) => (
-                    <li key={l}>{l}</li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {!running && !flakeResults && i.status !== "CANCELLED" && (
-              <details className="disclosure">
-                <summary>
-                  <Icon name="chevron-right" />
-                  Run another test in this investigation
-                </summary>
-                <form
-                  className="stack"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    execute.mutate();
-                  }}
-                >
-                  <TestFileField
-                    projectId={projectId}
-                    value={testPath}
-                    onChange={(path) => {
-                      setTestPath(path);
-                      setTestCase("");
-                    }}
-                  />
-                  {testPath.endsWith(".py") && (
-                    <PytestCaseField value={testCase} onChange={setTestCase} />
-                  )}
-                  <div className="composer-foot">
-                    <span className="muted">
-                      {3 - (i.attempts?.length ?? 0)} of 3 attempts left
-                    </span>
-                    <button
-                      className="btn"
-                      disabled={execute.isPending || (i.attempts?.length ?? 0) >= 3}
-                    >
-                      Run test
-                    </button>
+        {(i.attempts?.length ?? 0) > 1 && (
+          <section className="stack">
+            <h2 className="section-title">Attempts</h2>
+            <div className="list">
+              {i.attempts!.map((a, n) => (
+                <div className="row" key={a.id}>
+                  <div className="row-main">
+                    <strong>Attempt {n + 1}</strong>
+                    <span className="muted">{formatTime(a.createdAt)}</span>
                   </div>
-                  <ErrorMessage error={execute.error} />
-                </form>
-              </details>
-            )}
-            {!!i.attempts?.length && (
-              <details className="disclosure">
-                <summary>
-                  <Icon name="chevron-right" />
-                  Run history ({i.attempts.length})
-                </summary>
-                <div className="list">
-                  {i.attempts.map((a) => (
-                    <div className="row" key={a.id}>
-                      <div className="row-main">
-                        <code className="muted truncate">{a.id}</code>
-                      </div>
-                      {a.checkId && (
-                        <Link
-                          className="text-link"
-                          to={`${repositoryPath(projectId)}/checks/${encodeURIComponent(a.checkId)}`}
-                        >
-                          Check
-                        </Link>
-                      )}
-                      <State value={a.status} />
-                    </div>
-                  ))}
+                  {a.checkId && (
+                    <Link
+                      className="text-link"
+                      to={`${repositoryPath(projectId)}/checks/${encodeURIComponent(a.checkId)}`}
+                    >
+                      View run
+                    </Link>
+                  )}
+                  <State value={a.status} />
                 </div>
-              </details>
-            )}
-          </div>
+              ))}
+            </div>
+          </section>
         )}
-        <p className="muted mono small">{i.id}</p>
       </div>
       {setup && (
         <EnableGitHubChecks
@@ -1046,6 +910,57 @@ function InvestigationDetail() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+const OUTPUT_TITLES: Record<string, string> = {
+  "Focused test execution": "Full test output",
+  "Flakiness attempts": "Output from every attempt",
+  "Reported repository check": "Check log",
+  "Recorded trace spans": "Recorded trace",
+};
+const outputTitle = (title: string) => OUTPUT_TITLES[title] ?? title;
+
+/** Tests the repository index found, each one tap away from a run. */
+function TestsFound({ projectId }: { projectId: string }) {
+  const [all, setAll] = useState(false);
+  const index = useQuery({
+    queryKey: ["indexed-tests", projectId],
+    queryFn: () =>
+      integrationRequest<{ files: { path: string }[]; truncated: boolean } | null>(
+        projectId,
+        "repository/index?kind=tests",
+      ),
+  });
+  if (index.isPending) return <Spinner label="Loading tests…" />;
+  if (index.isError) return <ErrorMessage error={index.error} />;
+  const files = index.data?.files ?? [];
+  if (!files.length) return null;
+  const shown = all ? files : files.slice(0, 5);
+  return (
+    <div className="stack-sm">
+      <span className="field-label">Tests you can run</span>
+      <div className="list">
+        {shown.map((f) => (
+          <Link
+            key={f.path}
+            className="row link"
+            to={"/investigations?test=" + encodeURIComponent(f.path)}
+          >
+            <code className="row-main truncate">{f.path}</code>
+            <span className="row-action">
+              Run
+              <Icon name="arrow-right" />
+            </span>
+          </Link>
+        ))}
+        {!all && files.length > shown.length && (
+          <button className="row row-more" onClick={() => setAll(true)}>
+            Show {files.length - shown.length} more
+          </button>
+        )}
+      </div>
     </div>
   );
 }

@@ -23,7 +23,7 @@ interface Grant {
 const CLIENTS = [
   ["chatgpt", "ChatGPT"],
   ["antigravity", "Antigravity"],
-  ["other", "Other MCP client"],
+  ["other", "Other client"],
 ] as const;
 
 const SCOPES: Record<string, string> = {

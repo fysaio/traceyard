@@ -36,7 +36,7 @@ const STATUS: Record<string, [label: string, tone: Tone]> = {
   FAILED: ["Failed", "fail"],
   RUNNING: ["Running", "running"],
   QUEUED: ["Queued", "running"],
-  DISCOVERING: ["Indexing", "running"],
+  DISCOVERING: ["Reading code", "running"],
   PREPARING: ["Preparing", "running"],
   STALE: ["No recent update", "warn"],
   SKIPPED: ["Skipped", "neutral"],
@@ -143,6 +143,7 @@ export function RepositoriesPage() {
                   <Icon name="repository" />
                   <div className="row-main">
                     <strong className="truncate">{p.repository}</strong>
+                    {p.lastCheck && <span className="muted">Last check</span>}
                   </div>
                   {p.lastCheck ? (
                     <CheckStatus value={p.lastCheck} />
@@ -249,14 +250,14 @@ export function RepositoryPage() {
             <Icon name="branch" />
             {r.default_branch ?? "default branch"}
             {r.commit_sha && <code>{shortSha(r.commit_sha)}</code>}
-            {d.filesScanned > 0 && <span>{d.filesScanned.toLocaleString()} files indexed</span>}
+            {d.filesScanned > 0 && <span>{d.filesScanned.toLocaleString()} files read</span>}
           </span>
         }
         actions={
           <>
             <button className="btn" onClick={() => setSettings(true)}>
               <Icon name="sliders" />
-              Settings
+              Test settings
             </button>
             <button
               className="btn primary"
@@ -278,13 +279,15 @@ export function RepositoryPage() {
         {r.status === "DISCOVERING" && (
           <p className="notice" role="status">
             <Icon name="spinner" />
-            <span>Indexing the repository. Tests appear as they are found.</span>
+            <span>Reading the repository. Tests show up as Traceyard finds them.</span>
           </p>
         )}
         {r.status === "FAILED" && (
           <div className="notice danger">
             <Icon name="alert" />
-            <span>{r.last_error ?? "Indexing stopped before it finished."}</span>
+            <span>
+              {r.last_error ?? "Traceyard stopped reading the repository before it finished."}
+            </span>
             <button className="btn" disabled={scan.isPending} onClick={() => scan.mutate()}>
               {scan.isPending ? "Starting…" : "Retry"}
             </button>
@@ -294,10 +297,10 @@ export function RepositoryPage() {
 
         <section className="card setting-row">
           <div>
-            <h2>Test execution</h2>
+            <h2>Where tests run</h2>
             <p className="muted">
               {!d.executionAvailable
-                ? "Hosted execution isn’t configured on this server. Source analysis still works."
+                ? "Running tests isn’t available on this server yet."
                 : ready
                   ? d.executionProvider === "managed"
                     ? "Tests run on the Traceyard runner."
@@ -318,7 +321,7 @@ export function RepositoryPage() {
             <div className="list">
               {d.jobs.slice(0, 10).map((job, index) => (
                 <Link className="row link" key={job.id} to={checkPath(projectId, job.id)}>
-                  <code className="sha">{shortSha(job.commit_sha) ?? "local"}</code>
+                  <code className="sha">{shortSha(job.commit_sha) ?? "Local"}</code>
                   <div className="row-main">
                     <span className="muted">{formatTime(job.updated_at)}</span>
                   </div>
@@ -331,7 +334,7 @@ export function RepositoryPage() {
             </div>
           ) : (
             <p className="muted">
-              No checks yet. Run checks to install dependencies, build and run your test suite once.
+              No checks yet. Run checks to install, build and run your whole test suite once.
             </p>
           )}
         </section>
@@ -340,7 +343,7 @@ export function RepositoryPage() {
           <details className="disclosure">
             <summary>
               <Icon name="chevron-right" />
-              Coverage notes ({d.warnings.length})
+              Files Traceyard skipped ({d.warnings.length})
             </summary>
             <ul className="bullets">
               {d.warnings.map((w) => (
@@ -462,7 +465,7 @@ export function CheckPage() {
         title="Check"
         description={
           <span className="meta">
-            <code>{shortSha(job.commit_sha) ?? "local"}</code>
+            <code>{shortSha(job.commit_sha) ?? "Local"}</code>
             <span>{formatTime(job.updated_at)}</span>
             <span>
               {job.source === "managed"
@@ -656,11 +659,14 @@ function TestSettings({
   config: RunnerConfig;
   close: () => void;
 }) {
-  const [directory, setDirectory] = useState(config.directory),
+  const [directory, setDirectory] = useState(config.directory === "." ? "" : config.directory),
     cache = useQueryClient();
   const save = useMutation({
     mutationFn: () =>
-      integrationRequest(projectId, "runner-config", "PUT", { ...config, directory }),
+      integrationRequest(projectId, "runner-config", "PUT", {
+        ...config,
+        directory: directory.trim().replace(/^\.\/|\/$/g, "") || ".",
+      }),
     onSuccess: () => {
       void cache.invalidateQueries({ queryKey: ["catalog", projectId] });
       close();
@@ -668,7 +674,7 @@ function TestSettings({
   });
   return (
     <Modal
-      title="Repository settings"
+      title="Test settings"
       close={close}
       footer={
         <>
@@ -690,15 +696,16 @@ function TestSettings({
         }}
       >
         <label className="field">
-          <span className="field-label">Package directory</span>
+          <span className="field-label">App folder (optional)</span>
           <input
+            className="mono"
             value={directory}
-            placeholder="."
+            placeholder="apps/web"
+            spellCheck={false}
             onChange={(e) => setDirectory(e.target.value)}
-            required
           />
           <span className="field-hint">
-            Where package.json lives, relative to the repository root. Use “.” for the root.
+            The folder that holds package.json. Leave blank if it’s at the top of the repository.
           </span>
         </label>
         <ErrorMessage error={save.error} />
