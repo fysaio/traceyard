@@ -81,7 +81,9 @@ export async function focusedTestInvocation(workspace, index, plan) {
   const candidates = Object.entries(pkg.scripts ?? {}).filter(
     ([key, value]) =>
       /^[A-Za-z0-9:_-]+$/.test(key) &&
-      /^vitest(?:\s|$)/.test(String(value).trim()) &&
+      /^(?:vitest\b|node\s+(?:"[^"\r\n]*[/\\]vitest\.mjs"|'[^'\r\n]*[/\\]vitest\.mjs'|\S*[/\\]vitest\.mjs)(?:\s|$))/.test(
+        String(value).trim(),
+      ) &&
       !/(?:&&|\|\||[;|])/.test(String(value)),
   );
   const matching = candidates.filter(
