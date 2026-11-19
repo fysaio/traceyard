@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readdir, readFile, lstat, appendFile, mkdtemp, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve, join, relative, basename, dirname } from "node:path";
+import { resolve, join, relative, basename, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
@@ -262,7 +262,12 @@ export async function main(args = process.argv.slice(2)) {
   const manifest = (await manifestResponse.json()).data;
   const workspaceRoot = await realpath(root);
   root = await realpath(resolve(root, manifest.config.directory));
-  if (relative(workspaceRoot, root).startsWith("..") || !(await lstat(root)).isDirectory())
+  const configuredPath = relative(workspaceRoot, root);
+  if (
+    configuredPath.startsWith("..") ||
+    isAbsolute(configuredPath) ||
+    !(await lstat(root)).isDirectory()
+  )
     throw Error("The configured application directory is not inside this project.");
   let repositoryIndex;
   try {

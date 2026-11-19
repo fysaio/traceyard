@@ -153,14 +153,7 @@ export async function runTargetedTest(workspace, index, plan, env) {
           command.script,
           "--",
           ...(runner === "jest"
-            ? [
-                "--ci",
-                "--runInBand",
-                "--watch=false",
-                "--watchAll=false",
-                "--runTestsByPath",
-                "--json",
-              ]
+            ? ["--ci", "--watch=false", "--watchAll=false", "--runTestsByPath", "--json"]
             : ["--run", "--reporter=json"]),
           testArgument,
           "--outputFile=" + output,
