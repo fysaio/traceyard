@@ -1,0 +1,49 @@
+name: Traceyard test evidence
+description: Publish JUnit test results and compare them with prior GitHub Actions runs.
+inputs:
+  reports:
+    description: Directory containing JUnit XML reports.
+    required: true
+  tested-sha:
+    description: Exact Git commit checked out during the tests.
+    required: true
+  lane:
+    description: Stable identifier for the same test job configuration, such as linux-node22.
+    required: true
+  test-outcome:
+    description: Outcome of the test step, useful when a runner fails before producing all reports.
+    required: false
+    default: ""
+  token:
+    description: Read-only GitHub Actions token for earlier snapshots.
+    required: false
+    default: ""
+  baseline:
+    description: Branch whose push runs supply a baseline.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Install the evidence reader
+      shell: bash
+      run: npm ci --prefix "$GITHUB_ACTION_PATH" --ignore-scripts --no-audit --no-fund
+    - name: Summarize test results
+      id: evidence
+      shell: bash
+      env:
+        TRACEYARD_TEST_REPORTS: ${{ inputs.reports }}
+        TRACEYARD_TESTED_SHA: ${{ inputs.tested-sha }}
+        TRACEYARD_TEST_LANE: ${{ inputs.lane }}
+        TRACEYARD_TEST_OUTCOME: ${{ inputs.test-outcome }}
+        TRACEYARD_TEST_TOKEN: ${{ inputs.token }}
+        TRACEYARD_TEST_BASELINE: ${{ inputs.baseline || github.event.repository.default_branch }}
+        TRACEYARD_TEST_OUTPUT: ${{ runner.temp }}/traceyard-test-evidence/${{ inputs.lane }}
+      run: node "$GITHUB_ACTION_PATH/publish.mjs"
+    - name: Keep normalized test evidence
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: traceyard-test-evidence-${{ inputs.lane }}-${{ github.run_attempt }}
+        path: ${{ steps.evidence.outputs.report }}
+        if-no-files-found: error
+        retention-days: 14
