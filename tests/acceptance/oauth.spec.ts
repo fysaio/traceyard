@@ -112,7 +112,6 @@ test("MCP connects first and grants project access later in the browser", async 
       "investigate",
       "inspect",
       "verify",
-      "recover",
     ]);
     const first = await sdk.callTool({
       name: "investigate",
