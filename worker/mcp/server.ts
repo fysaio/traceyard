@@ -374,7 +374,7 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
                 indexedCommit: repository?.commit_sha ?? null,
                 status: "AVAILABLE",
                 summary:
-                  "Run focused Vitest or Jest tests in an npm repository. Eligible Vitest JSON fetch recordings support network-disabled replay on Linux Docker executors.",
+                  "Run focused Vitest, Jest, or Pytest tests. Pytest accepts a file and an optional exact case selector. Eligible Vitest recordings support network-disabled replay on Linux Docker executors.",
                 scopes: principal.scopes,
                 browserUrl: origin + "/connections?project=" + principal.projectId,
                 projectAccessUrl,
