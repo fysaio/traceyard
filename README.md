@@ -1,20 +1,22 @@
 # Traceyard
 
-Traceyard runs the test that shows what broke and checks your fix against it.
+Rerun a failing Vitest test at its original commit, then check the same test file against your fix.
 
-A failed test can get buried in CI logs. By the time a fix is ready, it’s easy to lose track of which test failed and what commit it ran on. Traceyard keeps that first failure beside the rerun so you and your coding agent can work from the same evidence.
+When CI goes red, the failing assertion, checkout SHA, and rerun often end up in different places. Traceyard keeps them together so you and your coding agent can review the same evidence before merging.
 
-![Traceyard landing page with an interactive checkout test example](docs/images/traceyard.png)
+![Traceyard and its example of a failed test with a candidate rerun](docs/images/traceyard.png)
 
-## Quickstart
+## 5-minute quickstart
 
-1. Open [Traceyard](https://traceyard.pilotsaviour229.workers.dev). **See an example** works without an account.
-2. Sign in with GitHub and connect a repository. To run tests, enable the reviewed GitHub Actions workflow from **Connections**.
-3. In **Investigations**, describe the failure and pick an existing test. Focused execution supports npm projects that run Vitest.
-4. Push your fix and choose **Verify a repair** on the result. Enter the new commit SHA to rerun the original test.
+Start with the path of a failing Vitest test, the commit that failed, and a pushed candidate fix. You need a GitHub-hosted npm repository with a lockfile and a direct npm script such as `"test": "vitest run"`. Hosted setup requires a pull request merged into the default branch. Merge requirements and CI queues can add time.
 
-You can also connect an agent over MCP. Sign in first, then grant the agent project access when you need it. [Connect a coding agent](docs/MCP.md)
+1. Open [Traceyard](https://traceyard.pilotsaviour229.workers.dev/), sign in with GitHub, and connect your repository. **See an example** is available without an account.
+2. In **Connections**, choose **Set up test execution**. Review `.github/workflows/traceyard.yml` and merge the setup PR. If repository rules require a maintainer, ask them to review and merge it. While blocked, run the same test locally at both commits and keep the output.
+3. In **Investigations**, enter the failing test file and the full failing commit SHA. You can paste a GitHub Actions job link and choose **Use tested commit**. Review the commit before choosing **Run failing test**. If the checkout is ambiguous, enter the SHA from the job log.
+4. Open the failing assertion, executed commit, and retained output. Under **Verify a repair**, enter the pushed candidate SHA. Compare both runs and review any changed tests or fixtures. The verdict covers the recorded test file and conditions.
+
+If the failure does not reproduce, **Check for flakiness** can run three fresh checkouts at each commit on GitHub Actions. Allow up to about 10 extra minutes on the runner plus queue time. The result shows each attempt.
 
 ## More
 
-[Repository setup](docs/REPOSITORY_SETUP.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [MIT license](LICENSE)
+[Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [MIT license](LICENSE)

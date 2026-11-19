@@ -162,7 +162,12 @@ describe("repair verification", () => {
     );
     expect(again.id).toBe(v.id);
     await complete(a, v.candidateId);
-    expect((await getVerification(env.DB, a.userId, a.projectId, v.id)).verdict).toBe("PASSED");
+    expect(await getVerification(env.DB, a.userId, a.projectId, v.id)).toMatchObject({
+      verdict: "PASSED",
+      label: "Confirmed",
+      baselineRun: { commit: a.report.commit, status: "FAILED" },
+      candidateRun: { commit: "b".repeat(40), status: "SUCCEEDED" },
+    });
     const reopened = await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id);
     expect(reopened.verifications).toEqual([
       expect.objectContaining({ id: v.id, baselineId: a.baseline.id, candidateId: v.candidateId }),
@@ -180,6 +185,22 @@ describe("repair verification", () => {
       .bind(a.baseline.id)
       .first<{ report_json: string }>();
     expect(JSON.parse(row!.report_json).status).toBe("FAILED");
+    await env.DB.prepare(
+      "INSERT INTO investigation_attempts(id,investigation_id,request_id,plan_json,status,report_json,created_at,updated_at) VALUES(?,?,?,'{}','SUCCEEDED',?,?,?)",
+    )
+      .bind(
+        "iat_later",
+        a.baseline.id,
+        "req_later",
+        JSON.stringify({ ...a.report, status: "SUCCEEDED" }),
+        "2026-11-19T22:00:00Z",
+        "2026-11-19T22:00:00Z",
+      )
+      .run();
+    expect(await getVerification(env.DB, a.userId, a.projectId, v.id)).toMatchObject({
+      label: "Confirmed",
+      baselineRun: { status: "FAILED" },
+    });
   });
   it("does not label changed tests as an established behavior repair", async () => {
     const a = await fixture(),

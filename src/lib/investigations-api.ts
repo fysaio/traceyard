@@ -7,6 +7,18 @@ export const investigations = {
     request<Investigation>(p, "investigations/" + encodeURIComponent(id)),
   create: (p: string, body: Partial<InvestigationRequest> & { question: string }) =>
     request<Investigation>(p, "investigations", "POST", body),
+  resolveCi: (p: string, url: string) =>
+    request<{ commit: string; kind: string; jobUrl: string }>(
+      p,
+      "investigations/ci-revision",
+      "POST",
+      { url },
+    ),
+  flakiness: (p: string, id: string, commit: string, testPath: string) =>
+    request<Investigation>(p, `investigations/${encodeURIComponent(id)}/flakiness`, "POST", {
+      commit,
+      testPath,
+    }),
   execute: (p: string, id: string, testPath?: string) =>
     request<Investigation>(
       p,

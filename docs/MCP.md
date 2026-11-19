@@ -4,7 +4,9 @@ Open **Connections** in Traceyard and choose your client. For the hosted app, th
 
 1. Add Traceyard to your MCP client and complete GitHub sign-in in the browser.
 2. Ask the agent to inspect your repository. If it needs project access, open the link it returns and choose **Allow access**. Connect the repository in Traceyard if it is missing.
-3. Ask a concrete question, such as “Run the checkout retry test and show me why it failed.” Follow the returned browser link to see the same evidence.
+3. Ask for a particular check, such as “Run `tests/checkout-retry.test.ts` at the failing commit and show me the assertion and output.” Follow the returned browser link to see the same evidence.
+
+To reproduce a known failure, give the agent the test file and the exact failing commit. Ask it to inspect the retained assertion and output. Once your candidate is pushed, use `verify` with the same investigation ID and the full candidate SHA. Poll `inspect` with `section: "verification"` and the verification ID. The result includes references to both sets of evidence. Use `inspect` with `section: "evidence"`, the corresponding investigation ID, and an evidence ID to read the retained report. The verification applies to the recorded test and conditions.
 
 In Antigravity, copy the setup request from Traceyard’s **Connections** page, or add the MCP URL as `serverUrl` in your existing `mcpServers` configuration. Open **Customizations → Installed → MCP Servers** and select **Authenticate**.
 

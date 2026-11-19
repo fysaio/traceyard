@@ -151,6 +151,8 @@ export async function getInvestigation(
               .slice(0, 3)
               .map((failure) => ({ ...failure, message: failure.message.slice(0, 2000) })),
             coverage: report.coverage,
+            output: report.output,
+            flakeRuns: report.flakeRuns,
           },
         }
       : {}),

@@ -9,6 +9,21 @@ const snapshot = {
   filesScanned: 4,
   warnings: [],
 };
+const execution = {
+  status: "FAILED",
+  commit: snapshot.commit,
+  command: { directory: ".", script: "test", testPath: "tests/checkout.test.ts" },
+  counts: { passed: 4, failed: 1, skipped: 0 },
+  durationMs: 1200,
+  exitCode: 1,
+  failures: [
+    {
+      file: "tests/checkout.test.ts",
+      name: "checkout retries",
+      message: "Expected 42, received 41",
+    },
+  ],
+};
 const inv = {
   id: "inv_browser",
   projectId: "prj_browser",
@@ -40,6 +55,7 @@ const inv = {
     },
   ],
   recordings: [],
+  execution,
   browserPath: "/investigations/inv_browser?project=prj_browser",
   budget: { outputChars: 3000, returnedChars: 1000, truncated: false },
 };
@@ -61,7 +77,8 @@ test("connected developer investigates, inspects bounded evidence and opens agen
   await page.route("**/api/projects/prj_browser/investigations", async (r) => {
     if (r.request().method() === "POST") {
       const body = r.request().postDataJSON();
-      expect(body.question).toBe(inv.question);
+      expect(body.testPath).toBe(execution.command.testPath);
+      expect(body.commit).toBe(snapshot.commit);
       expect(body.mode).toBe("execute");
       expect(body.captureInteractions).toBe(false);
       await r.fulfill(json(inv));
@@ -92,25 +109,37 @@ test("connected developer investigates, inspects bounded evidence and opens agen
   await page.route("**/api/projects/prj_browser/agent-connections", (r) =>
     r.fulfill(json({ items: [] })),
   );
+  await page.route("**/api/projects/prj_browser/investigations/ci-revision", (r) =>
+    r.fulfill(
+      json({
+        commit: snapshot.commit,
+        kind: "PR merge commit",
+        jobUrl: "https://github.com/example/app/actions/runs/10/job/20",
+      }),
+    ),
+  );
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "What’s breaking?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
   }
-  await page.getByLabel("Describe the problem").fill(inv.question);
-  await expect(page.getByLabel("Existing test (optional)")).toBeVisible();
-  const options = page.locator("details").filter({ hasText: "Commit and recording options" });
-  await expect(options).not.toHaveAttribute("open");
-  await options.getByText("Commit and recording options", { exact: true }).click();
-  await expect(page.getByLabel("Source commit (optional)")).toBeVisible();
-  await page.getByRole("button", { name: "Investigate", exact: true }).click();
+  await page.getByLabel("Test file").fill(execution.command.testPath);
+  await page
+    .getByLabel("GitHub Actions link (optional)")
+    .fill("https://github.com/example/app/actions/runs/10/job/20");
+  await page.getByRole("button", { name: "Use tested commit" }).click();
+  await expect(page.getByLabel("Failing commit")).toHaveValue(snapshot.commit);
+  await expect(page.getByText(/PR merge commit from the/)).toBeVisible();
+  await page.getByRole("button", { name: "Run failing test", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
   await expect(page).toHaveURL(/investigations\/inv_browser\?project=prj_browser/);
   await page.getByRole("button", { name: /Focused test execution/ }).click();
-  await expect(page.getByText("Expected 42, received 41")).toBeVisible();
+  await expect(
+    page.locator(".evidence-reader").getByText("Expected 42, received 41"),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Next portion" })).toBeDisabled();
   await expect(page.getByRole("heading", { name: "Verify a repair" })).toBeVisible();
   await page.getByRole("link", { name: "Connections", exact: true }).click();
@@ -123,7 +152,7 @@ test("local account opens a real persisted investigation and returns to the same
 }) => {
   await page.goto("/__acceptance/account");
   await page.getByRole("button", { name: "Open local test account" }).click();
-  await expect(page.getByRole("heading", { name: "What’s breaking?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Start with your repository" })).toBeVisible();
   const projects = await (await page.request.get("/api/projects")).json();
   const project = projects.data.items[0];
@@ -204,6 +233,21 @@ test("reopening a baseline restores its repair verdict and readable execution ev
         candidateId: "inv_candidate",
         candidateCommit: "b".repeat(40),
         verdict: "PASSED",
+        label: "Confirmed",
+        baselineRun: {
+          commit: snapshot.commit,
+          testPath: execution.command.testPath,
+          status: "FAILED",
+          evidenceId: "evd_browser",
+          failure: execution.failures[0],
+        },
+        candidateRun: {
+          commit: "b".repeat(40),
+          testPath: execution.command.testPath,
+          status: "SUCCEEDED",
+          evidenceId: "evd_candidate",
+          failure: null,
+        },
         changedTests: [],
         limitations: ["Only the selected checks executed."],
         summary: "The retained reproducer passes against the candidate.",
@@ -212,17 +256,21 @@ test("reopening a baseline restores its repair verdict and readable execution ev
     ),
   );
   await page.goto("/investigations/inv_browser?project=prj_browser");
-  await expect(page.getByText("Repair verified", { exact: true })).toBeVisible();
+  await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Test execution result" })).toContainText(
     "tests/checkout.test.ts",
   );
-  await expect(page.getByText("Expected 42, received 41", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Test execution result" })
+      .getByText("Expected 42, received 41", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: "Open candidate evidence" })).toHaveAttribute(
     "href",
-    "/investigations/inv_candidate?project=prj_browser",
+    "/investigations/inv_candidate?project=prj_browser&evidence=evd_candidate#retained-evidence",
   );
   await page.reload();
-  await expect(page.getByText("Repair verified", { exact: true })).toBeVisible();
+  await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
@@ -273,9 +321,9 @@ test("incomplete execution setup blocks test launch while source analysis remain
     r.fulfill(json(inv)),
   );
   await page.goto("/investigations?project=prj_browser");
-  await page.getByLabel("Describe the problem").fill(inv.question);
-  await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Run failing test", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Inspect evidence", exact: true }).click();
+  await page.getByLabel("What should Traceyard inspect?").fill(inv.question);
   await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Investigate", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
@@ -352,7 +400,7 @@ test("a regular local user can open every workspace destination on desktop and m
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/__acceptance/account");
   await page.getByRole("button", { name: "Open local test account" }).click();
-  await expect(page.getByRole("heading", { name: "What’s breaking?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
   const routes = [
     "investigations",
     "connections",

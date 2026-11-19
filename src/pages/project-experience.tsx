@@ -872,7 +872,8 @@ export function OperationPage() {
           </p>
         </section>
       )}
-      <section className="flow-section">
+      <details className="flow-section disclosure">
+        <summary>Tools · Saved HTTP request tests</summary>
         <div className="flow-section-heading">
           <div>
             <h2>Saved tests</h2>
@@ -956,7 +957,7 @@ export function OperationPage() {
             ))}
           </div>
         )}
-      </section>
+      </details>
       <RunList projectId={projectId} runs={d.runs} title="Run history" />
       {newTest && (
         <CreateRequestTest
@@ -1090,8 +1091,9 @@ export function EnableGitHubChecks({
             <div>
               <h3>One workflow file</h3>
               <p>
-                Enable checks adds or updates <code>.github/workflows/traceyard.yml</code>.
-                Traceyard handles the pull request and merge here when you approve.
+                Enable checks adds or updates <code>.github/workflows/traceyard.yml</code>. It must
+                merge into the default branch before hosted tests can run. Repository rules may
+                require a maintainer to review or merge it.
               </p>
             </div>
             <p>
@@ -1107,7 +1109,9 @@ export function EnableGitHubChecks({
             {setup.data?.state === "BLOCKED" && (
               <p className="flow-notice" role="status">
                 {setup.data.message ??
-                  "GitHub requires reviews, checks or additional permissions before merging this setup."}
+                  "GitHub requires reviews, checks or additional permissions before merging this setup."}{" "}
+                Ask a maintainer to merge the setup pull request, or run the same test locally at
+                both commits and keep the output.
               </p>
             )}
           </>
