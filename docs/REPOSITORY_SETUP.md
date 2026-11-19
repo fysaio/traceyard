@@ -13,6 +13,10 @@ Connecting, scanning, and previewing do not write repository files. After you ap
 
 Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.
 
+### Verify a repair when tests change
+
+If the candidate passes after changing a test or fixture, Traceyard can run the original test against the candidate code in a separate Git checkout on the GitHub runner. The verification and the GitHub Actions job summary show both results. The job summary links to the retained evidence in Traceyard. A repair is confirmed only when the original failing assertion runs and passes. The check restores recognized test and fixture paths and needs an unchanged test configuration and dependency setup. It uses a clean npm install with install scripts disabled. Managed execution and recorded interaction replay still show the changed paths for review.
+
 ## Source flow without application credentials
 
 Connecting and browsing source never require a Groq, Supabase or other application service key. Source discovery does not execute repository code. Open any discovered operation to inspect its possible calls before running checks. The parser expands unambiguous top-level local functions within the same file, annotates conditional/callback/loop/catch paths and leaves imported, computed or dynamically assigned implementations unresolved. Unused function bodies are not treated as executed calls. The view is bounded to 12 calls and three levels of local helpers; recursion and truncation are explicit. On the free hosted preview, deeper helper expansion is limited to files of at most 4 KB to control per-step CPU use; larger eligible files retain direct calls. A runner built from this revision can add deeper metadata for its wider source scan. Older pinned runners remain compatible and do not erase same-commit helper metadata. It does not infer a complete business workflow, actual branch selection or execution order.

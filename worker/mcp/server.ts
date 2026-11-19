@@ -1,3 +1,4 @@
+import type { Verification } from "../../shared/contracts/verification";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
@@ -40,6 +41,7 @@ function result(value: Record<string, unknown>, limit = 4000) {
   const size = () => JSON.stringify(packet).length * 2 + 200;
   if (packet.verification && typeof packet.verification === "object") {
     const v = packet.verification as Record<string, unknown>;
+    const original = v.originalTest as Verification["originalTest"];
     packet.verification = {
       id: v.id,
       baselineId: v.baselineId,
@@ -51,6 +53,25 @@ function result(value: Record<string, unknown>, limit = 4000) {
         const { commit, evidenceId, status } = run as Record<string, unknown>;
         return { commit, evidenceId, status };
       }),
+      ...(original
+        ? {
+            originalTest: {
+              baselineCommit: original.baselineCommit,
+              status: original.status,
+              assertion: original.assertion,
+              counts: original.counts,
+              ...(original.failures[0]
+                ? {
+                    failure: {
+                      file: original.failures[0].file,
+                      name: original.failures[0].name,
+                      message: original.failures[0].message.slice(0, 300),
+                    },
+                  }
+                : { message: original.message.slice(0, 300) }),
+            },
+          }
+        : {}),
       changedTestsCount: Array.isArray(v.changedTests) ? v.changedTests.length : 0,
       changedTests: Array.isArray(v.changedTests) ? v.changedTests.slice(0, 5) : [],
       metrics: v.metrics,
@@ -66,6 +87,8 @@ function result(value: Record<string, unknown>, limit = 4000) {
       packet.omitted = true;
     }
     if (size() > limit) {
+      if (original)
+        compact.originalTest = { status: original.status, assertion: original.assertion };
       const evidence = compact.evidence as ({
         commit: unknown;
         evidenceId: unknown;
@@ -513,7 +536,7 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
     "verify",
     {
       description:
-        "Verify a candidate commit against a retained failing test. Reports changed tests and selected regression coverage; preserves the original failure.",
+        "Verify a candidate commit against a retained failing test. Reports the candidate result and the original assertion on candidate code when changed tests can be restored.",
       inputSchema: {
         projectId: projectSelection,
         investigationId: z.string().min(1).max(100),

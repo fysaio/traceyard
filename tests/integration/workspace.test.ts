@@ -378,8 +378,8 @@ it("refuses old executors before exposing a focused plan, rather than running an
     },
   });
   expect(accepted.status).toBe(200);
-  expect(
-    ((await accepted.json()) as { data: { investigation: { requestId: string } } }).data
-      .investigation.requestId,
-  ).toBe(requestId);
+  expect(await readSuccess(accepted)).toMatchObject({
+    projectId: a.projectId,
+    investigation: { requestId },
+  });
 });

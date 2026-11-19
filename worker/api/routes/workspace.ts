@@ -253,12 +253,22 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   const compatibleRunner = async (
     c: Parameters<typeof getRequestContext>[0],
     manifest: {
-      investigation?: { investigationId: string; requestId: string; flakeCandidate?: string };
+      investigation?: {
+        investigationId: string;
+        requestId: string;
+        flakeCandidate?: string;
+        originalTest?: unknown;
+      };
     },
   ) => {
     const plan = manifest.investigation;
     const protocol = c.req.header("X-Traceyard-Runner-Protocol");
-    if (!plan || protocol === "3" || (protocol === "2" && !plan.flakeCandidate)) return;
+    if (
+      !plan ||
+      protocol === "4" ||
+      (!plan.originalTest && (protocol === "3" || (protocol === "2" && !plan.flakeCandidate)))
+    )
+      return;
     await c.env.DB.batch([
       c.env.DB.prepare(
         "UPDATE investigations SET status='BLOCKED',finding_json=?,updated_at=? WHERE id=? AND status='EXECUTING'",
@@ -326,7 +336,11 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
           JSON.parse(row.snapshot_json).investigation?.commit ?? who.sha!,
         );
       return c.json(
-        data(c, { ...JSON.parse(row.snapshot_json), capabilities: { repositoryIndex: true } }),
+        data(c, {
+          ...JSON.parse(row.snapshot_json),
+          projectId: who.projectId,
+          capabilities: { repositoryIndex: true },
+        }),
       );
     }
     const config = await c.env.DB.prepare(

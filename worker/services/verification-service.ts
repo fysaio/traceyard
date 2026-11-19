@@ -1,5 +1,8 @@
 import { investigationRequestSchema } from "../../shared/contracts/investigations";
-import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
+import {
+  investigationPlanSchema,
+  type InvestigationReport,
+} from "../../shared/contracts/investigation-execution";
 import type { Verification, VerificationRun } from "../../shared/contracts/verification";
 import { createInvestigation, getInvestigation } from "./investigation-service";
 import { startInvestigationExecution } from "./investigation-execution";
@@ -12,6 +15,11 @@ import { managedChecksAvailable } from "../repositories/managed";
 const testFile = (p: string) =>
   /\.(?:test|spec|fixture)\.[cm]?[jt]sx?$|(?:^|\/)(?:__(?:tests|fixtures|snapshots|mocks)__|tests?|fixtures?)\/|\.snap$/i.test(
     p,
+  );
+
+const testEnvironmentFile = (path: string) =>
+  /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|\.npmrc|\.babelrc(?:\..+)?|tsconfig[^/]*\.json|(?:vite|vitest|jest|babel)\.(?:config|workspace)\.[^/]+|(?:setupTests|(?:vite|vitest|jest)\.setup)\.[^/]+)$/i.test(
+    path,
   );
 
 export async function startFlakinessCheck(
@@ -201,7 +209,8 @@ export async function getVerification(
   const baseline = readReport(original),
     report = readReport(rerun),
     baselineRun = runEvidence(original, baseline),
-    candidateRun = runEvidence(rerun, report);
+    candidateRun = runEvidence(rerun, report),
+    originalTest = report?.originalTest;
   const changedFiles = JSON.parse(row.changed_files_json) as string[],
     changedTests = changedFiles.filter(testFile);
   let verdict: Verification["verdict"] = "PENDING";
@@ -251,11 +260,40 @@ export async function getVerification(
     } else if (!changedFiles.length || candidateRun.commit === baselineRun.commit) {
       summary =
         "The check passed with no recorded file changes between runs. The evidence is inconclusive. Rerun the check under the same conditions.";
+    } else if (changedFiles.some(testEnvironmentFile)) {
+      summary =
+        "The candidate passed, but its test configuration or dependencies changed. The original failure could not be checked under comparable conditions.";
+    } else if (changedTests.length && originalTest) {
+      if (
+        originalTest.assertion === "FAILED" &&
+        originalTest.failures.some((failure) => failure.name === baselineRun.failure?.name)
+      ) {
+        verdict = "FAILED";
+        label = "Still failing";
+        summary =
+          "The candidate’s tests passed, but the original assertion still fails against the candidate’s code.";
+      } else if (
+        originalTest.status === "SUCCEEDED" &&
+        originalTest.assertion === "PASSED" &&
+        originalTest.counts.passed >= baseline.counts.passed + baseline.counts.failed &&
+        originalTest.counts.skipped <= baseline.counts.skipped &&
+        changedFiles.some((path) => !testFile(path))
+      ) {
+        verdict = "PASSED";
+        label = "Confirmed";
+        summary =
+          "Both the candidate’s tests and the original tests passed against the candidate’s code. This result covers the recorded test file.";
+      } else {
+        summary =
+          originalTest.status === "BLOCKED"
+            ? "The candidate’s tests passed, but the original tests could not run against its code. Review the recorded reason."
+            : "The candidate’s tests passed, but the original run did not establish that the code change fixed the recorded failure. Review both results.";
+      }
     } else if (changedTests.length) {
       verdict = "REVIEW_TEST_CHANGES";
       label = "Passed with test changes";
       summary =
-        "The recorded check passed with changed tests or fixtures. Review the changed paths before relying on the result.";
+        "The recorded check passed with changed tests or fixtures. The original-test result is unavailable. Review the changed paths before relying on the result.";
     } else {
       verdict = "PASSED";
       label = "Confirmed";
@@ -277,6 +315,7 @@ export async function getVerification(
     label,
     baselineRun,
     candidateRun,
+    ...(originalTest ? { originalTest } : {}),
     changedTests,
     limitations,
     summary,
@@ -376,6 +415,12 @@ export async function createVerification(
   const limitations = ["Verification covers the recorded test file and execution conditions."];
   if (compared.incomplete)
     limitations.push("GitHub did not return a complete changed-file comparison.");
+  const changedTests = changed.filter(testFile);
+  const originalTest = investigationPlanSchema.shape.originalTest.safeParse({
+    baselineCommit: report.commit,
+    assertionName: originalRun.failure.name,
+    paths: [...new Set([report.command.testPath, ...changedTests])],
+  });
   const candidate = await createInvestigation(
     env.DB,
     userId,
@@ -428,6 +473,14 @@ export async function createVerification(
     {
       initial: true,
       testPath: report.command.testPath,
+      ...(!compared.incomplete &&
+      changedTests.length &&
+      !changed.some(testEnvironmentFile) &&
+      originalTest.success &&
+      !recording &&
+      !managedChecksAvailable(env)
+        ? { originalTest: originalTest.data }
+        : {}),
       ...(recording ? { replayRecording: { id: recording.id, manifest: recording.manifest } } : {}),
     },
     fetcher,

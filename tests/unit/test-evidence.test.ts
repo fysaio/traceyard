@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { investigationJobSummary, runOriginalTest } from "../../agent/cli.mjs";
 import { pathToFileURL } from "node:url";
 import { analyzeRepositoryFiles, indexRepository } from "../../agent/repository-index.mjs";
 import {
@@ -10,7 +12,10 @@ import {
   runInvestigationPlan,
   selectTest,
 } from "../../agent/test-evidence.mjs";
-import { investigationReportSchema } from "../../shared/contracts/investigation-execution";
+import {
+  investigationReportSchema,
+  type InvestigationReport,
+} from "../../shared/contracts/investigation-execution";
 describe("focused investigation evidence", () => {
   it("keeps assertion evidence bounded and distinguishes initialization failures from success", () => {
     const result = normalizeVitestReport(
@@ -39,6 +44,160 @@ describe("focused investigation evidence", () => {
     expect(normalizeVitestReport({ numPassedTests: 0, numFailedTests: 0 }, 0).status).toBe(
       "BLOCKED",
     );
+  });
+  it.each(["vitest", "jest"] as const)(
+    "catches a weakened %s assertion and accepts a code repair using the original Git files",
+    async (runner) => {
+      const root = await mkdtemp(join(tmpdir(), "traceyard-original-case-"));
+      const git = (...args: string[]) =>
+        execFileSync(
+          "git",
+          ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
+          {
+            cwd: root,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          },
+        ).trim();
+      const commit = (description: string) => {
+        git("add", "--all");
+        git("commit", "--no-verify", "--no-gpg-sign", "-m", description);
+        return git("rev-parse", "HEAD");
+      };
+      const write = (file: string, value: string) => writeFile(join(root, file), value);
+      try {
+        git("init");
+        await write(".gitignore", "node_modules/\n");
+        await mkdir(join(root, "fixtures"));
+        const api = pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href;
+        const isJest = runner === "jest";
+        const testPath = isJest ? "sum.test.cjs" : "sum.test.js";
+        const original = isJest
+          ? "const {sum}=require('./sum.cjs');const {expected}=require('./fixtures/expected.cjs');test('adds',()=>expect(sum(1,2)).toBe(expected));"
+          : `import {it,expect} from ${JSON.stringify(api)};import {sum} from './sum.cjs';import {expected} from './fixtures/expected.cjs';it('adds',()=>expect(sum(1,2)).toBe(expected));`;
+        const weakened = original.replace(".toBe(expected)", ".toBeDefined()");
+        await write(
+          "package.json",
+          JSON.stringify({
+            type: "module",
+            name: "traceyard-original",
+            version: "1.0.0",
+            scripts: {
+              test: isJest
+                ? `node ${JSON.stringify(resolve("node_modules/jest/bin/jest.js"))} --runInBand`
+                : `node ${JSON.stringify(resolve("node_modules/vitest/vitest.mjs"))} run`,
+            },
+          }),
+        );
+        await write(
+          "package-lock.json",
+          JSON.stringify({
+            name: "traceyard-original",
+            version: "1.0.0",
+            lockfileVersion: 3,
+            packages: { "": { name: "traceyard-original", version: "1.0.0" } },
+          }),
+        );
+        await write("sum.cjs", "exports.sum=(a,b)=>a-b;");
+        await write(testPath, original);
+        await write("fixtures/expected.cjs", "exports.expected=3;");
+        const baselineCommit = commit("Failure");
+        await write(testPath, weakened);
+        await write("fixtures/expected.cjs", "exports.expected=-1;");
+        await write("fixtures/new.js", "export default true;");
+        const fake = commit("Weaken the test");
+        const plan = {
+          investigationId: "inv_" + "a".repeat(32),
+          requestId: "req_" + "b".repeat(32),
+          question: "Verify the repair",
+          testPath,
+          timeoutMs: 20000,
+          commit: fake,
+          originalTest: {
+            baselineCommit,
+            assertionName: "adds",
+            paths: [testPath, "fixtures/expected.cjs", "fixtures/new.js"],
+          },
+        };
+        const testEnv = { ...process.env, VITEST: "" };
+        expect(
+          (await runTargetedTest(root, await indexRepository(root), plan, testEnv)).status,
+        ).toBe("SUCCEEDED");
+        const result = await runOriginalTest(root, plan, testEnv);
+        expect(result, JSON.stringify(result)).toMatchObject({
+          baselineCommit,
+          status: "FAILED",
+          assertion: "FAILED",
+          failures: [{ file: testPath, name: "adds" }],
+        });
+        expect(await readFile(join(root, testPath), "utf8")).toBe(weakened);
+        expect(git("status", "--porcelain")).toBe("");
+        await write("sum.cjs", "exports.sum=(a,b)=>a+b;");
+        const fixed = commit("Repair the application");
+        expect(await runOriginalTest(root, { ...plan, commit: fixed }, testEnv)).toMatchObject({
+          status: "SUCCEEDED",
+          assertion: "PASSED",
+          counts: { passed: 1, failed: 0 },
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    30000,
+  );
+  it("summarizes both runs and links to the retained evidence without copying diagnostic output", () => {
+    const commit = "b".repeat(40);
+    const baselineCommit = "a".repeat(40);
+    const report: InvestigationReport = {
+      requestId: "req_" + "1".repeat(32),
+      runId: "sample",
+      commit,
+      status: "SUCCEEDED",
+      command: { directory: ".", script: "test", testPath: "tests/retry.test.ts" },
+      counts: { passed: 1, failed: 0, skipped: 0 },
+      failures: [],
+      message: "1 passed",
+      durationMs: 600,
+      exitCode: 0,
+      truncated: false,
+      nodeVersion: "v22",
+      output: "private test output",
+      originalTest: {
+        baselineCommit,
+        status: "FAILED",
+        assertion: "FAILED",
+        counts: { passed: 0, failed: 1, skipped: 0 },
+        failures: [
+          {
+            file: "tests/retry.test.ts",
+            name: "retry count",
+            message: "private original assertion output",
+          },
+        ],
+        message: "1 failed",
+        durationMs: 400,
+      },
+    };
+    const origin = "https://traceyard.example";
+    const project = "prj_" + "2".repeat(32);
+    const investigation = "inv_" + "3".repeat(32);
+    const summary = investigationJobSummary(origin, project, investigation, report);
+    expect(summary).toContain("| Selected test | `" + commit + "` | Passed |");
+    expect(summary).toContain(
+      "| Original test on candidate code | `" + baselineCommit + "` | Failed |",
+    );
+    expect(summary).toContain("The original failing test case **failed**");
+    expect(summary).toContain(origin + "/investigations/" + investigation + "?project=" + project);
+    expect(summary).not.toContain("private");
+    const blocked = investigationJobSummary(origin, undefined, investigation, {
+      ...report,
+      status: "BLOCKED",
+      command: { ...report.command, testPath: "`](@malicious)" },
+      originalTest: undefined,
+    });
+    expect(blocked).toContain("| Could not run | — |");
+    expect(blocked).not.toContain("@malicious");
+    expect(blocked).not.toContain("Open evidence in Traceyard");
   });
   it("selects a clear existing test and returns ambiguity without running unrelated work", () => {
     const index = analyzeRepositoryFiles([

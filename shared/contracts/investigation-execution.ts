@@ -1,6 +1,48 @@
 import { z } from "zod";
 import { repositoryPathSchema } from "./repository-index";
 import { recordingManifestSchema } from "./recordings";
+const commitSha = z.string().regex(/^[a-f0-9]{40}$/);
+const executionStatus = z.enum(["SUCCEEDED", "FAILED", "BLOCKED"]);
+const testCounts = z
+  .object({
+    passed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    skipped: z.number().int().min(0),
+  })
+  .strict();
+const testFailure = z
+  .object({
+    file: z.string().max(240),
+    name: z.string().max(250),
+    message: z.string().max(1500),
+  })
+  .strict();
+export const originalTestResultSchema = z
+  .object({
+    baselineCommit: commitSha,
+    status: executionStatus,
+    assertion: z.enum(["PASSED", "FAILED", "NOT_OBSERVED"]),
+    counts: testCounts,
+    failures: z.array(testFailure).max(8),
+    message: z.string().max(2000),
+    durationMs: z.number().int().min(0).max(600000),
+  })
+  .strict()
+  .superRefine((result, context) => {
+    if (
+      result.status === "SUCCEEDED" &&
+      (!result.counts.passed || result.counts.failed || result.failures.length)
+    )
+      context.addIssue({
+        code: "custom",
+        message: "The original test pass needs executed assertions and no failures.",
+      });
+    if (result.status === "FAILED" && (!result.counts.failed || !result.failures.length))
+      context.addIssue({
+        code: "custom",
+        message: "The original test failure needs assertion evidence.",
+      });
+  });
 export const investigationPlanSchema = z
   .object({
     investigationId: z.string().regex(/^inv_[a-f0-9]{32}$/),
@@ -13,6 +55,14 @@ export const investigationPlanSchema = z
     flakeCandidate: z
       .string()
       .regex(/^[a-f0-9]{40}$/)
+      .optional(),
+    originalTest: z
+      .object({
+        baselineCommit: commitSha,
+        paths: z.array(repositoryPathSchema).min(1).max(100),
+        assertionName: z.string().min(1).max(250),
+      })
+      .strict()
       .optional(),
     replayRecording: z
       .object({ id: z.string().regex(/^rcd_[a-f0-9]{32}$/), manifest: recordingManifestSchema })
@@ -41,24 +91,9 @@ export const investigationReportSchema = z
         testPath: repositoryPathSchema.nullable(),
       })
       .strict(),
-    counts: z
-      .object({
-        passed: z.number().int().min(0),
-        failed: z.number().int().min(0),
-        skipped: z.number().int().min(0),
-      })
-      .strict(),
-    failures: z
-      .array(
-        z
-          .object({
-            file: z.string().max(240),
-            name: z.string().max(250),
-            message: z.string().max(1500),
-          })
-          .strict(),
-      )
-      .max(8),
+    counts: testCounts,
+    failures: z.array(testFailure).max(8),
+    originalTest: originalTestResultSchema.optional(),
     message: z.string().max(2000),
     durationMs: z.number().int().min(0).max(600000),
     exitCode: z.number().int().nullable(),
