@@ -1,5 +1,7 @@
 # Supported interaction replay
 
+For a standalone comparison of static browser builds, see [browser journeys](BROWSER_JOURNEYS.md).
+
 An investigation with `mode: "execute", captureInteractions: true` records up to eight JSON `globalThis.fetch` request/response bodies and statuses exercised by its existing Vitest test. Capture is opt-in because application bodies may contain private business data. Headers, credential environment values, credential-bearing bodies and oversized/non-JSON responses are not retained. Environment records contain names and credential/URL types only. Any omitted interaction makes the recording ineligible. A recording is immutable and bound to the authorized attempt, source revision, test and project.
 
 Use `investigate` with `mode: "replay", recordingId: "rcd_..."` to repeat its original test, or `verify` to run the reproducer against a candidate commit. Verification automatically reuses an eligible recording from the exact failed baseline attempt. `inspect` with `section: "recording"` reads the manifest in bounded slices. The browser and API expose the same recording references.
