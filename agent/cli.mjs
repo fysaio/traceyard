@@ -156,6 +156,91 @@ function ensureRevision(root, commit, token) {
     }
   }
 }
+export async function runOriginalTest(root, plan, env, checkoutToken) {
+  const started = Date.now();
+  const { baselineCommit, paths, assertionName } = plan.originalTest;
+  const temporary = await mkdtemp(join(tmpdir(), "traceyard-original-test-"));
+  const checkout = join(temporary, "candidate");
+  let added = false;
+  const git = (directory, args) =>
+    execFileSync("git", ["-c", "core.hooksPath=" + join(temporary, "no-hooks"), ...args], {
+      cwd: directory,
+      env: { ...process.env, GIT_LITERAL_PATHSPECS: "1" },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 15000,
+    });
+  const blocked = (message) => ({
+    baselineCommit,
+    status: "BLOCKED",
+    assertion: "NOT_OBSERVED",
+    counts: { passed: 0, failed: 0, skipped: 0 },
+    failures: [],
+    durationMs: Date.now() - started,
+    message: sanitizeDiagnostic(message, 2000),
+  });
+  try {
+    if (![baselineCommit, plan.commit].every((sha) => /^[a-f0-9]{40}$/.test(sha)))
+      return blocked("Both original-test revisions must be immutable Git commits.");
+    ensureRevision(root, baselineCommit, checkoutToken);
+    // Restore exact Git paths in their own worktree. Git also removes candidate-only fixtures.
+    for (const commit of [baselineCommit, plan.commit]) {
+      const entries = git(root, ["ls-tree", "-rz", commit, "--", ...paths]);
+      if (entries.split("\0").some((entry) => entry && !/^100(?:644|755) blob /.test(entry)))
+        return blocked("The original-test check requires regular tracked test and fixture files.");
+    }
+    git(root, ["worktree", "add", "--detach", checkout, plan.commit]);
+    added = true;
+    git(checkout, [
+      "restore",
+      "--source",
+      baselineCommit,
+      "--staged",
+      "--worktree",
+      "--",
+      ...paths,
+    ]);
+    git(checkout, ["diff", "--quiet", baselineCommit, "--", ...paths]);
+    const index = await indexRepository(checkout);
+    const prepared = await prepareTargetedTest(checkout, index, plan);
+    if (prepared.reason) return blocked(prepared.reason);
+    const installRoot = await findInstallRoot(checkout, prepared.directory);
+    if (!installRoot) return blocked("The original test needs an npm lockfile.");
+    await execute(
+      process.platform === "win32" ? "npm.cmd" : "npm",
+      ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "--prefer-offline"],
+      { cwd: installRoot, env },
+      "install",
+      plan.timeoutMs,
+    );
+    git(checkout, ["diff", "--quiet", baselineCommit, "--", ...paths]);
+    const result = await runTargetedTest(checkout, index, plan, env, assertionName);
+    const { status, counts, failures, message, durationMs, assertion = "NOT_OBSERVED" } = result;
+    if (status === "FAILED" && (!counts.failed || !failures.length))
+      return blocked(failures[0]?.message ?? result.output ?? message);
+    const failure = failures.find((entry) => entry.name === assertionName) ?? failures[0];
+    return {
+      baselineCommit,
+      status,
+      assertion,
+      counts,
+      failures: failure ? [failure] : [],
+      message,
+      durationMs,
+    };
+  } catch (error) {
+    return blocked(error instanceof Error ? error.message : "Could not run the original test.");
+  } finally {
+    if (added) {
+      try {
+        git(root, ["worktree", "remove", "--force", checkout]);
+      } catch {
+        // The enclosing job checkout is disposable even if Git could not remove the worktree.
+      }
+    }
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
 export async function runFlakiness(root, plan, env, checkoutToken) {
   const started = Date.now(),
     budget = 7 * 60000;
@@ -371,7 +456,7 @@ export async function main(args = process.argv.slice(2)) {
     {
       headers: {
         Authorization: "Bearer " + (await credential()),
-        "X-Traceyard-Runner-Protocol": "3",
+        "X-Traceyard-Runner-Protocol": "4",
       },
       signal: AbortSignal.timeout(15000),
     },
@@ -659,6 +744,10 @@ export async function main(args = process.argv.slice(2)) {
           " Interaction capture could not be retained; replay is unavailable.";
       }
       if (capture) await rm(capture, { recursive: true, force: true });
+      if (plan.originalTest && focused.status === "SUCCEEDED") {
+        await report("test", "RUNNING", "Running the original tests against the candidate code.");
+        focused.originalTest = await runOriginalTest(workspaceRoot, plan, env, checkoutToken);
+      }
       await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {
         ...focused,
         requestId: plan.requestId,
@@ -670,13 +759,20 @@ export async function main(args = process.argv.slice(2)) {
         focused.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
         focused.message.slice(0, 500),
       );
+      const originalTest = focused.originalTest;
+      const passed =
+        focused.status === "SUCCEEDED" &&
+        (!originalTest ||
+          (originalTest.status === "SUCCEEDED" && originalTest.assertion === "PASSED"));
       await report(
         "complete",
-        focused.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
-        "Focused investigation completed; inspect retained structured evidence.",
+        passed ? "SUCCEEDED" : "FAILED",
+        originalTest
+          ? `Original test on candidate code: ${originalTest.message}`.slice(0, 500)
+          : "Focused investigation completed; inspect retained structured evidence.",
       );
       completed = true;
-      process.exitCode = focused.status === "SUCCEEDED" ? 0 : 1;
+      process.exitCode = passed ? 0 : 1;
       return;
     }
     let testResults = [];

@@ -121,7 +121,7 @@ export async function prepareTargetedTest(workspace, index, plan) {
   };
 }
 
-export async function runTargetedTest(workspace, index, plan, env) {
+export async function runTargetedTest(workspace, index, plan, env, originalAssertion) {
   const started = Date.now();
   const blocked = (message, command = { directory: ".", script: "", testPath: null }) => ({
     status: "BLOCKED",
@@ -196,6 +196,7 @@ export async function runTargetedTest(workspace, index, plan, env) {
       });
     });
     let result;
+    let assertion;
     const retainedOutput = sanitizeDiagnostic(tail.slice(-4000), 4000);
     try {
       const text = await readFile(output, "utf8");
@@ -218,6 +219,19 @@ export async function runTargetedTest(workspace, index, plan, env) {
           output: retainedOutput,
         };
       result = normalizeVitestReport(data, exitCode, root);
+      if (originalAssertion) {
+        const matching = data.testResults
+          .flatMap((file) => file.assertionResults ?? [])
+          .filter(
+            (test) =>
+              sanitizeDiagnostic(test.fullName ?? test.title ?? "Unnamed assertion", 250) ===
+              originalAssertion,
+          );
+        if (matching.length === 1) {
+          if (matching[0].status === "passed") assertion = "PASSED";
+          if (matching[0].status === "failed") assertion = "FAILED";
+        }
+      }
     } catch {
       return {
         ...blocked(
@@ -232,6 +246,7 @@ export async function runTargetedTest(workspace, index, plan, env) {
     }
     return {
       ...result,
+      ...(assertion ? { assertion } : {}),
       output: retainedOutput,
       durationMs: Date.now() - started,
       exitCode,

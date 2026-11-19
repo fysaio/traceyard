@@ -713,6 +713,28 @@ function InvestigationDetail() {
                   <dd>{verification.data.changedTests.length}</dd>
                 </div>
               </dl>
+              {verification.data.originalTest && (
+                <section aria-label="Original tests on candidate code">
+                  <h3>Original tests on candidate code</h3>
+                  <p>
+                    {verification.data.originalTest.status === "SUCCEEDED"
+                      ? "Passed"
+                      : verification.data.originalTest.status === "FAILED"
+                        ? "Failed"
+                        : "Could not run"}
+                    {" · Tests from "}
+                    <code>{verification.data.originalTest.baselineCommit}</code>
+                  </p>
+                  <p>{verification.data.originalTest.message}</p>
+                  {verification.data.originalTest.failures[0] && (
+                    <pre className="code">
+                      {verification.data.originalTest.failures[0].name}
+                      {"\n"}
+                      {verification.data.originalTest.failures[0].message}
+                    </pre>
+                  )}
+                </section>
+              )}
               {verification.data.changedTests.length > 0 && (
                 <ul aria-label="Changed test and fixture paths">
                   {verification.data.changedTests.map((path) => (
