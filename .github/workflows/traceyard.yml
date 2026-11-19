@@ -33,14 +33,17 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: ${{ hashFiles('package-lock.json') != '' && 'package-lock.json' || '**/package-lock.json' }}
+          cache-dependency-path: |
+            **/package-lock.json
+            .traceyard-runner/runner/package/package-lock.json
       - name: Install runner dependencies
-        run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund
+        run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund --prefer-offline
       - name: Prepare trusted runner
         run: node .traceyard-runner/runner/prepare.mjs
       - name: Discover, build and test
         env:
           CI: 'true'
+          NPM_CONFIG_PREFER_OFFLINE: 'true'
           NPM_CONFIG_AUDIT: 'false'
           NPM_CONFIG_FUND: 'false'
           NPM_CONFIG_FETCH_TIMEOUT: '30000'
