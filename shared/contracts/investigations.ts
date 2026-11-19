@@ -63,6 +63,7 @@ export interface Investigation {
   status: InvestigationStatus;
   snapshot: SourceSnapshot;
   finding: {
+    code?: string;
     summary: string;
     basis: "observed" | "source";
     limitations: string[];

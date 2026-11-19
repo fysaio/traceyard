@@ -106,6 +106,9 @@ test("connected developer investigates, inspects bounded evidence and opens agen
   await page.route("**/api/projects/prj_browser/catalog", (r) =>
     r.fulfill(json({ executionAvailable: true, executionProvider: "github" })),
   );
+  await page.route("**/api/projects/prj_browser/repository/setup", (r) =>
+    r.fulfill(json({ state: "READY" })),
+  );
   await page.route("**/api/projects/prj_browser/agent-connections", (r) =>
     r.fulfill(json({ items: [] })),
   );
@@ -303,6 +306,27 @@ test("incomplete execution setup blocks test launch while source analysis remain
       }),
     ),
   );
+  let setupWrites = 0;
+  const preview = {
+    state: "SETUP_REQUIRED",
+    defaultBranch: "main",
+    previousWorkflow: "name: Old workflow",
+    workflow: "name: Reviewed workflow",
+    previewKey: "a".repeat(64),
+  };
+  await page.route("**/api/projects/prj_browser/repository/setup", (r) => {
+    if (r.request().method() === "POST") {
+      expect(r.request().postDataJSON()).toEqual({ previewKey: preview.previewKey });
+      setupWrites++;
+    }
+    return r.fulfill(
+      json(
+        setupWrites
+          ? { state: "AWAITING_MERGE", prUrl: "https://github.com/example/app/pull/1" }
+          : preview,
+      ),
+    );
+  });
   await page.route("**/api/projects/prj_browser/repository/index?kind=tests", (r) =>
     r.fulfill(json(null)),
   );
@@ -322,6 +346,18 @@ test("incomplete execution setup blocks test launch while source analysis remain
   );
   await page.goto("/investigations?project=prj_browser");
   await expect(page.getByRole("button", { name: "Run failing test", exact: true })).toBeDisabled();
+  await expect(page.getByText("GitHub workflow needs an update", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Review workflow change" }).click();
+  const dialog = page.getByRole("dialog", { name: "Review GitHub workflow setup" });
+  await expect(dialog.getByText("name: Reviewed workflow")).toBeVisible();
+  expect(setupWrites).toBe(0);
+  await dialog.getByRole("button", { name: "Create setup PR" }).click();
+  await expect(dialog.getByRole("link", { name: "Open setup PR on GitHub" })).toHaveAttribute(
+    "href",
+    "https://github.com/example/app/pull/1",
+  );
+  expect(setupWrites).toBe(1);
+  await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
   await page.getByRole("button", { name: "Inspect evidence", exact: true }).click();
   await page.getByLabel("What should Traceyard inspect?").fill(inv.question);
   await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeEnabled();

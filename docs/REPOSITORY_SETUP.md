@@ -4,12 +4,12 @@
 
 1. Sign in with GitHub and grant the Traceyard GitHub App access to selected repositories.
 2. Choose **Connect repo**. Traceyard creates or reopens the repository's project and starts source discovery.
-3. In **Connections**, choose **Set up test execution** and review the one-file change. Hosted tests become available once the setup PR is merged into the default branch. Repository rules may require a maintainer to review or merge it. If you're blocked, use a maintainer-approved test fork or run the test locally at both commits and retain the output.
+3. In **Investigations**, choose **Review workflow change**, inspect the one-file preview, and choose **Create setup PR**. Hosted tests become available once you or a maintainer merge that PR into the default branch on GitHub. If you're blocked, use a maintainer-approved test fork or run the test locally at both commits and retain the output.
 4. In **Investigations**, select the existing Vitest test file and the full SHA checked out by the failing run. Traceyard can fill the SHA from a GitHub Actions link when it can identify one checkout for the repository in the job log. If the run has multiple failing jobs, provide the specific job link. For a custom checkout, enter the tested SHA yourself.
 
 Traceyard refreshes the signed-in personal account’s existing installation directly from GitHub. Installations created before the current deployment are recovered without a new installation webhook or reinstall. A failed GitHub lookup is shown as a refresh error rather than an empty install prompt.
 
-Connecting and scanning do not write repository files. An explicit first-run setup action creates or updates only `.github/workflows/traceyard.yml` through a PR. Approval is bound to the displayed PR head and exact workflow contents; another changed file or a changed head prevents merging. Traceyard never bypasses repository rules. A required human review or failed prerequisite is shown as a blocked setup inside Traceyard; it cannot be silently overridden. Existing Traceyard workflows that target an old deployment are updated through the same in-app approval.
+Connecting, scanning, and previewing do not write repository files. After you approve the exact preview, Traceyard opens a PR that creates or updates only `.github/workflows/traceyard.yml`. Merge it on GitHub under your repository rules. Existing workflows that use an older runner follow the same process.
 
 Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.
 
