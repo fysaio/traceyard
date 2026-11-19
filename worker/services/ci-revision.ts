@@ -43,7 +43,7 @@ export function readCheckoutRevision(log: string, repository: string) {
   let observing = false,
     merge = false;
   for (const [index, line] of lines.entries()) {
-    const checkout = line.match(/^##\[group\]Syncing repository: (\S+)$/i);
+    const checkout = line.match(/^(?:##\[group\])?Syncing repository: (\S+)$/i);
     if (checkout?.[1]) {
       observing = checkout[1].toLowerCase() === repository.toLowerCase();
       merge = false;
