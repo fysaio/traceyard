@@ -1,1 +1,1 @@
-export const label: string = 'Not ready';
+export const label: string = 'Ready';
