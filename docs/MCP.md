@@ -12,12 +12,14 @@ In Antigravity, copy the setup request from Traceyard’s **Connections** page, 
 
 ## Tools
 
-| Tool          | Use                                                                                      |
-| ------------- | ---------------------------------------------------------------------------------------- |
-| `investigate` | Read indexed source or run an existing Vitest or Jest test in the configured repository. |
-| `inspect`     | Read findings, exact-revision source, evidence, or a verification result.                |
-| `verify`      | Rerun a saved failing test at a candidate commit and report changes to its test files.   |
-| `recover`     | Resume or restart an owned Traceyard workflow with the recovery scope.                   |
+| Tool          | Use                                                                                               |
+| ------------- | ------------------------------------------------------------------------------------------------- |
+| `investigate` | Read indexed source or run an existing Vitest, Jest, or Pytest test in the configured repository. |
+| `inspect`     | Read findings, exact-revision source, evidence, or a verification result.                         |
+| `verify`      | Rerun a saved failing test at a candidate commit and report changes to its test files.            |
+| `recover`     | Resume or restart an owned Traceyard workflow with the recovery scope.                            |
+
+For an exact Pytest run use `mode: execute`, `testPath`, the failing `commit`, and a `testCase` such as `TestCheckout::test_total[wallet]`. The selector excludes the file path. [Python package setup](CI_TEST_EVIDENCE.md#rerun-a-pytest-failure).
 
 Connections are account-wide. Each project approval controls which repository the agent can access. Use **Manage agent access** to remove a project approval or disconnect the agent. For multiple approved projects, pass `projectId` when the client exposes it.
 
