@@ -42,8 +42,15 @@ function result(value: Record<string, unknown>, limit = 4000) {
     const v = packet.verification as Record<string, unknown>;
     packet.verification = {
       id: v.id,
+      baselineId: v.baselineId,
       candidateId: v.candidateId,
       verdict: v.verdict,
+      label: v.label,
+      evidence: [v.baselineRun, v.candidateRun].map((run) => {
+        if (!run || typeof run !== "object") return null;
+        const { commit, evidenceId, status } = run as Record<string, unknown>;
+        return { commit, evidenceId, status };
+      }),
       changedTestsCount: Array.isArray(v.changedTests) ? v.changedTests.length : 0,
       changedTests: Array.isArray(v.changedTests) ? v.changedTests.slice(0, 5) : [],
       metrics: v.metrics,
@@ -56,6 +63,15 @@ function result(value: Record<string, unknown>, limit = 4000) {
     }
     if (size() > limit) {
       delete compact.metrics;
+      packet.omitted = true;
+    }
+    if (size() > limit) {
+      const evidence = compact.evidence as ({
+        commit: unknown;
+        evidenceId: unknown;
+        status: unknown;
+      } | null)[];
+      compact.evidence = evidence.map((item) => item?.evidenceId ?? null);
       packet.omitted = true;
     }
   }
@@ -408,7 +424,14 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
               args.verificationId,
             );
             return result(
-              { status: verification.verdict, summary: verification.summary, verification },
+              {
+                status: verification.verdict,
+                summary: verification.summary,
+                verification,
+                browserUrl:
+                  origin +
+                  `/investigations/${verification.baselineId}?project=${encodeURIComponent(principal.projectId)}&verification=${verification.id}`,
+              },
               args.outputChars,
             );
           }
@@ -521,7 +544,14 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
             args.requestKey,
           );
           return result(
-            { status: verification.verdict, summary: verification.summary, verification },
+            {
+              status: verification.verdict,
+              summary: verification.summary,
+              verification,
+              browserUrl:
+                origin +
+                `/investigations/${verification.baselineId}?project=${encodeURIComponent(principal.projectId)}&verification=${verification.id}`,
+            },
             args.outputChars,
           );
         },

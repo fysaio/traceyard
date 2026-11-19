@@ -17,10 +17,12 @@ function ExistingTest({
   projectId,
   value,
   onChange,
+  required = false,
 }: {
   projectId: string;
   value: string;
   onChange: (value: string) => void;
+  required?: boolean;
 }) {
   const index = useQuery({
     queryKey: ["indexed-tests", projectId],
@@ -32,8 +34,9 @@ function ExistingTest({
   });
   return (
     <label>
-      Existing test (optional)
+      {required ? "Test file" : "Existing test (optional)"}
       <input
+        required={required}
         list="indexed-tests"
         value={value}
         maxLength={300}
@@ -48,7 +51,9 @@ function ExistingTest({
       <span className="hint">
         {index.data?.truncated
           ? "Showing the first 100 indexed tests. You can enter another existing path."
-          : "Type a test file path, or leave it blank to let Traceyard choose."}
+          : required
+            ? "Enter the path of the failing Vitest file from the repository root."
+            : "Type a test file path, or leave it blank to let Traceyard choose."}
       </span>
       <ErrorMessage error={index.error} />
     </label>
@@ -59,9 +64,9 @@ function State({ value }: { value: string }) {
     EVIDENCE_READY: "Evidence ready",
     EXECUTING: "Running",
     ANALYZING: "Analyzing",
-    PASSED: "Repair verified",
-    REVIEW_TEST_CHANGES: "Review test changes",
-    INCONCLUSIVE: "Needs review",
+    PASSED: "Confirmed",
+    REVIEW_TEST_CHANGES: "Passed with test changes",
+    INCONCLUSIVE: "Inconclusive",
     BLOCKED: "Needs attention",
     CANCELLED: "Cancelled",
     SUCCEEDED: "Passed",
@@ -85,6 +90,7 @@ export function InvestigationsPage() {
     [capture, setCapture] = useState(false),
     [testPath, setTestPath] = useState(""),
     [commit, setCommit] = useState(""),
+    [ciUrl, setCiUrl] = useState(""),
     [connect, setConnect] = useState(false),
     [key, setKey] = useState(newIdempotencyKey);
   const catalog = useQuery({
@@ -104,7 +110,7 @@ export function InvestigationsPage() {
   const create = useMutation({
     mutationFn: () =>
       investigations.create(projectId, {
-        question,
+        question: question.trim() || `Reproduce ${testPath}`,
         mode,
         captureInteractions: mode === "execute" && capture,
         testPath: mode === "execute" ? testPath || undefined : undefined,
@@ -117,13 +123,22 @@ export function InvestigationsPage() {
       navigate(inv.browserPath);
     },
   });
+  const ci = useMutation({
+    mutationFn: (url: string) => investigations.resolveCi(projectId, url),
+    onSuccess: (revision) => {
+      setCommit(revision.commit);
+      setKey(newIdempotencyKey());
+    },
+  });
   return (
     <div className="investigation-home">
       <div className="page-head">
         <div>
           <p className="eyebrow">{project?.repository ?? project?.name ?? "Your workspace"}</p>
-          <h1>What’s breaking?</h1>
-          <p>Describe a failure. Traceyard saves the evidence with the commit it came from.</p>
+          <h1>Reproduce a failing test</h1>
+          <p>
+            Choose the test file and commit that failed, then run the same file against your fix.
+          </p>
         </div>
         <Link to="/connections" className="btn">
           <Icon name="plug" /> {project ? "Project setup" : "Agent setup"}
@@ -166,20 +181,6 @@ export function InvestigationsPage() {
               create.mutate();
             }}
           >
-            <label htmlFor="investigation-question">Describe the problem</label>
-            <textarea
-              id="investigation-question"
-              required
-              minLength={3}
-              maxLength={1000}
-              rows={3}
-              placeholder="Why does the checkout test fail after a retry?"
-              value={question}
-              onChange={(e) => {
-                setQuestion(e.target.value);
-                setKey(newIdempotencyKey());
-              }}
-            />
             <div className="investigation-submit">
               <div className="segmented" role="group" aria-label="Investigation mode">
                 {(
@@ -206,8 +207,8 @@ export function InvestigationsPage() {
             <p className="hint">
               {mode === "execute"
                 ? catalog.data?.executionProvider === "github"
-                  ? "Runs an existing test using your GitHub Actions allowance."
-                  : "Runs an existing test."
+                  ? "Focused runs require an npm lockfile and a direct Vitest script. GitHub Actions usage counts toward your allowance."
+                  : "Focused runs require an npm lockfile and a direct Vitest script."
                 : "Looks through code and saved evidence without running tests."}
             </p>
             {mode === "execute" && !ready && !catalog.isPending && (
@@ -223,30 +224,63 @@ export function InvestigationsPage() {
               <>
                 <ExistingTest
                   projectId={projectId}
+                  required
                   value={testPath}
                   onChange={(value) => {
                     setTestPath(value);
                     setKey(newIdempotencyKey());
                   }}
                 />
-                <details className="disclosure">
-                  <summary>Commit and recording options</summary>
-                  <label htmlFor="investigation-commit">Source commit (optional)</label>
+                <label htmlFor="investigation-ci-link">GitHub Actions link (optional)</label>
+                <div className="actions ci-revision-input">
                   <input
-                    id="investigation-commit"
-                    value={commit}
-                    pattern="[a-f0-9]{40}"
-                    maxLength={40}
-                    placeholder="Full pushed commit SHA"
+                    id="investigation-ci-link"
+                    placeholder="https://github.com/…/actions/runs/…"
+                    value={ciUrl}
                     onChange={(e) => {
-                      setCommit(e.target.value.trim());
-                      setKey(newIdempotencyKey());
+                      setCiUrl(e.target.value);
+                      ci.reset();
                     }}
+                    disabled={ci.isPending}
                   />
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={!ciUrl.trim() || ci.isPending}
+                    onClick={() => ci.mutate(ciUrl.trim())}
+                  >
+                    {ci.isPending ? "Reading checkout…" : "Use tested commit"}
+                  </button>
+                </div>
+                <ErrorMessage error={ci.error} />
+                {ci.data && ci.data.commit === commit && (
                   <p className="hint">
-                    Leave empty to use the indexed repository revision. A pushed commit selects
-                    another revision; local edits are not uploaded.
+                    {ci.data.kind} from the{" "}
+                    <a href={ci.data.jobUrl} target="_blank" rel="noreferrer">
+                      CI job checkout
+                    </a>
+                    .
                   </p>
+                )}
+                <label htmlFor="investigation-commit">Failing commit</label>
+                <input
+                  id="investigation-commit"
+                  required
+                  value={commit}
+                  pattern="[a-f0-9]{40}"
+                  maxLength={40}
+                  placeholder="Full pushed commit SHA"
+                  onChange={(e) => {
+                    setCommit(e.target.value.trim().toLowerCase());
+                    setKey(newIdempotencyKey());
+                  }}
+                />
+                <p className="hint">
+                  Use the full SHA that ran the failing test. Push local commits before running them
+                  here.
+                </p>
+                <details className="disclosure">
+                  <summary>Interaction recording</summary>
                   <label className="checkbox-label">
                     <input
                       type="checkbox"
@@ -265,13 +299,33 @@ export function InvestigationsPage() {
                 </details>
               </>
             )}
+            {mode === "analyze" && (
+              <label>
+                What should Traceyard inspect?
+                <textarea
+                  required
+                  minLength={3}
+                  maxLength={1000}
+                  rows={3}
+                  value={question}
+                  onChange={(e) => {
+                    setQuestion(e.target.value);
+                    setKey(newIdempotencyKey());
+                  }}
+                />
+              </label>
+            )}
             <ErrorMessage error={create.error} />
             <div className="investigation-actions">
               <button
                 className="btn primary"
-                disabled={create.isPending || (mode === "execute" && !ready)}
+                disabled={create.isPending || ci.isPending || (mode === "execute" && !ready)}
               >
-                {create.isPending ? "Starting…" : "Investigate"}
+                {create.isPending
+                  ? "Starting…"
+                  : mode === "execute"
+                    ? "Run failing test"
+                    : "Investigate"}
                 <Icon name="arrow-right" />
               </button>
             </div>
@@ -406,9 +460,10 @@ function InvestigationDetail() {
     cache = useQueryClient(),
     navigate = useNavigate(),
     [params, setParams] = useSearchParams();
-  const [selected, setSelected] = useState(""),
+  const [selected, setSelected] = useState(params.get("evidence") ?? ""),
     [testPath, setTestPath] = useState(""),
-    [commit, setCommit] = useState("");
+    [commit, setCommit] = useState(""),
+    [flakeCommit, setFlakeCommit] = useState<string | null>(null);
   const q = useQuery({
     queryKey: ["investigation", projectId, id],
     queryFn: () => investigations.get(projectId, id),
@@ -452,6 +507,16 @@ function InvestigationDetail() {
       setParams(next);
     },
   });
+  const flake = useMutation({
+    mutationFn: () =>
+      investigations.flakiness(
+        projectId,
+        id,
+        flakeCommit ?? verification.data?.candidateCommit ?? commit,
+        q.data!.execution!.command.testPath!,
+      ),
+    onSuccess: (run) => navigate(run.browserPath),
+  });
   if (q.isPending) return <p role="status">Loading investigation…</p>;
   if (q.isError)
     return (
@@ -464,7 +529,18 @@ function InvestigationDetail() {
       </>
     );
   const i = q.data,
-    failed = i.attempts?.some((a) => a.status === "FAILED");
+    failed =
+      i.execution?.status === "FAILED" &&
+      !!i.execution.counts.failed &&
+      i.execution.failures.some((failure) => failure.file === i.execution?.command.testPath);
+  const didNotReproduce =
+    i.execution?.status === "SUCCEEDED" && !i.execution.flakeRuns && !verificationId;
+  const earlierFailure = i.attempts?.some((attempt) => attempt.status === "FAILED");
+  const flakePrompt =
+    didNotReproduce ||
+    (verification.data?.label === "Inconclusive" &&
+      verification.data.candidateRun?.status === "SUCCEEDED");
+  const flakeResults = !!i.execution?.flakeRuns;
   return (
     <div className="investigation-detail">
       <Link className="back" to="/investigations">
@@ -472,16 +548,18 @@ function InvestigationDetail() {
       </Link>
       <div className="page-head">
         <div>
-          <h1>Investigation result</h1>
+          <h1>{flakeResults ? "Flakiness results" : "Investigation result"}</h1>
           <details className="investigation-question">
             <summary>Original question</summary>
             <p>{i.question}</p>
             <code>{i.id}</code>
           </details>
         </div>
-        <State
-          value={i.status === "EVIDENCE_READY" && i.execution ? i.execution.status : i.status}
-        />
+        {!flakeResults && (
+          <State
+            value={i.status === "EVIDENCE_READY" && i.execution ? i.execution.status : i.status}
+          />
+        )}
       </div>
       <section className="connected-panel finding-panel" aria-labelledby="finding-title">
         <p className="eyebrow">
@@ -498,6 +576,15 @@ function InvestigationDetail() {
           </p>
         )}
         {i.execution && <ExecutionSummary execution={i.execution} />}
+        {didNotReproduce && (
+          <p>
+            <strong>Inconclusive.</strong>{" "}
+            {earlierFailure
+              ? "The latest run passed after an earlier failure in this investigation."
+              : "The test passed at the selected failing commit."}{" "}
+            Check the commit and test file or check for flakiness below.
+          </p>
+        )}
         {i.finding.nextAction && !busy(i) && !i.execution && <p>{i.finding.nextAction}</p>}
         {failed && !busy(i) && !verificationId && (
           <a className="btn primary finding-action" href="#verify-repair">
@@ -555,37 +642,65 @@ function InvestigationDetail() {
             <ErrorMessage error={verification.error} />
           ) : (
             <>
-              <State value={verification.data.verdict} />
+              <span className={"status " + verification.data.verdict.toLowerCase()}>
+                {verification.data.label}
+              </span>
               <p>{verification.data.summary}</p>
-              <dl className="result-facts">
-                <div>
-                  <dt>Candidate revision</dt>
-                  <dd>
-                    <code title={verification.data.candidateCommit}>
-                      {verification.data.candidateCommit.slice(0, 12)}
-                    </code>
-                  </dd>
-                </div>
+              <dl className="result-facts verification-facts">
+                {[
+                  {
+                    name: "Original failure",
+                    run: verification.data.baselineRun,
+                    runId: verification.data.baselineId,
+                  },
+                  {
+                    name: "Candidate",
+                    run: verification.data.candidateRun,
+                    runId: verification.data.candidateId,
+                  },
+                ].map(({ name, run, runId }) => (
+                  <div key={name}>
+                    <dt>{name}</dt>
+                    <dd>
+                      <code>
+                        {run?.commit ??
+                          (name === "Candidate"
+                            ? verification.data.candidateCommit
+                            : "No retained run")}
+                      </code>
+                    </dd>
+                    {run && (
+                      <dd>
+                        {run.status === "SUCCEEDED"
+                          ? "Passed"
+                          : run.status === "FAILED"
+                            ? "Failed"
+                            : "Blocked"}{" "}
+                        · <code>{run.testPath}</code>
+                        {run.failure && <pre className="code">{run.failure.message}</pre>}
+                        <a
+                          className="text-link"
+                          href={`/investigations/${runId}?project=${encodeURIComponent(projectId)}${run.evidenceId ? `&evidence=${encodeURIComponent(run.evidenceId)}#retained-evidence` : ""}`}
+                        >
+                          Open {name.toLowerCase()} evidence
+                        </a>
+                      </dd>
+                    )}
+                  </div>
+                ))}
                 <div>
                   <dt>Changed tests or fixtures</dt>
                   <dd>{verification.data.changedTests.length}</dd>
                 </div>
               </dl>
-              <Link
-                className="btn"
-                to={
-                  "/investigations/" +
-                  (id === verification.data.candidateId
-                    ? verification.data.baselineId
-                    : verification.data.candidateId)
-                }
-              >
-                {id === verification.data.candidateId
-                  ? "Open original failure"
-                  : "Open candidate evidence"}
-              </Link>
               {verification.data.changedTests.length > 0 && (
-                <p>Changed tests or fixtures: {verification.data.changedTests.join(", ")}</p>
+                <ul aria-label="Changed test and fixture paths">
+                  {verification.data.changedTests.map((path) => (
+                    <li key={path}>
+                      <code>{path}</code>
+                    </li>
+                  ))}
+                </ul>
               )}
               <ul>
                 {verification.data.limitations.map((l) => (
@@ -596,8 +711,44 @@ function InvestigationDetail() {
           )}
         </section>
       )}
+      {!busy(i) &&
+        !flakeResults &&
+        i.execution?.command.testPath &&
+        i.snapshot.commit &&
+        i.status === "EVIDENCE_READY" &&
+        id !== verification.data?.candidateId && (
+          <details className="connected-panel section" open={flakePrompt || undefined}>
+            <summary>Check for flakiness</summary>
+            <p>
+              Extra time estimate: up to about 10 minutes on the GitHub runner, plus queue time.
+              Traceyard uses a fresh checkout for each of the three attempts per commit.
+            </p>
+            <form
+              className="form-stack"
+              onSubmit={(e) => {
+                e.preventDefault();
+                flake.mutate();
+              }}
+            >
+              <label>
+                Candidate commit for flakiness check
+                <input
+                  required
+                  pattern="[a-f0-9]{40}"
+                  maxLength={40}
+                  value={flakeCommit ?? verification.data?.candidateCommit ?? commit}
+                  onChange={(e) => setFlakeCommit(e.target.value.trim().toLowerCase())}
+                />
+              </label>
+              <button className="btn primary" disabled={flake.isPending}>
+                Run six attempts
+              </button>
+              <ErrorMessage error={flake.error} />
+            </form>
+          </details>
+        )}
       {!!i.evidence.length && (
-        <section className="section">
+        <section className="section" id="retained-evidence">
           <h2>Evidence</h2>
           {i.evidence.map((e) => (
             <div className="investigation-evidence" key={e.id}>
@@ -638,7 +789,7 @@ function InvestigationDetail() {
           <ErrorMessage error={replay.error} />
         </section>
       ))}
-      {failed && !busy(i) && (
+      {failed && !busy(i) && !flakeResults && id !== verification.data?.candidateId && (
         <form
           id="verify-repair"
           className="connected-panel form-stack section"
@@ -648,7 +799,10 @@ function InvestigationDetail() {
           }}
         >
           <h2>Verify a repair</h2>
-          <p>Push your fix, then enter its commit SHA to rerun the original test.</p>
+          <p>
+            Push your fix, then enter its commit SHA to rerun the same test file. The verdict covers
+            the recorded test and conditions.
+          </p>
           <label>
             Candidate commit
             <input
@@ -656,7 +810,7 @@ function InvestigationDetail() {
               pattern="[a-f0-9]{40}"
               maxLength={40}
               value={commit}
-              onChange={(e) => setCommit(e.target.value)}
+              onChange={(e) => setCommit(e.target.value.trim().toLowerCase())}
               placeholder="40-character Git commit SHA"
             />
           </label>
@@ -666,7 +820,7 @@ function InvestigationDetail() {
           <ErrorMessage error={verify.error} />
         </form>
       )}
-      {!busy(i) && i.status !== "CANCELLED" && (
+      {!busy(i) && !flakeResults && i.status !== "CANCELLED" && (
         <details className="disclosure section">
           <summary>Run an existing test</summary>
           <form
@@ -847,7 +1001,7 @@ export function ConnectionsPage() {
                   {ready
                     ? `${catalog.data?.executionProvider === "managed" ? "Managed" : "GitHub Actions"} execution is enabled for this repository.`
                     : project?.repository
-                      ? "Enable the reviewed execution workflow to run repository tests."
+                      ? "Hosted tests require a setup pull request for .github/workflows/traceyard.yml merged into the default branch. Repository rules may require a maintainer to review or merge it."
                       : "Connect a repository before configuring test execution."}
                 </p>
               )}
@@ -857,8 +1011,9 @@ export function ConnectionsPage() {
                 </button>
               )}
               <p className="hint">
-                GitHub execution uses your Actions allowance. You can inspect indexed source without
-                enabling it.
+                GitHub execution uses your Actions allowance. If you cannot get the setup PR merged,
+                run the exact test locally at both commits and keep the output. Traceyard can still
+                inspect indexed source.
               </p>
               <ErrorMessage error={catalog.error} />
               {catalog.isError && (

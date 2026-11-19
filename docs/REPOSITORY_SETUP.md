@@ -4,8 +4,8 @@
 
 1. Sign in with GitHub and grant the Traceyard GitHub App access to selected repositories.
 2. Choose **Connect repo**. Traceyard creates or reopens the repository's project and starts source discovery.
-3. Open the project. Discovered operations become available without waiting for installation, build or tests to pass.
-4. Choose **Run checks**. On the first run, review the one-file workflow change and choose **Enable and run** inside Traceyard. Traceyard creates the setup PR and requests its merge without sending you to GitHub. Once GitHub confirms the workflow on the default branch, the check starts and reports here. Subsequent runs start directly. Default-branch pushes refresh discovery and request bounded checks after setup is enabled.
+3. In **Connections**, choose **Set up test execution** and review the one-file change. Hosted tests become available once the setup PR is merged into the default branch. Repository rules may require a maintainer to review or merge it. If you're blocked, use a maintainer-approved test fork or run the test locally at both commits and retain the output.
+4. In **Investigations**, select the existing Vitest test file and the full SHA checked out by the failing run. Traceyard can fill the SHA from a GitHub Actions link when it can identify one checkout for the repository in the job log. If the run has multiple failing jobs, provide the specific job link. For a custom checkout, enter the tested SHA yourself.
 
 Traceyard refreshes the signed-in personal account’s existing installation directly from GitHub. Installations created before the current deployment are recovered without a new installation webhook or reinstall. A failed GitHub lookup is shown as a refresh error rather than an empty install prompt.
 
@@ -115,7 +115,7 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 
 ## Runner update for existing deployments
 
-The reviewed runner revision is `6bfde2973ff92f322b6d575e60a3212e2474bbcc`. It contains protocol-2 focused investigations, the minimal hosted dependency package, opt-in JSON recording and isolated replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
+The reviewed runner revision is `cea08ac268b570dd0724c1d693a79acecd6d84c0`. It contains focused investigations and flakiness attempts, the minimal hosted dependency package, opt-in JSON recording and isolated replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
 
 An existing deployment can select this immutable revision through its operator-controlled `TRACEYARD_RUNNER_REF` setting. The repository workflow must use the same revision; Traceyard validates the exact generated workflow before dispatch. Application test fixes and runner updates are separate changes. Mock-only tests do not establish observed application activity, and batch exporters may lose the final spans of a worker that is forcibly stopped.
 
@@ -137,7 +137,7 @@ TRACEYARD_KEY=<project-scoped API key>
 With Node.js 22.12+ and Git, run this from that repository (no separate Traceyard checkout required):
 
 ```bash
-npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#6bfde2973ff92f322b6d575e60a3212e2474bbcc -- traceyard run .
+npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#cea08ac268b570dd0724c1d693a79acecd6d84c0 -- traceyard run .
 ```
 
 The command installs an immutable reviewed runner revision into npm's cache. In Traceyard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing Traceyard checkout instead:

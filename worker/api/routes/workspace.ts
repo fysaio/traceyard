@@ -252,10 +252,13 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
   });
   const compatibleRunner = async (
     c: Parameters<typeof getRequestContext>[0],
-    manifest: { investigation?: { investigationId: string; requestId: string } },
+    manifest: {
+      investigation?: { investigationId: string; requestId: string; flakeCandidate?: string };
+    },
   ) => {
-    if (!manifest.investigation || c.req.header("X-Traceyard-Runner-Protocol") === "2") return;
     const plan = manifest.investigation;
+    const protocol = c.req.header("X-Traceyard-Runner-Protocol");
+    if (!plan || protocol === "3" || (protocol === "2" && !plan.flakeCandidate)) return;
     await c.env.DB.batch([
       c.env.DB.prepare(
         "UPDATE investigations SET status='BLOCKED',finding_json=?,updated_at=? WHERE id=? AND status='EXECUTING'",
