@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { investigationReportSchema } from "../../../shared/contracts/investigation-execution";
+import {
+  investigationReportSchema,
+  pytestCaseSchema,
+} from "../../../shared/contracts/investigation-execution";
 import { repositoryPathSchema } from "../../../shared/contracts/repository-index";
 import { ownedProject } from "../../integrations/access";
 import { runnerPrincipal } from "../../repositories/runner-auth";
@@ -16,7 +19,13 @@ export function investigationExecutionRoutes(fetcher: typeof fetch = fetch) {
   app.post("/projects/:projectId/investigations/:id/execute", async (c) => {
     const { userId, projectId } = await ownedProject(c);
     const body = parseWith(
-      z.object({ testPath: repositoryPathSchema.optional() }).strict(),
+      z
+        .object({
+          testPath: repositoryPathSchema.optional(),
+          testCase: pytestCaseSchema.optional(),
+        })
+        .strict()
+        .refine((value) => !value.testCase || value.testPath?.endsWith(".py")),
       await readJsonBody(c),
       "Select a supported existing test.",
     );

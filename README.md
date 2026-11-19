@@ -1,6 +1,6 @@
 # Traceyard
 
-Rerun a failing Vitest test at its original commit, then check the same test file against your fix.
+Rerun a failing test at its original commit, then check the same test against your fix.
 
 When CI goes red, the failing assertion, checkout SHA, and rerun often end up in different places. Traceyard keeps them together so you and your coding agent can review the same evidence before merging.
 
@@ -17,7 +17,7 @@ Start with the path of a failing Vitest test, the commit that failed, and a push
 
 If the failure does not reproduce, **Check for flakiness** can run three fresh checkouts at each commit on GitHub Actions. Allow up to about 10 extra minutes on the runner plus queue time. The result shows each attempt.
 
-Focused Jest runs are also available for supported npm packages. The flakiness check uses Vitest.
+Focused runs also support Jest and [Pytest](docs/CI_TEST_EVIDENCE.md#rerun-a-pytest-failure). The six-attempt flakiness check uses Vitest.
 
 [Record a browser journey](docs/BROWSER_JOURNEYS.md) to compare a user flow on two browser builds and review the result on a pull request.
 

@@ -22,7 +22,31 @@ const inline = (value) =>
     .replace(/[&<>[\]{}\\|*~_()!]/g, (char) => "&#" + char.charCodeAt(0) + ";")
     .replaceAll(String.fromCharCode(96), "&#96;");
 
-function renderSummary(report) {
+function appUrl(origin, report, item) {
+  if (!origin || !item.testCase || !item.file) return;
+  try {
+    const base = new URL(origin);
+    if (
+      base.protocol !== "https:" ||
+      base.username ||
+      base.password ||
+      base.pathname !== "/" ||
+      base.search ||
+      base.hash
+    )
+      return;
+    const url = new URL("/investigations", base);
+    url.searchParams.set("ciRepository", report.repository);
+    url.searchParams.set("ciTest", item.file);
+    url.searchParams.set("ciCase", item.testCase);
+    url.searchParams.set("ciCommit", report.sha);
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function renderSummary(report, origin) {
   const { counts, observations, history, repository, duplicates, files, findings, sha, lane } =
     report;
   const rows = [
@@ -69,8 +93,11 @@ function renderSummary(report) {
           item.priorRunId +
           ")"
         : "—";
+      const handoff = appUrl(origin, report, item);
+      const test =
+        inline(item.testCase ?? name) + (handoff ? " · [Open in Traceyard](" + handoff + ")" : "");
       rows.push(
-        "| " + labels[item.finding] + " | " + inline(name) + " | " + path + " | " + previous + " |",
+        "| " + labels[item.finding] + " | " + test + " | " + path + " | " + previous + " |",
       );
     }
     if (displayed.length > 35)
@@ -79,7 +106,7 @@ function renderSummary(report) {
   if (findings.some(({ file }) => file))
     rows.push(
       "",
-      "To investigate an npm test in Traceyard, start with its source file and the tested commit above.",
+      "To investigate a failure in Traceyard, use the source file and tested commit shown here.",
     );
   return rows.join("\n") + "\n";
 }
@@ -127,7 +154,7 @@ async function main() {
   await mkdir(outputDirectory, { recursive: true });
   const file = join(outputDirectory, "report.json");
   await writeFile(file, body + "\n");
-  const summary = renderSummary(report);
+  const summary = renderSummary(report, env.TRACEYARD_TEST_APP_URL);
   if (env.GITHUB_STEP_SUMMARY) {
     await appendFile(env.GITHUB_STEP_SUMMARY, summary);
     console.log(

@@ -47,3 +47,19 @@ Baseline evidence comes from recent push runs of the same workflow on the reposi
 The artifact keeps structured test names, source files where available, and outcomes for 14 days. Raw failure bodies, stdout, and stderr stay out of the artifact. Review any sensitive data your test names themselves include. If historical artifacts are missing, expired, or inaccessible, the report shows the available evidence and identifies failures whose baseline is unknown.
 
 For a supported npm test you want to reproduce, open Traceyard Investigations and use the source file and exact tested commit from the summary. Use the original CI log for the full assertion and surrounding output.
+
+## Rerun a Pytest failure
+
+Traceyard can run a standard test_*.py or *_test.py file at a chosen commit. For a specific case, enter the part of its Pytest node ID after the file path, such as TestCheckout::test_total[wallet]. Select the connected repository in Investigations, review the commit and case, then choose **Run failing test**. Candidate verification carries the same case forward.
+
+Put pytest and its test dependencies in requirements-test.txt or requirements.txt in the Python package. Traceyard creates a temporary virtual environment and requests binary wheels when installing. Test jobs use the Python on the configured runner. Tests that need project configuration should use the package's committed test fixtures and Pytest configuration. Focused runs clear addopts so it can't add test files or broaden the selected case.
+
+Add traceyard-url to the CI evidence action for an **Open in Traceyard** link on a Pytest failure. Use your trusted HTTPS Traceyard origin. Generate JUnit with source paths so the action can derive the case selector.
+
+```sh
+python -m pytest -o junit_family=xunit1 --junitxml=test-reports/pytest.xml
+```
+
+The link prefills the repo, file, case and tested commit for review, then the user starts the run. Sign in and connect the intended repository before opening the link. If a report has no reliable case selector, enter the test file and case manually.
+
+Pytest runs keep structured pass, fail, or skip evidence. Vitest supports interaction recording, isolated replay, and six-attempt flakiness checks.

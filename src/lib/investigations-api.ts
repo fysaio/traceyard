@@ -19,13 +19,11 @@ export const investigations = {
       commit,
       testPath,
     }),
-  execute: (p: string, id: string, testPath?: string) =>
-    request<Investigation>(
-      p,
-      `investigations/${encodeURIComponent(id)}/execute`,
-      "POST",
-      testPath ? { testPath } : {},
-    ),
+  execute: (p: string, id: string, testPath?: string, testCase?: string) =>
+    request<Investigation>(p, `investigations/${encodeURIComponent(id)}/execute`, "POST", {
+      testPath,
+      testCase,
+    }),
   cancel: (p: string, id: string) =>
     request<Investigation>(p, `investigations/${encodeURIComponent(id)}/cancel`, "POST", {}),
   evidence: (p: string, id: string, evidence: string, offset: number) =>

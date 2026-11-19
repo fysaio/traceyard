@@ -3,6 +3,7 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { SaxesParser } from "saxes";
 import { sanitizeDiagnostic } from "../../agent/test-report.mjs";
+import { isPytestFile, validPytestCase } from "../../agent/pytest.mjs";
 
 export const revisionPattern = /^[a-f0-9]{40}$/;
 export const lanePattern = /^[a-z0-9][a-z0-9_-]{0,59}$/;
@@ -37,6 +38,18 @@ function repoFile(value, root) {
   )
     return "";
   return local;
+}
+
+function pytestCase(file, className, name) {
+  if (!isPytestFile(file) || !/^[A-Za-z0-9_./@-]+$/.test(file) || typeof className !== "string")
+    return;
+  const module = file.slice(0, -3).split("/");
+  const scopes = className.split(".");
+  const moduleIndex = scopes.lastIndexOf(module.at(-1));
+  if (moduleIndex < 0 || !module.join(".").endsWith(scopes.slice(0, moduleIndex + 1).join(".")))
+    return;
+  const test = [...scopes.slice(moduleIndex + 1), name].join("::");
+  if (validPytestCase(test) && sanitizeDiagnostic(test, 240) === test) return test;
 }
 
 function identity(fields) {
@@ -84,7 +97,17 @@ export function readJUnit(xml, source, root) {
         file,
       ];
       const [, suite, className, name] = fields;
-      testcase = { id: identity(fields), source, suite, className, name, file, status: "passed" };
+      const testCase = tag.attributes.file && pytestCase(file, tag.attributes.classname, title);
+      testcase = {
+        id: identity(fields),
+        source,
+        suite,
+        className,
+        name,
+        file,
+        status: "passed",
+        ...(testCase ? { testCase } : {}),
+      };
     } else if (parent?.name === "testcase" && testcase) {
       if (tag.name === "error") testcase.status = "error";
       if (tag.name === "failure" && testcase.status !== "error") testcase.status = "failed";

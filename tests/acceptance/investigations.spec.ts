@@ -150,6 +150,78 @@ test("connected developer investigates, inspects bounded evidence and opens agen
   await expect(page.getByText("http://localhost:5173/mcp", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+test("a CI link prefills the exact Pytest case in its connected repository", async ({ page }) => {
+  const testPath = "tests/test_checkout.py";
+  const testCase = "TestCheckout::test_total[wallet]";
+  const commit = "c".repeat(40);
+  let submissions = 0;
+  await page.route("**/api/auth/session", (r) =>
+    r.fulfill(
+      json({
+        user: { id: "usr_browser", login: "browser", name: "Browser", avatarUrl: null },
+        sessions: [],
+        githubSignInAvailable: true,
+      }),
+    ),
+  );
+  await page.route("**/api/projects", (r) =>
+    r.fulfill(
+      json({
+        items: [
+          { id: "prj_other", name: "Other", repository: "example/other" },
+          { id: "prj_browser", name: "Browser", repository: "example/app" },
+        ],
+      }),
+    ),
+  );
+  await page.route("**/api/projects/*/catalog", (r) =>
+    r.fulfill(
+      json({
+        executionAvailable: true,
+        executionProvider: "github",
+      }),
+    ),
+  );
+  await page.route("**/api/projects/*/repository/setup", (r) =>
+    r.fulfill(json({ state: "READY" })),
+  );
+  await page.route("**/api/projects/*/repository/index?kind=tests", (r) => r.fulfill(json(null)));
+  await page.route("**/api/projects/*/investigations", async (r) => {
+    if (r.request().method() === "POST") {
+      submissions++;
+      expect(new URL(r.request().url()).pathname).toContain("/prj_browser/");
+      expect(r.request().postDataJSON()).toMatchObject({
+        testPath,
+        testCase,
+        commit,
+        expectedRepository: "example/app",
+        mode: "execute",
+      });
+      await r.fulfill(json(inv));
+    } else await r.fulfill(json({ items: [] }));
+  });
+  await page.route("**/api/projects/prj_browser/investigations/inv_browser", (r) =>
+    r.fulfill(json(inv)),
+  );
+  const query = new URLSearchParams({
+    project: "prj_other",
+    ciRepository: "example/app",
+    ciTest: testPath,
+    ciCase: testCase,
+    ciCommit: commit,
+  });
+  await page.goto("/investigations?" + query.toString());
+  await expect(page.getByLabel("Test file")).toHaveValue("");
+  await page.getByRole("button", { name: "Open the connected repository" }).click();
+  await expect(page.getByLabel("Test file")).toHaveValue(testPath);
+  await expect(page.getByLabel("Pytest case (optional)")).toHaveValue(testCase);
+  await expect(page.getByLabel("Failing commit")).toHaveValue(commit);
+  expect(submissions).toBe(0);
+  await page.getByRole("button", { name: "Run failing test", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "What we found" })).toBeVisible();
+  expect(submissions).toBe(1);
+});
+
 test("local account opens a real persisted investigation and returns to the same evidence", async ({
   page,
 }) => {

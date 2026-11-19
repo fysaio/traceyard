@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
+import { pytestCaseSchema } from "../../shared/contracts/investigation-execution";
 import type { Context } from "hono";
 import { readJsonBody, type AppEnv } from "../api/middleware";
 import {
@@ -279,6 +280,11 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
         recordingId: z.string().max(100).optional(),
         target: investigationTargetSchema.optional(),
         testPath: repositoryPathSchema.optional(),
+        testCase: pytestCaseSchema
+          .optional()
+          .describe(
+            "Pytest case selector without its file path, such as TestCheckout::test_total[wallet].",
+          ),
         expectedRepository: investigationRepositorySchema.optional(),
         commit: z
           .string()
