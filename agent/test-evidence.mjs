@@ -62,9 +62,43 @@ export function selectTest(index, question, testPath) {
     candidates: ranked.slice(0, 8).map((x) => x.test.path),
   };
 }
+export async function focusedTestInvocation(workspace, index, plan) {
+  const selection = selectTest(index, plan.question, plan.testPath);
+  if (!selection.test)
+    throw Error(
+      selection.reason +
+        (selection.candidates.length ? " Candidates: " + selection.candidates.join(", ") : ""),
+    );
+  const test = selection.test;
+  if (!/^[A-Za-z0-9_./@-]+$/.test(test.path))
+    throw Error("This test path is outside the supported command argument format.");
+  const root = await realpath(workspace),
+    directory = await realpath(resolve(root, test.packageDirectory)),
+    file = await realpath(resolve(root, test.path));
+  if (relative(root, directory).startsWith("..") || relative(directory, file).startsWith(".."))
+    throw Error("The selected test escapes its package workspace.");
+  const pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
+  const candidates = Object.entries(pkg.scripts ?? {}).filter(
+    ([key, value]) =>
+      /^[A-Za-z0-9:_-]+$/.test(key) &&
+      /^vitest(?:\s|$)/.test(String(value).trim()) &&
+      !/(?:&&|\|\||[;|])/.test(String(value)),
+  );
+  const matching = candidates.filter(
+    ([key]) =>
+      key === "test" || test.path.toLowerCase().includes(key.replace(/^test:/, "").toLowerCase()),
+  );
+  const script =
+    matching.length === 1 ? matching[0][0] : candidates.length === 1 ? candidates[0][0] : null;
+  if (!script)
+    throw Error(
+      'Focused tests require a direct Vitest npm script, such as "test": "vitest run". Add one or choose a supported npm package.',
+    );
+  return { root, directory, file, script, test };
+}
 export async function runTargetedTest(workspace, index, plan, env) {
   const started = Date.now(),
-    selection = selectTest(index, plan.question, plan.testPath);
+    blockOutput = (tail) => sanitizeDiagnostic(tail, 4000);
   const blocked = (message) => ({
     status: "BLOCKED",
     counts: { passed: 0, failed: 0, skipped: 0 },
@@ -76,33 +110,13 @@ export async function runTargetedTest(workspace, index, plan, env) {
     nodeVersion: process.version,
     command: { directory: ".", script: "", testPath: null },
   });
-  if (!selection.test)
-    return blocked(
-      selection.reason +
-        (selection.candidates.length ? " Candidates: " + selection.candidates.join(", ") : ""),
-    );
-  const test = selection.test;
-  if (!/^[A-Za-z0-9_./@-]+$/.test(test.path))
-    return blocked("This test path is outside the supported command argument format.");
-  const root = await realpath(workspace),
-    directory = await realpath(resolve(root, test.packageDirectory)),
-    file = await realpath(resolve(root, test.path));
-  if (relative(root, directory).startsWith("..") || relative(directory, file).startsWith(".."))
-    return blocked("The selected test escapes its package workspace.");
-  const pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
-  const candidates = Object.entries(pkg.scripts ?? {}).filter(
-    ([key, value]) => /^[A-Za-z0-9:_-]+$/.test(key) && /\bvitest\b/.test(String(value)),
-  );
-  const matching = candidates.filter(
-    ([key]) =>
-      key === "test" || test.path.toLowerCase().includes(key.replace(/^test:/, "").toLowerCase()),
-  );
-  const script =
-    matching.length === 1 ? matching[0][0] : candidates.length === 1 ? candidates[0][0] : null;
-  if (!script)
-    return blocked(
-      "A unique supported Vitest script could not be inferred for this test. Other runners remain available through ordinary repository checks.",
-    );
+  let invocation;
+  try {
+    invocation = await focusedTestInvocation(workspace, index, plan);
+  } catch (error) {
+    return blocked(error.message);
+  }
+  const { root, directory, file, script, test } = invocation;
   if (plan.replayRecording)
     return replayVitest(
       root,
@@ -121,6 +135,8 @@ export async function runTargetedTest(workspace, index, plan, env) {
           "run",
           script,
           "--",
+          "--run",
+          ...(plan.flakeCandidate ? ["--retry=0"] : []),
           relative(directory, file).split("\\").join("/"),
           "--reporter=json",
           "--outputFile=" + output,
@@ -163,11 +179,24 @@ export async function runTargetedTest(workspace, index, plan, env) {
       });
     });
     let result;
+    const outputTail = blockOutput(tail.slice(-4000));
     try {
+      if (timedOut) throw Error("The focused test exceeded its time budget.");
       const text = await readFile(output, "utf8");
       if (Buffer.byteLength(text) > 8_000_000)
         return blocked("The structured reporter exceeded the supported artifact size.");
-      result = normalizeVitestReport(JSON.parse(text), exitCode, root);
+      const reporter = JSON.parse(text);
+      const matches =
+        reporter.testResults?.filter((suite) => resolve(directory, suite.name ?? "") === file) ??
+        [];
+      if (matches.length !== 1 || reporter.testResults.length !== 1)
+        return {
+          ...blocked(
+            "Vitest did not run exactly the selected test file. Review the script filters and test path.",
+          ),
+          output: outputTail,
+        };
+      result = normalizeVitestReport(reporter, exitCode, root);
     } catch {
       return {
         ...blocked(
@@ -175,11 +204,13 @@ export async function runTargetedTest(workspace, index, plan, env) {
             ? "The focused test exceeded its time budget."
             : summarizeCommandFailure(tail, "test", exitCode ?? "interrupted"),
         ),
+        output: outputTail,
         exitCode,
       };
     }
     return {
       ...result,
+      output: outputTail,
       durationMs: Date.now() - started,
       exitCode,
       nodeVersion: process.version,
