@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Execution intelligence and reliability platform for workflows, background jobs and AI agents.",
+  "description": "Run the test that shows what broke and check your fix against it.",
   "license": "MIT",
   "engines": {
     "node": ">=22.12.0"

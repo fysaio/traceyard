@@ -26,8 +26,4 @@ HTTP 429, 5xx and network failures carry retryable dependency errors. Other HTTP
 
 `GET /api/v1/runs/:id/events?after=0&limit=200` returns persisted events and a cursor, with project-scoped `runs:read` authorization. `TraceyardClient.events(id, after)` reads a page; `TraceyardClient.retry(id, "resume")` recovers an execution. The CLI supports `resume` and `restart` alongside launch, inspection and cancellation.
 
-## Verification and deployment
-
-The recovery integration suite executes the actual graph executor against migrated D1 with controlled HTTP responses. It checks a 503 failure followed by successful recovery, completed HTTP effect suppression, stable idempotency keys, permanent-failure handling, separate retry attempts, owner/project isolation and retained failure history. Another test executes recovered conditional checkpoints through the actual local Cloudflare Workflow binding. Controlled HTTP tests do not establish remote-provider behavior or exactly-once delivery.
-
-The operator deployed revision `90206d8` with migration `0015_execution_recovery.sql`. Actual production document execution, transient retry, checkpoint reuse and linked fresh execution were verified through the API. Authenticated browser acceptance remains blocked by a GitHub callback failure. See [live evidence](LIVE_VERIFICATION_2026-11-18.md) for the exact scope. No paid infrastructure is introduced.
+[Production release](PRODUCTION_RELEASE.md) · [Changelog](../CHANGELOG.md)
