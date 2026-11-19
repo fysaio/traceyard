@@ -1,5 +1,11 @@
 import type { Investigation } from "../../shared/contracts/investigations";
 import { flakinessOutcome } from "../../shared/contracts/investigation-execution";
+import { Badge, Icon } from "./ui";
+
+const runLabel = (status: string) =>
+  status === "SUCCEEDED" ? "Passed" : status === "FAILED" ? "Failed" : "Blocked";
+const runTone = (status: string) =>
+  status === "SUCCEEDED" ? "pass" : status === "FAILED" ? "fail" : "warn";
 
 export function ExecutionSummary({
   execution,
@@ -9,47 +15,52 @@ export function ExecutionSummary({
   if (execution.flakeRuns) {
     const outcome = flakinessOutcome(execution.flakeRuns);
     return (
-      <section className="execution-summary" aria-label="Flakiness results">
-        <h3>{outcome.label}</h3>
-        <p>{outcome.summary}</p>
+      <section className="stack" aria-label="Flakiness results">
+        <div>
+          <h3>{outcome.label}</h3>
+          <p className="muted">{outcome.summary}</p>
+        </div>
         {[execution.flakeRuns.slice(0, 3), execution.flakeRuns.slice(3)].map((runs, index) => (
-          <section key={index} className="section">
-            <h4>
-              {index === 0 ? "Failing commit" : "Candidate commit"} <code>{runs[0]?.commit}</code>
-            </h4>
-            {runs.map((run) => (
-              <details className="disclosure" key={run.attempt}>
-                <summary>
-                  Attempt {run.attempt} ·{" "}
-                  {run.status === "SUCCEEDED"
-                    ? "Passed"
-                    : run.status === "FAILED"
-                      ? "Failed"
-                      : "Blocked"}{" "}
-                  · {(run.durationMs / 1000).toFixed(1)}s
-                </summary>
-                <pre className="code">{run.message}</pre>
-              </details>
-            ))}
-          </section>
+          <div key={index} className="stack-sm">
+            <p className="field-label">
+              {index === 0 ? "Failing commit" : "Candidate commit"}{" "}
+              <code>{runs[0]?.commit.slice(0, 12)}</code>
+            </p>
+            <div className="list">
+              {runs.map((run) => (
+                <details className="row-details" key={run.attempt}>
+                  <summary className="row">
+                    <Icon name="chevron-right" />
+                    <div className="row-main">
+                      <strong>Attempt {run.attempt}</strong>
+                      <span className="muted">{(run.durationMs / 1000).toFixed(1)}s</span>
+                    </div>
+                    <Badge tone={runTone(run.status)}>{runLabel(run.status)}</Badge>
+                  </summary>
+                  <pre className="code flush">{run.message}</pre>
+                </details>
+              ))}
+            </div>
+          </div>
         ))}
       </section>
     );
   }
+  const { counts } = execution;
   return (
-    <section className="execution-summary" aria-label="Test execution result">
-      <div className="test-counts">
-        <span>
-          <strong>{execution.counts.passed}</strong> passed
+    <section className="stack" aria-label="Test execution result">
+      <div className="counts">
+        <span className={counts.passed ? "count pass" : "count"}>
+          <strong>{counts.passed}</strong> passed
         </span>
-        <span className={execution.counts.failed ? "has-failures" : ""}>
-          <strong>{execution.counts.failed}</strong> failed
+        <span className={counts.failed ? "count fail" : "count"}>
+          <strong>{counts.failed}</strong> failed
         </span>
-        <span>
-          <strong>{execution.counts.skipped}</strong> skipped
+        <span className="count">
+          <strong>{counts.skipped}</strong> skipped
         </span>
       </div>
-      <dl className="result-facts">
+      <dl className="facts">
         <div>
           <dt>Test</dt>
           <dd>
@@ -60,9 +71,11 @@ export function ExecutionSummary({
           </dd>
         </div>
         <div>
-          <dt>Executed revision</dt>
+          <dt>Commit</dt>
           <dd>
-            <code title={execution.commit ?? undefined}>{execution.commit ?? "Not confirmed"}</code>
+            <code title={execution.commit ?? undefined}>
+              {execution.commit ? execution.commit.slice(0, 12) : "Not confirmed"}
+            </code>
           </dd>
         </div>
         <div>
@@ -75,22 +88,28 @@ export function ExecutionSummary({
         </div>
       </dl>
       {execution.failures.map((failure, index) => (
-        <article className="test-failure" key={index}>
-          <h3>{failure.name}</h3>
-          <p className="hint">{failure.file}</p>
+        <article className="failure" key={index}>
+          <div className="failure-head">
+            <Icon name="failed" />
+            <strong>{failure.name}</strong>
+          </div>
+          <p className="muted mono">{failure.file}</p>
           <pre className="code">{failure.message}</pre>
         </article>
       ))}
       {execution.output && (
         <details className="disclosure">
-          <summary>Retained test output</summary>
+          <summary>
+            <Icon name="chevron-right" />
+            Test output
+          </summary>
           <pre className="code">{execution.output}</pre>
         </details>
       )}
       {!!execution.coverage?.omittedTests && (
-        <p className="hint">
-          {execution.coverage.omittedTests} related test file(s) were outside this execution’s
-          coverage.
+        <p className="muted">
+          {execution.coverage.omittedTests} related test{" "}
+          {execution.coverage.omittedTests === 1 ? "file was" : "files were"} not part of this run.
         </p>
       )}
     </section>

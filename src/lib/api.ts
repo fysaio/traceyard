@@ -1,19 +1,4 @@
-import type {
-  AnalyticsPayload,
-  ApiFailure,
-  CancelRunResult,
-  EventListPage,
-  HealthPayload,
-  LaunchRunResult,
-  OverviewPayload,
-  RetryRunResult,
-  RunDetail,
-  RunListPage,
-  SandboxStatus,
-  WorkflowSummary,
-} from "../../shared/contracts/api";
-import type { RunStatus } from "../../shared/domain/status";
-import type { FailureScenario } from "../../shared/workflow/document";
+import type { ApiFailure } from "../../shared/contracts/api";
 
 interface ApiSuccess<T> {
   data: T;
@@ -64,24 +49,11 @@ export function describeApiError(error: unknown, fallback: string): string {
       : ` Capacity returns in about ${formatRetryWindow(error.retryAfterSeconds)}.`;
 
   switch (error.code) {
-    case "SANDBOX_CONCURRENCY_LIMIT":
-      return `${error.message} Your existing executions and their history remain available.`;
     case "GLOBAL_DAILY_QUOTA":
     case "SESSION_DAILY_QUOTA":
     case "SESSION_HOURLY_QUOTA":
     case "IP_HOURLY_QUOTA":
-      return `${error.message}${retry} Existing executions and their history remain available.`;
-    case "SANDBOX_CIRCUIT_OPEN":
-    case "SANDBOX_DISABLED":
-      return `${error.message}${retry} Existing executions and their history remain available.`;
-    case "IDEMPOTENCY_KEY_REUSED":
-      return `${error.message} Start a new launch with a fresh idempotency key.`;
-    case "IDEMPOTENCY_RECORD_UNAVAILABLE":
-      return `${error.message} Start a new launch to create a new execution.`;
-    case "RETRY_ALREADY_EXISTS":
-      return `${error.message} Open the existing retry execution instead.`;
-    case "RUN_NOT_RETRYABLE":
-      return `${error.message} Only terminal failures can be retried, and a retry creates a new execution.`;
+      return `${error.message}${retry} Your existing investigations remain available.`;
     default:
       return error.message;
   }
@@ -138,14 +110,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<ApiSuccess<
   return parsed as ApiSuccess<T>;
 }
 
-export interface RunListParams {
-  status?: RunStatus | undefined;
-  workflowId?: string | undefined;
-  projectId?: string | undefined;
-  cursor?: string | undefined;
-  limit?: number | undefined;
-}
-
 export interface AuthUser {
   id: string;
   login: string;
@@ -175,29 +139,12 @@ export interface ProjectSummary {
   repository?: string | null;
 }
 
-export interface SavedWorkflowSummary {
-  id: string;
-  projectId: string;
-  slug: string;
-  name: string;
-  description: string;
-  definition: unknown;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export const api = {
   authSession: (): Promise<AuthSession> =>
     request<AuthSession>("/api/auth/session").then((body) => body.data),
 
   logout: (): Promise<void> =>
     request<unknown>("/api/auth/logout", { method: "POST" }).then(() => undefined),
-
-  claim: (projectId?: string): Promise<{ claimedRuns: number }> =>
-    request<{ claimedRuns: number }>("/api/auth/claim", {
-      method: "POST",
-      ...(projectId ? { body: JSON.stringify({ projectId }) } : {}),
-    }).then((body) => body.data),
 
   revokeSession: (id: string): Promise<void> =>
     request<unknown>(`/api/auth/sessions/${encodeURIComponent(id)}/revoke`, {
@@ -206,120 +153,8 @@ export const api = {
 
   projects: (): Promise<ProjectSummary[]> =>
     request<{ items: ProjectSummary[] }>("/api/projects").then((body) => body.data.items),
-
-  createProject: (name: string): Promise<ProjectSummary> =>
-    request<ProjectSummary>("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }).then((body) => body.data),
-
-  savedWorkflows: (projectId: string): Promise<SavedWorkflowSummary[]> =>
-    request<{ items: SavedWorkflowSummary[] }>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflows`,
-    ).then((body) => body.data.items),
-
-  createSavedWorkflow: (
-    projectId: string,
-    input: { name: string; description: string; definition: Record<string, unknown> },
-  ): Promise<SavedWorkflowSummary> =>
-    request<SavedWorkflowSummary>(`/api/projects/${encodeURIComponent(projectId)}/workflows`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    }).then((body) => body.data),
-
-  deleteSavedWorkflow: (projectId: string, workflowId: string): Promise<void> =>
-    request<unknown>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflowId)}`,
-      { method: "DELETE" },
-    ).then(() => undefined),
-
-  health: (): Promise<HealthPayload> =>
-    request<HealthPayload>("/api/health").then((body) => body.data),
-
-  workflows: (projectId?: string): Promise<WorkflowSummary[]> =>
-    request<{ items: WorkflowSummary[] }>(
-      "/api/workflows" + (projectId ? "?projectId=" + encodeURIComponent(projectId) : ""),
-    ).then((body) => body.data.items),
-
-  workflow: (id: string, projectId?: string, version?: number): Promise<WorkflowSummary> =>
-    request<WorkflowSummary>(
-      `/api/workflows/${encodeURIComponent(id)}?${new URLSearchParams({ ...(projectId ? { projectId } : {}), ...(version ? { version: String(version) } : {}) })}`,
-    ).then((body) => body.data),
-
-  overview: (days: number): Promise<OverviewPayload> =>
-    request<OverviewPayload>(`/api/overview?days=${days}`).then((body) => body.data),
-
-  analytics: (days: number): Promise<AnalyticsPayload> =>
-    request<AnalyticsPayload>(`/api/analytics?days=${days}`).then((body) => body.data),
-
-  sandbox: (): Promise<SandboxStatus> =>
-    request<SandboxStatus>("/api/sandbox").then((body) => body.data),
-
-  runs: (params: RunListParams = {}): Promise<RunListPage> => {
-    const search = new URLSearchParams();
-    if (params.status !== undefined) search.set("status", params.status);
-    if (params.workflowId !== undefined) search.set("workflowId", params.workflowId);
-    if (params.projectId) search.set("projectId", params.projectId);
-    if (params.cursor !== undefined) search.set("cursor", params.cursor);
-    if (params.limit !== undefined) search.set("limit", String(params.limit));
-    const query = search.toString();
-    return request<RunListPage>(`/api/runs${query.length === 0 ? "" : `?${query}`}`).then(
-      (body) => body.data,
-    );
-  },
-
-  run: (id: string): Promise<RunDetail> =>
-    request<RunDetail>(`/api/runs/${encodeURIComponent(id)}`).then((body) => body.data),
-
-  events: (id: string, after = 0): Promise<EventListPage> =>
-    request<EventListPage>(
-      `/api/runs/${encodeURIComponent(id)}/events?after=${after}&limit=200`,
-    ).then((body) => body.data),
-
-  launch: (
-    input: {
-      workflowId: string;
-      projectId?: string;
-      parentRunId?: string;
-      version?: number;
-      input: unknown;
-      scenario: FailureScenario;
-    },
-    idempotencyKey: string,
-  ): Promise<{ result: LaunchRunResult; replayed: boolean }> =>
-    request<LaunchRunResult>("/api/runs", {
-      method: "POST",
-      headers: { "Idempotency-Key": idempotencyKey },
-      body: JSON.stringify(input),
-    }).then((body) => ({ result: body.data, replayed: body.meta.replayed === true })),
-
-  cancel: (id: string): Promise<CancelRunResult> =>
-    request<CancelRunResult>(`/api/runs/${encodeURIComponent(id)}/cancel`, {
-      method: "POST",
-    }).then((body) => body.data),
-
-  retry: (id: string, mode: "restart" | "resume" = "restart"): Promise<RetryRunResult> =>
-    request<RetryRunResult>(`/api/runs/${encodeURIComponent(id)}/retry`, {
-      method: "POST",
-      body: JSON.stringify({ mode }),
-    }).then((body) => body.data),
 };
 
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
-}
-
-/** Retrieve every persisted event page for inspection/export, without truncating at 200. */
-export async function readAllEvents(id: string): Promise<EventListPage> {
-  const items: EventListPage["items"] = [];
-  let cursor = 0;
-  for (;;) {
-    const page = await api.events(id, cursor);
-    items.push(...page.items);
-    if (page.nextCursor === null) return { items, nextCursor: null };
-    if (page.nextCursor <= cursor) {
-      throw new ApiClientError(502, "INVALID_EVENT_CURSOR", "Event pagination did not advance.");
-    }
-    cursor = page.nextCursor;
-  }
 }

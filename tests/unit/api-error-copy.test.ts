@@ -15,7 +15,7 @@ describe("describeApiError", () => {
     const message = describeApiError(error, "fallback");
     expect(message).toContain("hourly execution allowance");
     expect(message).toContain("Capacity returns in about 2 minutes.");
-    expect(message).toContain("Existing executions and their history remain available.");
+    expect(message).toContain("Your existing investigations remain available.");
   });
 
   it("never invents a retry time when the server did not supply one", () => {
@@ -28,22 +28,6 @@ describe("describeApiError", () => {
     const message = describeApiError(error, "fallback");
     expect(message).toContain("maximum number of executions");
     expect(message).not.toContain("Capacity returns");
-  });
-
-  it("explains that a manual retry creates a new execution", () => {
-    const error = new ApiClientError(409, "RUN_NOT_RETRYABLE", "Only failed runs can be retried.");
-
-    expect(describeApiError(error, "fallback")).toContain("creates a new execution");
-  });
-
-  it("tells the operator to use a fresh idempotency key", () => {
-    const error = new ApiClientError(
-      422,
-      "IDEMPOTENCY_KEY_REUSED",
-      "This Idempotency-Key was already used with a different request body.",
-    );
-
-    expect(describeApiError(error, "fallback")).toContain("fresh idempotency key");
   });
 
   it("falls back for errors that are not API failures", () => {
