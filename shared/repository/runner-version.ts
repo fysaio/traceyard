@@ -1,2 +1,2 @@
 // Immutable bootstrap revision shared by hosted setup and the optional local command.
-export const REVIEWED_RUNNER_REVISION = "fcec074fd530295ff64a0ff2f1c5b6dcb5527669";
+export const REVIEWED_RUNNER_REVISION = "a2f193a56a8130c66030256b6c470beb4e51e5f4";
