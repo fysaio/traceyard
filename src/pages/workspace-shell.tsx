@@ -327,8 +327,12 @@ export function WorkspaceShell({
               <Link className="btn" to="/projects" onClick={() => setMenu(null)}>
                 All projects
               </Link>
-              <button className="btn primary" onClick={() => setMenu("connect")}>
-                <i className="fa-brands fa-github" aria-hidden="true" /> Connect repo
+              <button
+                className={connectedProjects.length ? "btn" : "btn primary"}
+                onClick={() => setMenu("connect")}
+              >
+                <i className="fa-brands fa-github" aria-hidden="true" />{" "}
+                {connectedProjects.length ? "Add another repo" : "Connect repo"}
               </button>
               <button className="btn" onClick={() => setMenu("create")}>
                 Create project

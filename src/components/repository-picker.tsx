@@ -21,7 +21,9 @@ export function RepositoryPicker({
   refreshing,
   error,
   connectingId,
+  connectedProjects = {},
   onConnect,
+  onOpen,
   onRefresh,
   onLocal,
 }: {
@@ -30,7 +32,11 @@ export function RepositoryPicker({
   refreshing: boolean;
   error: unknown;
   connectingId?: number;
+  /** Lower-cased repository name mapped to the id of the project that already uses it. */
+  connectedProjects?: Record<string, string>;
   onConnect: (repository: RepositoryChoice) => void;
+  /** Called instead of onConnect when the repository already has a project. */
+  onOpen?: (projectId: string) => void;
   onRefresh: () => void;
   onLocal: () => void;
 }) {
@@ -77,21 +83,27 @@ export function RepositoryPicker({
           )}
           {items.length > 0 ? (
             <div className="repository-choices" role="group" aria-label="GitHub repositories">
-              {items.map((r) => (
-                <button
-                  key={r.id}
-                  className="repository-choice"
-                  aria-label={"Connect " + r.name}
-                  aria-busy={connectingId === r.id}
-                  disabled={connectingId !== undefined}
-                  onClick={() => onConnect(r)}
-                >
-                  <i className="fa-brands fa-github" aria-hidden="true" />
-                  <strong>{r.name}</strong>
-                  <span>{connectingId === r.id ? "Connecting…" : "Connect"}</span>
-                  <Icon name={connectingId === r.id ? "circle-notch" : "arrow-right"} />
-                </button>
-              ))}
+              {items.map((r) => {
+                const existing = connectedProjects[r.name.toLowerCase()];
+                const busy = connectingId === r.id;
+                return (
+                  <button
+                    key={r.id}
+                    className={"repository-choice" + (existing ? " is-connected" : "")}
+                    aria-label={(existing ? "Open " : "Connect ") + r.name}
+                    aria-busy={busy}
+                    disabled={connectingId !== undefined}
+                    onClick={() => (existing && onOpen ? onOpen(existing) : onConnect(r))}
+                  >
+                    <i className="fa-brands fa-github" aria-hidden="true" />
+                    <strong>{r.name}</strong>
+                    <span>{busy ? "Connecting…" : existing ? "Connected" : "Connect"}</span>
+                    <Icon
+                      name={busy ? "circle-notch" : existing ? "circle-check" : "arrow-right"}
+                    />
+                  </button>
+                );
+              })}
             </div>
           ) : (
             <div className="repository-empty">

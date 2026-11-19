@@ -737,7 +737,7 @@ function InvestigationDetail() {
         i.snapshot.commit &&
         i.status === "EVIDENCE_READY" &&
         id !== verification.data?.candidateId && (
-          <details className="connected-panel section" open={flakePrompt || undefined}>
+          <details className="connected-panel section" open>
             <summary>Check for flakiness</summary>
             <p>
               Extra time estimate: up to about 10 minutes on the GitHub runner, plus queue time.
@@ -841,7 +841,7 @@ function InvestigationDetail() {
         </form>
       )}
       {!busy(i) && !flakeResults && i.status !== "CANCELLED" && (
-        <details className="disclosure section">
+        <details className="disclosure section" open>
           <summary>Run an existing test</summary>
           <form
             className="form-stack"
