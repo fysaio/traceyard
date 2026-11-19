@@ -12,6 +12,8 @@ import { nowIso } from "../lib/time";
 import { conflict, notFound } from "../api/errors";
 import { operationKey } from "../repositories/catalog";
 import { getRepositoryIndex } from "./repository-index-service";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
 
 interface Row {
@@ -163,11 +165,17 @@ export async function listInvestigations(db: D1Database, userId: string, project
   await requireInvestigationProject(db, userId, projectId);
   const rows = await db
     .prepare(
-      "SELECT * FROM investigations WHERE project_id=? AND owner_user_id=? ORDER BY created_at DESC,id DESC LIMIT 50",
+      `SELECT i.*, (SELECT a.status FROM investigation_attempts a WHERE a.investigation_id=i.id
+        ORDER BY a.created_at DESC,a.id DESC LIMIT 1) AS latest_attempt_status
+      FROM investigations i WHERE i.project_id=? AND i.owner_user_id=?
+      ORDER BY i.created_at DESC,i.id DESC LIMIT 50`,
     )
     .bind(projectId, userId)
-    .all<Row>();
-  return rows.results.map((r) => view(r, []));
+    .all<Row & { latest_attempt_status: string | null }>();
+  return rows.results.map((r) => ({
+    ...view(r, []),
+    ...(r.latest_attempt_status ? { outcome: r.latest_attempt_status } : {}),
+  }));
 }
 export async function getInvestigationStatus(
   db: D1Database,
@@ -275,11 +283,11 @@ async function collect(
       ...bounded({ operations: operations.slice(0, 30), snapshot }),
     });
     summary = operations.length
-      ? `Found ${operations.length} indexed operation(s) in ${snapshot.filesScanned} scanned file(s). Runtime behavior has not been verified by this investigation.`
-      : "No supported operations are indexed yet. Repository analysis remains available after source discovery completes.";
+      ? `Traceyard read ${plural(snapshot.filesScanned, "file")} and mapped ${plural(operations.length, "function")}. Nothing was run.`
+      : "Traceyard hasn’t finished reading this repository yet. Nothing was run.";
     nextAction = operations.length
-      ? "Select an operation or investigate an existing failed check."
-      : "Connect a repository or refresh source discovery.";
+      ? "Pick a test to run, or open a failed check."
+      : "Connect a repository, or wait for Traceyard to finish reading it.";
     if (operations.length > 30) limitations.push("The evidence contains the first 30 operations.");
     const index = await getRepositoryIndex(
       db,
@@ -299,9 +307,8 @@ async function collect(
         ...bounded(index),
       });
       const tests = target.operationKey ? index.relatedTests : index.files.filter((f) => f.isTest);
-      summary += ` Indexed ${index.fileCount} source/test files across ${index.packages.length} package(s); ${tests.length} test file(s) in this view.`;
-      if (tests.length)
-        nextAction = "Run a selected existing test in an available execution environment.";
+      summary += ` It found ${plural(tests.length, "test file")} across ${plural(index.packages.length, "package")}.`;
+      if (tests.length) nextAction = "Pick one of these tests and run it.";
       if (index.truncated)
         limitations.push(
           "The index view is paginated; not all file records are included in this evidence.",

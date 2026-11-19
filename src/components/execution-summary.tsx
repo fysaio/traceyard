@@ -61,7 +61,7 @@ export function ExecutionSummary({
         </span>
       </div>
       <dl className="facts">
-        <div>
+        <div className="wide">
           <dt>Test</dt>
           <dd>
             <code>
@@ -74,13 +74,13 @@ export function ExecutionSummary({
           <dt>Commit</dt>
           <dd>
             <code title={execution.commit ?? undefined}>
-              {execution.commit ? execution.commit.slice(0, 12) : "Not confirmed"}
+              {execution.commit ? execution.commit.slice(0, 7) : "Not confirmed"}
             </code>
           </dd>
         </div>
         <div>
           <dt>Duration</dt>
-          <dd>{(execution.durationMs / 1000).toFixed(2)}s</dd>
+          <dd>{(execution.durationMs / 1000).toFixed(1)}s</dd>
         </div>
         <div>
           <dt>Exit code</dt>
@@ -93,7 +93,9 @@ export function ExecutionSummary({
             <Icon name="failed" />
             <strong>{failure.name}</strong>
           </div>
-          <p className="muted mono">{failure.file}</p>
+          {failure.file !== execution.command.testPath && (
+            <p className="muted mono">{failure.file}</p>
+          )}
           <pre className="code">{failure.message}</pre>
         </article>
       ))}
