@@ -62,10 +62,33 @@ async function verifyRequestOrder(browser, origin, temp) {
       candidateBuild: files,
     });
     assert.equal(result.verdict, "PASSED", JSON.stringify(result));
+    const noBody = join(temp, "without-body");
+    await mkdir(noBody);
+    await writeFile(
+      join(noBody, "index.html"),
+      repeatRequestPage.replace('body: JSON.stringify({ count: 1, item: "single" }),', ""),
+    );
+    const manifest = JSON.parse(raw);
+    manifest.exchanges[0].body = null;
+    manifest.exchanges.pop();
+    const mismatched = await compareBrowserJourney(
+      browser,
+      temp,
+      JSON.stringify(manifest),
+      base,
+      head,
+      {
+        baselineBuild: noBody,
+        candidateBuild: noBody,
+      },
+    );
+    assert.equal(mismatched.verdict, "INCONCLUSIVE");
+    assert.deepEqual(mismatched.candidate.unusedFixtures, ["POST /api/recording-order"]);
     assert.equal(requests, 2);
     console.log(
       "Parallel JSON requests replayed in issue order without reaching the fixture server.",
     );
+    console.log("A missing request body could not consume an explicit JSON null fixture.");
   } finally {
     await record.close();
   }

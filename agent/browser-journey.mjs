@@ -54,6 +54,11 @@ const journeySchema = z
     "Provide one locator per action.",
   )
   .refine(
+    ({ responses, exchanges }) =>
+      exchanges.every(({ method, url }) => method !== "GET" || !Object.hasOwn(responses, url)),
+    "Use one source of response evidence per endpoint.",
+  )
+  .refine(
     ({ steps }) => steps.some((step) => ["expectText", "expectUrl"].includes(step.action)),
     "A journey needs an assertion.",
   );
@@ -146,7 +151,7 @@ function stableJson(value) {
 }
 
 function requestKey(method, url, body) {
-  return JSON.stringify([method, url, stableJson(body)]);
+  return JSON.stringify([method, url, body === undefined ? "" : JSON.stringify(stableJson(body))]);
 }
 
 function exchangeQueues(exchanges) {

@@ -13,7 +13,7 @@ npm ci
 npx playwright install --with-deps chromium
 ```
 
-Start your app locally with test data. From the app repository, run the recorder and name any JSON API endpoint the journey uses.
+Start a local preview of your built app with test data. In Vite, run npm run build and npm run preview. From the app repository, start the recorder and name each JSON API endpoint the journey uses.
 
 ```sh
 node "$TRACEYARD/agent/cli.mjs" record-browser \
