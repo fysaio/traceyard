@@ -135,6 +135,49 @@ async function requestWithToken<T>(
   const body = await response.text();
   return (body.trim() ? JSON.parse(body) : null) as T;
 }
+export async function githubJobLog(token: string, path: string, fetcher: typeof fetch) {
+  const response = await fetcher("https://api.github.com" + path, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Traceyard",
+      "X-GitHub-Api-Version": "2022-11-28",
+      Authorization: "Bearer " + token,
+    },
+    redirect: "manual",
+    signal: AbortSignal.timeout(8000),
+  });
+  const location = response.headers.get("location");
+  if (response.status !== 302 || !location) return null;
+  const url = new URL(location);
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    !(
+      /^[a-z0-9-]+\.blob\.core\.windows\.net$/.test(url.hostname) ||
+      url.hostname === "results-receiver.actions.githubusercontent.com"
+    )
+  )
+    return null;
+  const log = await fetcher(url, { redirect: "error", signal: AbortSignal.timeout(8000) });
+  if (!log.ok || !log.body) return null;
+  const reader = log.body.getReader();
+  const decoder = new TextDecoder();
+  let contents = "",
+    bytes = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return contents + decoder.decode();
+      bytes += chunk.value.length;
+      if (bytes > 512_000) return null;
+      contents += decoder.decode(chunk.value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
 export async function repositoryGitHubClient(
   env: Env,
   installationId: number,
@@ -149,6 +192,21 @@ export async function repositoryGitHubClient(
   });
   return <T>(path: string, init: RequestInit = {}) =>
     requestWithToken<T>(token, path, init, fetcher);
+}
+export async function repositoryActionsReader(
+  env: Env,
+  installationId: number,
+  repositoryId: number,
+  fetcher: typeof fetch,
+) {
+  const token = await installationAccessToken(env, installationId, fetcher, repositoryId, {
+    actions: "read",
+    contents: "read",
+  });
+  return {
+    get: <T>(path: string) => requestWithToken<T>(token, path, {}, fetcher),
+    log: (path: string) => githubJobLog(token, path, fetcher),
+  };
 }
 export async function syncPersonalInstallation(
   env: Env,
