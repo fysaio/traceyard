@@ -163,6 +163,7 @@ export async function startInvestigationExecution(
     changedFiles?: string[];
     captureInteractions?: boolean;
     flakeCandidate?: string;
+    originalTest?: InvestigationPlan["originalTest"];
     replayRecording?: InvestigationPlan["replayRecording"];
   } = {},
   fetcher: typeof fetch = fetch,
@@ -194,6 +195,7 @@ export async function startInvestigationExecution(
     ...(options.changedFiles ? { changedFiles: options.changedFiles, maxTestFiles: 3 } : {}),
     ...(options.captureInteractions ? { captureInteractions: true } : {}),
     ...(options.flakeCandidate ? { flakeCandidate: options.flakeCandidate } : {}),
+    ...(options.originalTest ? { originalTest: options.originalTest } : {}),
     ...(options.replayRecording ? { replayRecording: options.replayRecording } : {}),
     commit: inv.snapshot.commit,
     timeoutMs: 120000,
@@ -317,6 +319,18 @@ export async function recordInvestigationReport(
     throw conflict(
       "REPLAY_PROOF_REQUIRED",
       "A replay cannot claim success without matching isolated replay evidence.",
+    );
+  if (
+    (report.originalTest &&
+      (!plan.originalTest ||
+        report.status !== "SUCCEEDED" ||
+        report.originalTest.baselineCommit !== plan.originalTest.baselineCommit ||
+        report.originalTest.failures.some((failure) => failure.file !== plan.testPath))) ||
+    (plan.originalTest && !report.originalTest && report.status === "SUCCEEDED")
+  )
+    throw conflict(
+      "ORIGINAL_TEST_REPORT_MISMATCH",
+      "A passing candidate needs the original-test result from the authorized baseline.",
     );
   if (row.runner_id !== report.runId)
     throw conflict(

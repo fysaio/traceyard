@@ -182,7 +182,7 @@ test("local account opens a real persisted investigation and returns to the same
   ).toBeVisible();
 });
 
-test("reopening a baseline restores its repair verdict and readable execution evidence", async ({
+test("reopening a baseline shows the original failure even when the candidate test passed", async ({
   page,
 }) => {
   await page.route("**/api/auth/session", (r) =>
@@ -235,8 +235,8 @@ test("reopening a baseline restores its repair verdict and readable execution ev
         baselineId: inv.id,
         candidateId: "inv_candidate",
         candidateCommit: "b".repeat(40),
-        verdict: "PASSED",
-        label: "Confirmed",
+        verdict: "FAILED",
+        label: "Still failing",
         baselineRun: {
           commit: snapshot.commit,
           testPath: execution.command.testPath,
@@ -251,15 +251,25 @@ test("reopening a baseline restores its repair verdict and readable execution ev
           evidenceId: "evd_candidate",
           failure: null,
         },
-        changedTests: [],
+        originalTest: {
+          baselineCommit: snapshot.commit,
+          status: "FAILED",
+          assertion: "FAILED",
+          counts: { passed: 4, failed: 1, skipped: 0 },
+          failures: execution.failures,
+          message: "4 passed, 1 failed, 0 skipped.",
+          durationMs: 1200,
+        },
+        changedTests: [execution.command.testPath],
         limitations: ["Only the selected checks executed."],
-        summary: "The retained reproducer passes against the candidate.",
+        summary:
+          "The candidate’s tests passed, but the original assertion still fails against the candidate’s code.",
         metrics: {},
       }),
     ),
   );
   await page.goto("/investigations/inv_browser?project=prj_browser");
-  await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Still failing", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Test execution result" })).toContainText(
     "tests/checkout.test.ts",
   );
@@ -272,8 +282,11 @@ test("reopening a baseline restores its repair verdict and readable execution ev
     "href",
     "/investigations/inv_candidate?project=prj_browser&evidence=evd_candidate#retained-evidence",
   );
+  await expect(
+    page.getByRole("region", { name: "Original tests on candidate code" }),
+  ).toContainText("Expected 42, received 41");
   await page.reload();
-  await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Still failing", { exact: true })).toBeVisible();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { runOriginalTest } from "../../agent/cli.mjs";
 import { pathToFileURL } from "node:url";
 import { analyzeRepositoryFiles, indexRepository } from "../../agent/repository-index.mjs";
 import {
@@ -40,6 +42,92 @@ describe("focused investigation evidence", () => {
       "BLOCKED",
     );
   });
+  it("catches a weakened assertion and accepts a code repair using the original Git files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "traceyard-original-case-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    const commit = (description: string) => {
+      git("add", "--all");
+      git("commit", "--no-verify", "--no-gpg-sign", "-m", description);
+      return git("rev-parse", "HEAD");
+    };
+    const write = (file: string, value: string) => writeFile(join(root, file), value);
+    try {
+      git("init");
+      await write(".gitignore", "node_modules/\n");
+      await mkdir(join(root, "fixtures"));
+      const api = pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href;
+      const original = `import {it,expect} from ${JSON.stringify(api)};import {sum} from './sum.js';import {expected} from './fixtures/expected.js';it('adds',()=>expect(sum(1,2)).toBe(expected));`;
+      const weakened = original.replace(".toBe(expected)", ".toBeTypeOf('number')");
+      await write(
+        "package.json",
+        JSON.stringify({
+          type: "module",
+          name: "traceyard-original",
+          version: "1.0.0",
+          scripts: {
+            test: `node ${JSON.stringify(resolve("node_modules/vitest/vitest.mjs"))} run`,
+          },
+        }),
+      );
+      await write(
+        "package-lock.json",
+        JSON.stringify({
+          name: "traceyard-original",
+          version: "1.0.0",
+          lockfileVersion: 3,
+          packages: { "": { name: "traceyard-original", version: "1.0.0" } },
+        }),
+      );
+      await write("sum.js", "export const sum=(a,b)=>a-b;");
+      await write("sum.test.js", original);
+      await write("fixtures/expected.js", "export const expected=3;");
+      const baselineCommit = commit("Failure");
+      await write("sum.test.js", weakened);
+      await write("fixtures/expected.js", "export const expected=-1;");
+      await write("fixtures/new.js", "export default true;");
+      const fake = commit("Weaken the test");
+      const plan = {
+        investigationId: "inv_" + "a".repeat(32),
+        requestId: "req_" + "b".repeat(32),
+        question: "Verify the repair",
+        testPath: "sum.test.js",
+        timeoutMs: 20000,
+        commit: fake,
+        originalTest: {
+          baselineCommit,
+          assertionName: "adds",
+          paths: ["sum.test.js", "fixtures/expected.js", "fixtures/new.js"],
+        },
+      };
+      const testEnv = { ...process.env, VITEST: "" };
+      expect((await runTargetedTest(root, await indexRepository(root), plan, testEnv)).status).toBe(
+        "SUCCEEDED",
+      );
+      const result = await runOriginalTest(root, plan, testEnv);
+      expect(result, JSON.stringify(result)).toMatchObject({
+        baselineCommit,
+        status: "FAILED",
+        assertion: "FAILED",
+        failures: [{ file: "sum.test.js", name: "adds" }],
+      });
+      expect(await readFile(join(root, "sum.test.js"), "utf8")).toBe(weakened);
+      expect(git("status", "--porcelain")).toBe("");
+      await write("sum.js", "export const sum=(a,b)=>a+b;");
+      const fixed = commit("Repair the application");
+      expect(await runOriginalTest(root, { ...plan, commit: fixed }, testEnv)).toMatchObject({
+        status: "SUCCEEDED",
+        assertion: "PASSED",
+        counts: { passed: 1, failed: 0 },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30000);
   it("selects a clear existing test and returns ambiguity without running unrelated work", () => {
     const index = analyzeRepositoryFiles([
       { path: "today.test.ts", content: "test('proposal',()=>{})" },

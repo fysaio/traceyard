@@ -26,6 +26,7 @@ export interface Verification {
   label: "Running" | "Confirmed" | "Passed with test changes" | "Still failing" | "Inconclusive";
   baselineRun: VerificationRun | null;
   candidateRun: VerificationRun | null;
+  originalTest?: InvestigationReport["originalTest"];
   changedTests: string[];
   limitations: string[];
   summary: string;

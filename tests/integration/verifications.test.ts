@@ -97,7 +97,11 @@ function github(files: string[], status = "ahead"): typeof fetch {
     throw Error("Unexpected GitHub request: " + path);
   };
 }
-async function complete(a: Awaited<ReturnType<typeof fixture>>, candidateId: string) {
+async function complete(
+  a: Awaited<ReturnType<typeof fixture>>,
+  candidateId: string,
+  originalTest?: InvestigationReport["originalTest"],
+) {
   const inv = await getInvestigation(env.DB, a.userId, a.projectId, candidateId),
     attempt = inv.attempts![0]!;
   await env.DB.prepare(
@@ -115,6 +119,7 @@ async function complete(a: Awaited<ReturnType<typeof fixture>>, candidateId: str
     failures: [],
     message: "One test passed",
     exitCode: 0,
+    ...(originalTest ? { originalTest } : {}),
   });
 }
 describe("repair verification", () => {
@@ -202,21 +207,71 @@ describe("repair verification", () => {
       baselineRun: { status: "FAILED" },
     });
   });
-  it("does not label changed tests as an established behavior repair", async () => {
-    const a = await fixture(),
-      v = await createVerification(
+  it.each(["FAILED", "SUCCEEDED", "BLOCKED"] as const)(
+    "uses the original test verdict %s for a passing candidate with changed tests",
+    async (status) => {
+      const a = await fixture();
+      const verification = await createVerification(
         configured,
         a.userId,
         a.projectId,
         a.baseline.id,
         "b".repeat(40),
         undefined,
-        github(["sum.test.ts"]),
+        github(["sum.ts", "sum.test.ts", "fixtures/sum.json"]),
       );
+      await expect(complete(a, verification.candidateId)).rejects.toMatchObject({
+        code: "ORIGINAL_TEST_REPORT_MISMATCH",
+      });
+      const originalTest = {
+        baselineCommit: "a".repeat(40),
+        status,
+        assertion:
+          status === "BLOCKED"
+            ? ("NOT_OBSERVED" as const)
+            : status === "SUCCEEDED"
+              ? ("PASSED" as const)
+              : ("FAILED" as const),
+        counts: {
+          passed: Number(status === "SUCCEEDED"),
+          failed: Number(status === "FAILED"),
+          skipped: 0,
+        },
+        failures: status === "FAILED" ? a.report.failures : [],
+        message: "Executed the original test against candidate code.",
+        durationMs: 200,
+      };
+      await expect(
+        complete(a, verification.candidateId, {
+          ...originalTest,
+          baselineCommit: "c".repeat(40),
+        }),
+      ).rejects.toMatchObject({ code: "ORIGINAL_TEST_REPORT_MISMATCH" });
+      await complete(a, verification.candidateId, originalTest);
+      expect(await getVerification(env.DB, a.userId, a.projectId, verification.id)).toMatchObject({
+        verdict:
+          status === "FAILED" ? "FAILED" : status === "SUCCEEDED" ? "PASSED" : "INCONCLUSIVE",
+        originalTest,
+        candidateRun: { status: "SUCCEEDED" },
+      });
+    },
+  );
+  it("keeps a green candidate inconclusive if its test configuration changed", async () => {
+    const a = await fixture();
+    const v = await createVerification(
+      configured,
+      a.userId,
+      a.projectId,
+      a.baseline.id,
+      "b".repeat(40),
+      undefined,
+      github(["sum.test.ts", "vitest.config.ts"]),
+    );
     await complete(a, v.candidateId);
-    const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
-    expect(result.verdict).toBe("REVIEW_TEST_CHANGES");
-    expect(result.metrics.agentTokens).toBeNull();
+    expect(await getVerification(env.DB, a.userId, a.projectId, v.id)).toMatchObject({
+      verdict: "INCONCLUSIVE",
+      summary: expect.stringContaining("test configuration"),
+    });
   });
   it("keeps a passing result inconclusive when changed-file integrity is incomplete", async () => {
     const a = await fixture(),
