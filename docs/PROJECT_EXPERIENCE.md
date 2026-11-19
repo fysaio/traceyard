@@ -11,8 +11,6 @@ This revision implements a connected, repository-backed application journey rath
 - `/projects/:id/checks/:check`: latest actual event for each runner phase, managed or legacy runner identity, cancellation and recorded application runs. Legacy checks retain a GitHub logs link. Queued managed checks do not appear to have finished.
 - `/projects/:id/compare`: choose two recorded runs in a history and compare statuses, timings and available request-test assertions. This is descriptive comparison, not a certified regression verdict with guaranteed identical environments.
 
-The optional Traceyard builder, Gateway and other existing tools remain accessible. Native SVG icons were not introduced: new controls use the existing Font Awesome font pack. Soft card/control radii, custom rounded checkboxes, surface focus states, keyboard labels, reduced-motion styles, touch-size inputs and narrow-screen layouts are in `src/styles/project-experience.css`.
-
 ## Source-first exploration
 
 Operation pages expose a credential-free source call tree before any application execution. Readable nested calls show same-file helper relationships, source lines, conditional/error/loop/callback context and unresolved boundaries. The call tree is source evidence, never a fabricated run timeline. Legacy direct-call indexes remain readable. Empty runtime histories link back to source exploration. Failed checks or missing execution configuration do not hide this view. The feature currently resolves only unambiguous top-level local functions, with 12-call/three-level bounds; cross-file imports and general business-workflow reconstruction remain incomplete.
@@ -42,9 +40,3 @@ The runner installs locked dependencies, then builds/runs the existing npm test 
 Standard deployments use GitHub Actions with a pinned agent. First-run setup previews one workflow file inside Traceyard; **Enable and run** requests its merge while respecting GitHub repository rules, then starts the check. Subsequent checks do not need another approval unless the workflow changes. The Traceyard-managed image remains an optional paid execution mode.
 
 The local CLI still ships from a checkout, not a published/browser-authenticated package. Existing local `scan` and `connect` commands remain supported. Per-project fixtures are not a permanent application server, and this change does not implement visual rewriting of application business logic or automatically generated fixes.
-
-## Verification
-
-Automated tests exercise project isolation, conservative source matching, complete application-run reads, local request-target/path validation, saved configuration, immutable requested settings, preview opt-in, and scoped fixture deletion. A spawned real Node HTTP application verifies passing/failing assertions, actual measured trace export, credential redaction and process cleanup. Existing npm-suite checks continue to run.
-
-No fresh browser screenshots or physical-phone verification are claimed for the managed execution replacement. Existing public chatgpt.site remains a separate prototype.

@@ -1,6 +1,6 @@
 # Frontend / backend contracts
 
-The main journey is Workflows → Execution → Step evidence → Recovery. See [execution recovery](EXECUTION_RECOVERY.md) for checkpoint provenance, automatic retries and the server API. Repository discovery and checks are supporting capabilities.
+The browser and [MCP server](MCP.md) share project investigations and their test evidence. Workflow runs have a separate [execution and recovery API](EXECUTION_RECOVERY.md).
 
 The connected application journey and request-runner contracts are detailed in [project experience](PROJECT_EXPERIENCE.md). New owner-scoped APIs expose `/api/workspace/projects`, project `catalog`, `operations/:key`, `runner-config`, operation `cases`/`test`, `application-runs/:trace`, check detail/cancellation and managed check launch. `/api/v1/repository/configuration` supplies a project-scoped runner manifest/snapshot through a scoped local key, active managed credential or verified legacy GitHub OIDC identity. Migration 0011 adds these configurations, case snapshots and retained results.
 
