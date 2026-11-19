@@ -115,7 +115,7 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 
 ### Focused tests
 
-Use a committed `package-lock.json` and a direct script such as `vitest run` or `jest`. When a package has several suites, use an explicit test path and a script named for that suite, such as `test:unit` for files under `tests/unit`. Traceyard retains the test result from the selected commit.
+Use a committed `package-lock.json` and a direct script such as `vitest run` or `jest`. When a package has several suites, use an explicit test path and a script named for that suite, such as `test:unit` for files under `tests/unit`. Traceyard retains the test result from the selected commit. Verification identifies test, fixture, mock and snapshot paths using common naming conventions. Review the candidate diff when your project keeps fixtures elsewhere.
 
 React and TypeScript use the project's existing transforms and test configuration. React Native runs JavaScript and component tests through Jest with the project's preset. Native device tests require their own iOS or Android runner. Interaction replay is available for eligible Vitest tests.
 
@@ -123,7 +123,7 @@ The GitHub download cache uses the repository and runner lockfiles. Each check i
 
 ## Runner update for existing deployments
 
-The [reviewed runner revision](../shared/repository/runner-version.ts) includes focused investigations, npm lockfile installs and Vitest interaction replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
+The [reviewed runner revision](../shared/repository/runner-version.ts) includes focused investigations, fresh-checkout Vitest flakiness checks, npm lockfile installs and Vitest interaction replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
 
 An existing deployment can select this immutable revision through its operator-controlled `TRACEYARD_RUNNER_REF` setting. The repository workflow must use the same revision; Traceyard validates the exact generated workflow before dispatch. Application test fixes and runner updates are separate changes. Mock-only tests do not establish observed application activity, and batch exporters may lose the final spans of a worker that is forcibly stopped.
 
