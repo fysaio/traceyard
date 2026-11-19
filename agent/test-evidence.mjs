@@ -1,5 +1,5 @@
 import { readFile, realpath, mkdtemp, rm } from "node:fs/promises";
-import { join, resolve, relative } from "node:path";
+import { join, resolve, relative, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
@@ -62,46 +62,68 @@ export function selectTest(index, question, testPath) {
     candidates: ranked.slice(0, 8).map((x) => x.test.path),
   };
 }
-export async function focusedTestInvocation(workspace, index, plan) {
+export async function prepareTargetedTest(workspace, index, plan) {
   const selection = selectTest(index, plan.question, plan.testPath);
   if (!selection.test)
-    throw Error(
-      selection.reason +
+    return {
+      reason:
+        selection.reason +
         (selection.candidates.length ? " Candidates: " + selection.candidates.join(", ") : ""),
-    );
+    };
   const test = selection.test;
   if (!/^[A-Za-z0-9_./@-]+$/.test(test.path))
-    throw Error("This test path is outside the supported command argument format.");
-  const root = await realpath(workspace),
-    directory = await realpath(resolve(root, test.packageDirectory)),
-    file = await realpath(resolve(root, test.path));
-  if (relative(root, directory).startsWith("..") || relative(directory, file).startsWith(".."))
-    throw Error("The selected test escapes its package workspace.");
-  const pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
-  const candidates = Object.entries(pkg.scripts ?? {}).filter(
-    ([key, value]) =>
-      /^[A-Za-z0-9:_-]+$/.test(key) &&
-      /^(?:vitest\b|node\s+(?:"[^"\r\n]*[/\\]vitest\.mjs"|'[^'\r\n]*[/\\]vitest\.mjs'|\S*[/\\]vitest\.mjs)(?:\s|$))/.test(
-        String(value).trim(),
-      ) &&
-      !/(?:&&|\|\||[;|])/.test(String(value)),
-  );
-  const matching = candidates.filter(
-    ([key]) =>
-      key === "test" || test.path.toLowerCase().includes(key.replace(/^test:/, "").toLowerCase()),
-  );
-  const script =
-    matching.length === 1 ? matching[0][0] : candidates.length === 1 ? candidates[0][0] : null;
-  if (!script)
-    throw Error(
-      'Focused tests require a direct Vitest npm script, such as "test": "vitest run". Add one or choose a supported npm package.',
-    );
-  return { root, directory, file, script, test };
+    return { reason: "This test path is outside the supported command argument format." };
+  const root = await realpath(workspace);
+  const directory = await realpath(resolve(root, test.packageDirectory));
+  const file = await realpath(resolve(root, test.path));
+  const packagePath = relative(root, directory);
+  const filePath = relative(directory, file);
+  if ([packagePath, filePath].some((path) => path.startsWith("..") || isAbsolute(path)))
+    return { reason: "The selected test escapes its package workspace." };
+  let pkg;
+  try {
+    pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
+  } catch {
+    return { reason: "The selected test needs a readable package.json." };
+  }
+
+  const candidates = Object.entries(pkg.scripts ?? {}).flatMap(([name, command]) => {
+    if (!/^[A-Za-z0-9:_-]+$/.test(name) || typeof command !== "string" || /[;&|\r\n]/.test(command))
+      return [];
+    const match = command
+      .trim()
+      .match(
+        /^(?:vitest|jest)(?=\s|$)|^node\s+["']?[^\r\n]*?[\\/](vitest\.mjs|jest\.js)["']?(?=\s|$)/,
+      );
+    if (!match) return [];
+    return [{ name, runner: match[0] === "jest" || match[1] === "jest.js" ? "jest" : "vitest" }];
+  });
+  const matching = candidates.filter(({ name }) => {
+    const kind = name.replace(/^test:/, "").toLowerCase();
+    return name.startsWith("test:") && test.path.toLowerCase().split("/").includes(kind);
+  });
+  const selected =
+    candidates.find(({ name }) => name === "test") ??
+    (matching.length === 1 ? matching[0] : candidates.length === 1 ? candidates[0] : null);
+  if (!selected)
+    return {
+      reason:
+        "Select a test in an npm package with a clear Vitest or Jest script. Use a direct test command rather than a script that chains several checks.",
+    };
+  if (plan.replayRecording && selected.runner !== "vitest")
+    return { reason: "Isolated interaction replay requires Vitest." };
+  return {
+    root,
+    directory,
+    file,
+    runner: selected.runner,
+    command: { directory: test.packageDirectory, script: selected.name, testPath: test.path },
+  };
 }
+
 export async function runTargetedTest(workspace, index, plan, env) {
-  const started = Date.now(),
-    blockOutput = (tail) => sanitizeDiagnostic(tail, 4000);
-  const blocked = (message) => ({
+  const started = Date.now();
+  const blocked = (message, command = { directory: ".", script: "", testPath: null }) => ({
     status: "BLOCKED",
     counts: { passed: 0, failed: 0, skipped: 0 },
     failures: [],
@@ -110,21 +132,14 @@ export async function runTargetedTest(workspace, index, plan, env) {
     durationMs: Date.now() - started,
     exitCode: null,
     nodeVersion: process.version,
-    command: { directory: ".", script: "", testPath: null },
+    command,
   });
-  let invocation;
-  try {
-    invocation = await focusedTestInvocation(workspace, index, plan);
-  } catch (error) {
-    return blocked(error.message);
-  }
-  const { root, directory, file, script, test } = invocation;
-  if (plan.replayRecording)
-    return replayVitest(
-      root,
-      { directory: test.packageDirectory, script, testPath: test.path },
-      plan,
-    );
+  const prepared = await prepareTargetedTest(workspace, index, plan);
+  if (prepared.reason) return blocked(prepared.reason);
+  const { root, directory, file, runner, command } = prepared;
+  if (plan.replayRecording) return replayVitest(root, command, plan);
+  const path = relative(directory, file).split("\\").join("/");
+  const testArgument = path.startsWith("-") ? "./" + path : path;
   const temporary = await mkdtemp(join(tmpdir(), "traceyard-evidence-")),
     output = join(temporary, "report.json");
   let tail = "",
@@ -135,12 +150,12 @@ export async function runTargetedTest(workspace, index, plan, env) {
         process.platform === "win32" ? "npm.cmd" : "npm",
         [
           "run",
-          script,
+          command.script,
           "--",
-          "--run",
-          ...(plan.flakeCandidate ? ["--retry=0"] : []),
-          relative(directory, file).split("\\").join("/"),
-          "--reporter=json",
+          ...(runner === "jest"
+            ? ["--ci", "--watch=false", "--watchAll=false", "--runTestsByPath", "--json"]
+            : ["--run", "--reporter=json", ...(plan.flakeCandidate ? ["--retry=0"] : [])]),
+          testArgument,
           "--outputFile=" + output,
         ],
         {
@@ -181,42 +196,47 @@ export async function runTargetedTest(workspace, index, plan, env) {
       });
     });
     let result;
-    const outputTail = blockOutput(tail.slice(-4000));
+    const retainedOutput = sanitizeDiagnostic(tail.slice(-4000), 4000);
     try {
-      if (timedOut) throw Error("The focused test exceeded its time budget.");
       const text = await readFile(output, "utf8");
       if (Buffer.byteLength(text) > 8_000_000)
         return blocked("The structured reporter exceeded the supported artifact size.");
-      const reporter = JSON.parse(text);
-      const matches =
-        reporter.testResults?.filter((suite) => resolve(directory, suite.name ?? "") === file) ??
-        [];
-      if (matches.length !== 1 || reporter.testResults.length !== 1)
+      if (timedOut)
         return {
-          ...blocked(
-            "Vitest did not run exactly the selected test file. Review the script filters and test path.",
-          ),
-          output: outputTail,
+          ...blocked("The focused test exceeded its time budget.", command),
+          output: retainedOutput,
         };
-      result = normalizeVitestReport(reporter, exitCode, root);
+      const data = JSON.parse(text);
+      if (!Array.isArray(data.testResults) || !data.testResults.length)
+        return {
+          ...blocked("The test runner did not report a result for the selected file.", command),
+          output: retainedOutput,
+        };
+      if (data.testResults.some(({ name }) => relative(file, resolve(directory, String(name)))))
+        return {
+          ...blocked("The test script reported files outside the selected test.", command),
+          output: retainedOutput,
+        };
+      result = normalizeVitestReport(data, exitCode, root);
     } catch {
       return {
         ...blocked(
           timedOut
             ? "The focused test exceeded its time budget."
             : summarizeCommandFailure(tail, "test", exitCode ?? "interrupted"),
+          command,
         ),
-        output: outputTail,
+        output: retainedOutput,
         exitCode,
       };
     }
     return {
       ...result,
-      output: outputTail,
+      output: retainedOutput,
       durationMs: Date.now() - started,
       exitCode,
       nodeVersion: process.version,
-      command: { directory: test.packageDirectory, script, testPath: test.path },
+      command,
     };
   } finally {
     await rm(temporary, { recursive: true, force: true });

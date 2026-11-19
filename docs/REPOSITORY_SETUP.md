@@ -109,13 +109,21 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 - The free GitHub discovery preview reads at most 16 eligible JavaScript/TypeScript files, each at most 16 KB; managed deployments allow up to 60 files of 64 KB. It exposes up to 100 operations and labels coverage limits. A downloaded agent scan can inspect up to 10,000 eligible files, with the same file/operation bounds.
 - Managed queue deadline: 10 minutes. Managed execution deadline: 10 minutes; each application command/request-test process is bounded to 180 seconds. VM entrypoint lifetime is at most 15 minutes if the controller fails.
 - At most 6 accepted checks per project per hour; default global concurrency is 2 (`MANAGED_CHECK_CONCURRENCY_LIMIT`, bounded 1–8). These are capacity limits, not a monthly spending guarantee. Pushes beyond the project allowance still update source discovery.
-- Each check uses a fresh workspace. GitHub settings/request fixtures are frozen at dispatch; code comes from the default-branch commit selected by GitHub when dispatch starts. Managed checks freeze both commit and settings. No persistent service or dependency cache is supplied yet. External services, private registry authentication and application secrets are not inferred or provisioned.
+- Each check uses a fresh workspace. GitHub settings/request fixtures are frozen at dispatch; code comes from the default-branch commit selected by GitHub when dispatch starts. Managed checks freeze both commit and settings. The GitHub runner caches npm package downloads and still runs `npm ci` in each checkout. External services, private registry authentication and application secrets are not inferred or provisioned.
 - Supported Node HTTP activity is recorded automatically during tests. Mocked/in-process tests can pass without recording a trace. Continuous monitoring of an already deployed application requires that application's runtime integration; repository access alone does not instrument production.
 - Visual business-logic editing, automatic fixes/commits and arbitrary workflow replay are not implemented.
 
+### Focused tests
+
+Use a committed `package-lock.json` and a direct script such as `vitest run` or `jest`. When a package has several suites, use an explicit test path and a script named for that suite, such as `test:unit` for files under `tests/unit`. Traceyard retains the test result from the selected commit.
+
+React and TypeScript use the project's existing transforms and test configuration. React Native runs JavaScript and component tests through Jest with the project's preset. Native device tests require their own iOS or Android runner. Interaction replay is available for eligible Vitest tests.
+
+The GitHub download cache uses the repository and runner lockfiles. Each check installs from the selected commit and runs its tests. Traceyard does not restore `node_modules`, build output, or test results across commits. Repositories with an existing build tool cache can use it inside their own build script.
+
 ## Runner update for existing deployments
 
-The reviewed runner revision is `cea08ac268b570dd0724c1d693a79acecd6d84c0`. It contains focused investigations and flakiness attempts, the minimal hosted dependency package, opt-in JSON recording and isolated replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
+The [reviewed runner revision](../shared/repository/runner-version.ts) includes focused investigations, npm lockfile installs and Vitest interaction replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
 
 An existing deployment can select this immutable revision through its operator-controlled `TRACEYARD_RUNNER_REF` setting. The repository workflow must use the same revision; Traceyard validates the exact generated workflow before dispatch. Application test fixes and runner updates are separate changes. Mock-only tests do not establish observed application activity, and batch exporters may lose the final spans of a worker that is forcibly stopped.
 
@@ -137,7 +145,7 @@ TRACEYARD_KEY=<project-scoped API key>
 With Node.js 22.12+ and Git, run this from that repository (no separate Traceyard checkout required):
 
 ```bash
-npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#cea08ac268b570dd0724c1d693a79acecd6d84c0 -- traceyard run .
+npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#6bfde2973ff92f322b6d575e60a3212e2474bbcc -- traceyard run .
 ```
 
 The command installs an immutable reviewed runner revision into npm's cache. In Traceyard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing Traceyard checkout instead:
