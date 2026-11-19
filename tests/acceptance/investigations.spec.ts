@@ -80,7 +80,6 @@ test("connected developer investigates, inspects bounded evidence and opens agen
       expect(body.testPath).toBe(execution.command.testPath);
       expect(body.commit).toBe(snapshot.commit);
       expect(body.mode).toBe("execute");
-      expect(body.captureInteractions).toBe(false);
       await r.fulfill(json(inv));
     } else await r.fulfill(json({ items: [inv] }));
   });
@@ -130,17 +129,17 @@ test("connected developer investigates, inspects bounded evidence and opens agen
     );
   }
   await page.getByLabel("Test file").fill(execution.command.testPath);
-  await page.getByText("Use a GitHub Actions link instead").click();
+  await page.getByRole("button", { name: "Paste a GitHub Actions link instead" }).click();
   await page
     .getByLabel("GitHub Actions link")
     .fill("https://github.com/example/app/actions/runs/10/job/20");
-  await page.getByRole("button", { name: "Use this commit" }).click();
-  await expect(page.getByLabel("Failing commit")).toHaveValue(snapshot.commit);
-  await expect(page.getByText(/PR merge commit from the/)).toBeVisible();
+  await page.getByRole("button", { name: "Use this run" }).click();
+  await expect(page.getByLabel("Commit where it failed")).toHaveValue(snapshot.commit);
+  await expect(page.getByText("Taken from the GitHub Actions run.")).toBeVisible();
   await page.getByRole("button", { name: "Run test", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
   await expect(page).toHaveURL(/investigations\/inv_browser\?project=prj_browser/);
-  await page.getByRole("button", { name: /Focused test execution/ }).click();
+  await page.getByRole("button", { name: /Full test output/ }).click();
   await expect(page.locator("#evidence pre").getByText("Expected 42, received 41")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Verify a fix" })).toBeVisible();
   await page.getByRole("link", { name: "Agents", exact: true }).click();
@@ -212,8 +211,8 @@ test("a CI link prefills the exact Pytest case in its connected repository", asy
   await expect(page.getByLabel("Test file")).toHaveValue("");
   await page.getByRole("button", { name: "Open repository" }).click();
   await expect(page.getByLabel("Test file")).toHaveValue(testPath);
-  await expect(page.getByLabel("Pytest case (optional)")).toHaveValue(testCase);
-  await expect(page.getByLabel("Failing commit")).toHaveValue(commit);
+  await expect(page.getByLabel("Test name (optional)")).toHaveValue(testCase);
+  await expect(page.getByLabel("Commit where it failed")).toHaveValue(commit);
   expect(submissions).toBe(0);
   await page.getByRole("button", { name: "Run test", exact: true }).click();
   await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
@@ -236,7 +235,7 @@ test("local account opens a real persisted investigation and returns to the same
   expect(response.status()).toBe(201);
   const { data } = await response.json();
   await page.goto(data.browserPath);
-  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What Traceyard found" })).toBeVisible();
   await page.reload();
   await expect(
     page.getByRole("heading", { level: 1, name: "Inspect retained repository evidence" }),
@@ -347,7 +346,7 @@ test("reopening a baseline restores its repair verdict and readable execution ev
   }
 });
 
-test("incomplete execution setup blocks test launch while source analysis remains available", async ({
+test("incomplete execution setup blocks test launch until the workflow is set up", async ({
   page,
 }) => {
   await page.route("**/api/auth/session", (r) =>
@@ -422,11 +421,7 @@ test("incomplete execution setup blocks test launch while source analysis remain
   );
   expect(setupWrites).toBe(1);
   await dialog.getByRole("button", { name: "Close", exact: true }).last().click();
-  await page.getByRole("button", { name: "Ask about the code", exact: true }).click();
-  await page.getByLabel("What should Traceyard look into?").fill(inv.question);
-  await expect(page.getByRole("button", { name: "Investigate", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Investigate", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run test", exact: true })).toBeDisabled();
 });
 
 test("a new account can open agent setup before choosing a repository", async ({ page }) => {

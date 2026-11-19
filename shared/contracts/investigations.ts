@@ -82,6 +82,8 @@ export interface Investigation {
     nextAction: string | null;
   };
   evidence: Omit<InvestigationEvidence, "content">[];
+  /** Latest test attempt status. Only present in list responses. */
+  outcome?: string;
   attempts?: {
     id: string;
     requestId: string;
