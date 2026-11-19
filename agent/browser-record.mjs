@@ -121,6 +121,9 @@ export async function startBrowserRecorder(browser, start, { paths, site, inputs
   const pending = new Map();
   const pathsSeen = new Set();
   const exchanges = [];
+  const requestOrder = new WeakMap();
+  const inFlight = new Set();
+  let sequence = 0;
   let usedBytes = 0;
   let finish;
   let cancel;
@@ -172,15 +175,26 @@ export async function startBrowserRecorder(browser, start, { paths, site, inputs
         }
       },
     );
-    context.on("response", (response) => {
-      const request = response.request();
+    context.on("request", (request) => {
       const url = new URL(request.url());
       if (
-        url.origin !== start.origin ||
-        !paths.has(url.pathname) ||
-        !["fetch", "xhr"].includes(request.resourceType())
-      )
-        return;
+        url.origin === start.origin &&
+        paths.has(url.pathname) &&
+        ["fetch", "xhr"].includes(request.resourceType())
+      ) {
+        requestOrder.set(request, sequence++);
+        inFlight.add(request);
+      }
+    });
+    context.on("requestfinished", (request) => inFlight.delete(request));
+    context.on("requestfailed", (request) => {
+      if (inFlight.delete(request)) issues.add("An approved API request failed during recording.");
+    });
+    context.on("response", (response) => {
+      const request = response.request();
+      const order = requestOrder.get(request);
+      if (order === undefined) return;
+      const url = new URL(request.url());
       if (exchanges.length >= 80) {
         issues.add("The journey exceeds 80 recorded responses.");
         return;
@@ -191,7 +205,7 @@ export async function startBrowserRecorder(browser, start, { paths, site, inputs
         url: url.pathname + url.search,
         status: response.status(),
       };
-      exchanges.push(exchange);
+      exchanges.push({ order, exchange });
       const capture = async () => {
         try {
           if (request.postData() !== null) exchange.body = JSON.parse(request.postData());
@@ -220,12 +234,30 @@ export async function startBrowserRecorder(browser, start, { paths, site, inputs
       )
         return;
       if (item.action === "save") {
+        try {
+          const deadline = Date.now() + 2000;
+          while (inFlight.size && Date.now() < deadline)
+            await context.waitForEvent("requestfinished", {
+              predicate: (request) => requestOrder.has(request),
+              timeout: Math.max(1, deadline - Date.now()),
+            });
+        } catch {
+          if (inFlight.size) issues.add("An approved API request did not finish before saving.");
+        }
+        if (inFlight.size) issues.add("An approved API request did not finish before saving.");
+        if (issues.size) return cancel(Error([...issues].join(" ")));
         await Promise.all(pending.values());
         for (const path of paths)
           if (!pathsSeen.has(path)) issues.add("No response captured for " + path + ".");
         if (issues.size) return cancel(Error([...issues].join(" ")));
         const raw = JSON.stringify(
-          { version: 1, site, start: start.pathname + start.search, steps, exchanges },
+          {
+            version: 1,
+            site,
+            start: start.pathname + start.search,
+            steps,
+            exchanges: exchanges.sort((a, b) => a.order - b.order).map(({ exchange }) => exchange),
+          },
           null,
           2,
         );
