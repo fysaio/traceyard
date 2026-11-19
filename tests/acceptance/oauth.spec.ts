@@ -150,7 +150,7 @@ test("MCP connects first and grants project access later in the browser", async 
       expect(frame.done).toBe(false);
       expect(new TextDecoder().decode(frame.value)).toContain(": keep-alive");
     }
-    expect((await sdk.listTools()).tools).toHaveLength(4);
+    expect((await sdk.listTools()).tools).toHaveLength(3);
     expect(gets).toBe(1);
     expect(errors).toEqual([]);
     await sdk.close();
