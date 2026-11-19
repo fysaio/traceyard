@@ -81,7 +81,7 @@ try {
       version: "1.0.0",
       type: "module",
       scripts: {
-        test: "node fake-vitest.mjs",
+        test: "node ./vitest.mjs",
         install: "node -e \"require('fs').writeFileSync('install-hook-ran','unsafe')\"",
       },
     }),
@@ -99,7 +99,7 @@ try {
     }),
   );
   await writeFile(join(root, "replay.test.mjs"), "test('existing assertion',()=>{});");
-  await writeFile(join(root, "fake-vitest.mjs"), "throw Error('Unisolated test was executed');");
+  await writeFile(join(root, "vitest.mjs"), "throw Error('Unisolated test was executed');");
   const result = await new Promise((done, reject) => {
     const child = spawn(process.execPath, [agent, "run", root], {
       env: {
