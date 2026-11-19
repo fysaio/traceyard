@@ -473,6 +473,25 @@ code.sha {
   text-decoration-color: currentColor;
 }
 
+/* An inline action inside hint text: reads like a link, behaves like a button. */
+.text-button {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+  transition: text-decoration-color var(--t-fast) var(--ease);
+}
+
+.text-button:hover {
+  text-decoration-color: currentColor;
+}
+
 .back {
   display: inline-flex;
   align-items: center;
@@ -1431,8 +1450,12 @@ input[type="checkbox"] {
 
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--s-3) var(--s-5);
+}
+
+.facts .wide {
+  grid-column: 1 / -1;
 }
 
 .facts div {

@@ -8,7 +8,7 @@ import { ConnectRepository } from "./repositories";
 import { Empty, ErrorMessage, GitHubMark, Icon, Spinner, type IconName } from "../components/ui";
 
 const NAV: [path: string, label: string, icon: IconName][] = [
-  ["/investigations", "Investigations", "search"],
+  ["/investigations", "Investigations", "bug"],
   ["/repositories", "Repositories", "repository"],
   ["/agents", "Agents", "agent"],
 ];
