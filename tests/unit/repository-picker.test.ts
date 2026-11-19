@@ -19,7 +19,6 @@ function render(overrides: Partial<Parameters<typeof RepositoryPicker>[0]> = {})
       error: null,
       onConnect: () => {},
       onRefresh: () => {},
-      onLocal: () => {},
       ...overrides,
     }),
   );
@@ -27,7 +26,7 @@ function render(overrides: Partial<Parameters<typeof RepositoryPicker>[0]> = {})
 describe("repository connection states", () => {
   it("offers installation only when no installation has been received", () => {
     const html = render();
-    expect(html).toContain("Install Traceyard");
+    expect(html).toContain("Install on GitHub");
     expect(html).toContain(data.installUrl);
     expect(html).not.toContain("Manage access");
   });
@@ -41,20 +40,19 @@ describe("repository connection states", () => {
       },
     });
     expect(html).toContain("fysaio/somni");
-    expect(html).toContain('aria-label="Find a repository"');
     expect(html).toContain("https://github.com/settings/installations/7");
     expect(html).not.toContain(data.installUrl);
-    expect(html).not.toContain("Install Traceyard");
+    expect(html).not.toContain("Install on GitHub");
   });
   it("distinguishes an installed app with no shared repos from a missing installation", () => {
     const html = render({ data: { ...data, installationCount: 1 } });
-    expect(html).toContain("No repos shared yet");
-    expect(html).not.toContain("Install Traceyard");
+    expect(html).toContain("No repositories shared yet");
+    expect(html).not.toContain("Install on GitHub");
   });
   it("retains installation state when receiving a response from an older server", () => {
     expect(
       render({ data: { ...data, items: [{ id: 99, installationId: 7, name: "fysaio/somni" }] } }),
-    ).not.toContain("Install Traceyard");
+    ).not.toContain("Install on GitHub");
   });
   it("shows only the selected repository as connecting", () => {
     const html = render({
@@ -76,12 +74,11 @@ describe("repository connection states", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain("Try again");
     expect(html).not.toContain("needs server setup");
-    expect(html).not.toContain("Install Traceyard");
+    expect(html).not.toContain("Install on GitHub");
   });
-  it("keeps loading and local setup accessible without flashing an install action", () => {
+  it("keeps loading accessible without flashing an install action", () => {
     const html = render({ data: undefined, loading: true, refreshing: true });
     expect(html).toContain('role="status"');
-    expect(html).toContain("Connect a local project instead");
-    expect(html).not.toContain("Install Traceyard");
+    expect(html).not.toContain("Install on GitHub");
   });
 });
