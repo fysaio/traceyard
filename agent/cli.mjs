@@ -10,7 +10,12 @@ import { discoverFile } from "./discovery.mjs";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
 import { buildRecording } from "./recording.mjs";
 import { indexRepository } from "./repository-index.mjs";
-import { runInvestigationPlan, sanitizeDiagnostic } from "./test-evidence.mjs";
+import {
+  focusedTestInvocation,
+  runInvestigationPlan,
+  runTargetedTest,
+  sanitizeDiagnostic,
+} from "./test-evidence.mjs";
 import { createHash } from "node:crypto";
 
 export async function scanDirectory(root) {
@@ -61,7 +66,7 @@ export async function scanDirectory(root) {
   if (operations.length > 100) warnings.push("Dashboard discovery is limited to 100 operations.");
   return { operations: operations.slice(0, 100), filesScanned, warnings: warnings.slice(0, 20) };
 }
-function execute(program, args, options, phase) {
+function execute(program, args, options, phase, timeoutMs = 180000) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(program, args, {
       ...options,
@@ -85,8 +90,16 @@ function execute(program, args, options, phase) {
       } catch {
         /* Already exited. */
       }
-      reject(new Error(summarizeCommandFailure(output, phase, "180 second time limit")));
-    }, 180000);
+      reject(
+        new Error(
+          summarizeCommandFailure(
+            output,
+            phase,
+            `${Math.floor(timeoutMs / 1000)} second time limit`,
+          ),
+        ),
+      );
+    }, timeoutMs);
     child.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
@@ -105,6 +118,124 @@ function execute(program, args, options, phase) {
       else reject(new Error(summarizeCommandFailure(output, phase, signal ?? code)));
     });
   });
+}
+async function npmInstallRoot(workspaceRoot, packageRoot) {
+  try {
+    await lstat(join(packageRoot, "package-lock.json"));
+    return packageRoot;
+  } catch {
+    try {
+      const lock = JSON.parse(await readFile(join(workspaceRoot, "package-lock.json"), "utf8"));
+      const workspace = relative(workspaceRoot, packageRoot).split("\\").join("/");
+      if (workspace && lock.packages?.[workspace]) return workspaceRoot;
+    } catch {
+      // The package has no usable npm lockfile.
+    }
+    throw Error(
+      "Focused tests require a package-lock.json in the test package or its npm workspace root.",
+    );
+  }
+}
+function ensureRevision(root, commit, token) {
+  const options = { cwd: root, stdio: "ignore" };
+  try {
+    execFileSync("git", ["cat-file", "-e", commit + "^{commit}"], options);
+  } catch {
+    const env = { ...process.env };
+    if (token) {
+      env.GIT_CONFIG_COUNT = "1";
+      env.GIT_CONFIG_KEY_0 = "http.https://github.com/.extraheader";
+      env.GIT_CONFIG_VALUE_0 =
+        "AUTHORIZATION: basic " + Buffer.from("x-access-token:" + token).toString("base64");
+    }
+    try {
+      execFileSync("git", ["fetch", "--no-tags", "origin", commit], {
+        ...options,
+        env,
+        timeout: 15000,
+      });
+    } catch {
+      throw Error(
+        "GitHub could not fetch the selected commit. Confirm it is accessible in the connected repository.",
+      );
+    }
+  }
+}
+export async function runFlakiness(root, plan, env, checkoutToken) {
+  const started = Date.now(),
+    budget = 7 * 60000;
+  const temporary = await mkdtemp(join(tmpdir(), "traceyard-flakiness-"));
+  const flakeRuns = [];
+  const git = (args) => execFileSync("git", args, { cwd: root, stdio: "ignore", timeout: 15000 });
+  try {
+    for (const [side, commit] of [plan.commit, plan.flakeCandidate].entries()) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const attemptStarted = Date.now();
+        const checkout = join(temporary, `${side}-${attempt}`);
+        let added = false;
+        let status, message;
+        try {
+          if (budget - (Date.now() - started) < 1000)
+            throw Error("The flakiness check reached its run budget before this attempt.");
+          ensureRevision(root, commit, checkoutToken);
+          git(["worktree", "add", "--detach", checkout, commit]);
+          added = true;
+          const index = await indexRepository(checkout);
+          const { directory } = await focusedTestInvocation(checkout, index, plan);
+          const installRoot = await npmInstallRoot(checkout, directory);
+          const remaining = () => Math.max(1000, budget - (Date.now() - started));
+          await execute(
+            process.platform === "win32" ? "npm.cmd" : "npm",
+            ["ci"],
+            { cwd: installRoot, env },
+            "install",
+            Math.min(45000, remaining()),
+          );
+          const result = await runTargetedTest(
+            checkout,
+            index,
+            { ...plan, timeoutMs: Math.min(45000, remaining()) },
+            env,
+          );
+          status = result.status === "FAILED" && !result.counts.failed ? "BLOCKED" : result.status;
+          message = [result.message, result.failures[0]?.name, result.failures[0]?.message]
+            .filter(Boolean)
+            .join("\n");
+        } catch (error) {
+          status = "BLOCKED";
+          message = error.message;
+        } finally {
+          if (added) await rm(checkout, { recursive: true, force: true });
+        }
+        flakeRuns.push({
+          commit,
+          attempt,
+          status,
+          message: sanitizeDiagnostic(message, 1400),
+          durationMs: Math.min(120000, Date.now() - attemptStarted),
+        });
+      }
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+    git(["worktree", "prune"]);
+  }
+  return {
+    status: "SUCCEEDED",
+    command: { directory: ".", script: "", testPath: plan.testPath },
+    counts: {
+      passed: flakeRuns.filter((run) => run.status === "SUCCEEDED").length,
+      failed: flakeRuns.filter((run) => run.status === "FAILED").length,
+      skipped: flakeRuns.filter((run) => run.status === "BLOCKED").length,
+    },
+    failures: [],
+    message: "Flakiness check finished. Open the individual attempts for the observed results.",
+    durationMs: Date.now() - started,
+    exitCode: 0,
+    truncated: false,
+    nodeVersion: process.version,
+    flakeRuns,
+  };
 }
 export async function main(args = process.argv.slice(2)) {
   const [command = "help", directory = "."] = args;
@@ -137,6 +268,8 @@ export async function main(args = process.argv.slice(2)) {
     throw Error("Use an HTTPS server origin, or localhost for local development.");
   const origin = url.origin,
     isActions = process.env.GITHUB_ACTIONS === "true";
+  const checkoutToken = isActions ? process.env.TRACEYARD_GITHUB_FETCH_TOKEN : undefined;
+  delete process.env.TRACEYARD_GITHUB_FETCH_TOKEN;
   const managedId = process.env.TRACEYARD_MANAGED_RUN_ID;
   if (
     managedId &&
@@ -238,7 +371,7 @@ export async function main(args = process.argv.slice(2)) {
     {
       headers: {
         Authorization: "Bearer " + (await credential()),
-        "X-Traceyard-Runner-Protocol": "2",
+        "X-Traceyard-Runner-Protocol": "3",
       },
       signal: AbortSignal.timeout(15000),
     },
@@ -255,16 +388,35 @@ export async function main(args = process.argv.slice(2)) {
   let repositoryIndex;
   try {
     const desired = manifest.investigation?.commit;
+    if (manifest.investigation?.flakeCandidate) {
+      if (!isActions || !desired || !manifest.investigation.testPath)
+        throw Error(
+          "Flakiness checks require the hosted GitHub runner and two selected revisions.",
+        );
+      const env = { ...process.env, CI: "true" };
+      for (const name of [
+        "TRACEYARD_KEY",
+        "TRACEYARD_RUN_TOKEN",
+        "NODE_OPTIONS",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_URL",
+      ])
+        delete env[name];
+      const result = await runFlakiness(workspaceRoot, manifest.investigation, env, checkoutToken);
+      await send(
+        "investigations/" + encodeURIComponent(manifest.investigation.investigationId) + "/report",
+        { ...result, requestId: manifest.investigation.requestId, runId: id, commit: desired },
+      );
+      await report("complete", "SUCCEEDED", "Flakiness attempts retained.");
+      return;
+    }
     if (desired && desired !== sha) {
       if (!/^[a-f0-9]{40}$/.test(desired)) throw Error("Invalid candidate revision.");
       if (!isActions && !managedId)
         throw Error(
           "Use an isolated checkout at the requested candidate revision; Traceyard will not change your working checkout.",
         );
-      execFileSync("git", ["cat-file", "-e", desired + "^{commit}"], {
-        cwd: workspaceRoot,
-        stdio: "ignore",
-      });
+      ensureRevision(workspaceRoot, desired, checkoutToken);
       execFileSync("git", ["checkout", "--detach", desired], {
         cwd: workspaceRoot,
         stdio: "ignore",
@@ -338,8 +490,17 @@ export async function main(args = process.argv.slice(2)) {
     }
     let pkg;
     try {
+      if (manifest.investigation) {
+        const invocation = await focusedTestInvocation(
+          workspaceRoot,
+          repositoryIndex ?? (await indexRepository(workspaceRoot)),
+          manifest.investigation,
+        );
+        root = invocation.directory;
+      }
       pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    } catch {
+    } catch (error) {
+      if (manifest.investigation) throw error;
       await report(
         "complete",
         "SKIPPED",
@@ -350,6 +511,7 @@ export async function main(args = process.argv.slice(2)) {
     }
     if (
       !manifest.cases.length &&
+      !manifest.investigation &&
       !pkg.scripts?.build &&
       (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
     ) {
@@ -368,26 +530,18 @@ export async function main(args = process.argv.slice(2)) {
     delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     await report("install", "RUNNING", "Installing project dependencies.");
-    let installRoot = root;
+    let installRoot;
     try {
-      await lstat(join(installRoot, "package-lock.json"));
-    } catch {
-      // npm workspaces install from their shared lockfile, while application
-      // commands still run in the selected directory.
-      try {
-        const lock = JSON.parse(await readFile(join(workspaceRoot, "package-lock.json"), "utf8"));
-        const workspace = relative(workspaceRoot, root).split("\\").join("/");
-        if (!workspace || !lock.packages?.[workspace]) throw Error("Not an npm workspace");
-        installRoot = workspaceRoot;
-      } catch {
-        await report(
-          "complete",
-          "SKIPPED",
-          "A package-lock.json is required in this application or its npm workspace root.",
-        );
-        completed = true;
-        return;
-      }
+      installRoot = await npmInstallRoot(workspaceRoot, root);
+    } catch (error) {
+      if (manifest.investigation) throw error;
+      await report(
+        "complete",
+        "SKIPPED",
+        "A package-lock.json is required in this application or its npm workspace root.",
+      );
+      completed = true;
+      return;
     }
     const replaying = Boolean(manifest.investigation?.replayRecording);
     const installEnv = replaying
