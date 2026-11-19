@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "site": "dist/client",
+  "start": "/?signIn=retry",
+  "exchanges": [
+    {
+      "method": "GET",
+      "url": "/api/auth/session",
+      "status": 200,
+      "response": {
+        "data": {
+          "user": null,
+          "sessions": [],
+          "githubSignInAvailable": true
+        }
+      }
+    }
+  ],
+  "steps": [
+    {
+      "action": "expectText",
+      "selector": "[role=\"alert\"]",
+      "text": "That sign-in link expired or could not be verified. Continue with GitHub to try again."
+    }
+  ]
+}

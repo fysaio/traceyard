@@ -1,0 +1,104 @@
+name: Traceyard browser replay
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: traceyard-browser-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: Build ${{ matrix.revision }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ matrix.revision == 'baseline' && github.event.pull_request.base.sha || github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: traceyard-build-${{ matrix.revision }}
+          path: dist/client/
+          if-no-files-found: error
+          retention-days: 1
+  replay:
+    name: Traceyard browser comparison
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reviewed journey
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: reviewed
+          sparse-checkout: |
+            .traceyard/browser/
+            .traceyard/browser-journey.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Locate journey on base revision
+        id: journey
+        run: |
+          shopt -s nullglob
+          journeys=(reviewed/.traceyard/browser/*.json)
+          if test -f reviewed/.traceyard/browser-journey.json || (( ${#journeys[@]} > 0 )); then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Merge the reviewed journey to enable comparison on later pull requests." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Checkout Traceyard
+        if: steps.journey.outputs.ready == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: fysaio/traceyard
+          ref: 5d7e5ced7a86454d5fd40abb769974df0a48c533
+          path: replay-engine
+          persist-credentials: false
+      - name: Download browser builds
+        if: steps.journey.outputs.ready == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: traceyard-build-*
+          path: builds
+      - name: Prepare browser runner
+        if: steps.journey.outputs.ready == 'true'
+        run: docker build -f replay-engine/runner/browser.Dockerfile -t traceyard-browser replay-engine
+      - name: Compare with network disabled
+        if: steps.journey.outputs.ready == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p evidence
+          touch evidence/summary.md
+          set +e
+          bash replay-engine/runner/browser-check.sh \
+            "$PWD/reviewed/.traceyard" \
+            "$BASE_SHA" "$HEAD_SHA" \
+            "$PWD/builds/traceyard-build-baseline" \
+            "$PWD/builds/traceyard-build-candidate" \
+            "$PWD/evidence"
+          result=$?
+          set -e
+          cat evidence/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$result"
+      - name: Retain browser comparison
+        if: always() && steps.journey.outputs.ready == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: traceyard-browser-evidence
+          path: evidence/
+          if-no-files-found: ignore
+          retention-days: 7
