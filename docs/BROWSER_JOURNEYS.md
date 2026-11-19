@@ -1,52 +1,61 @@
-# Compare a browser journey across commits
+# Browser replay
 
-Use Traceyard to check whether a browser flow that failed on one commit passes on another. The same actions, assertions, and reviewed API fixtures run against both commits in fresh Chromium sessions.
+Record a user journey once, then use it to compare your app's previous and proposed builds on a pull request. Traceyard reuses the reviewed actions, assertions, and API responses. The report shows the exact commits, what passed or failed, and what changed on screen.
 
-## Set up a journey
+## Record a journey
 
-1. In the Traceyard checkout, run `npm ci` and `npx playwright install chromium`.
-2. In your app repository, commit a directory of static browser files at both revisions. Fetch both full commit SHAs.
-3. Describe one flow using the app's `data-testid` attributes. List the same-origin GET responses you want to replay, with `null` as the placeholder for each.
-
-```json
-{
-  "version": 1,
-  "site": "site",
-  "start": "/",
-  "responses": { "/api/cart": null },
-  "steps": [
-    { "action": "click", "testId": "show-total" },
-    { "action": "expectText", "testId": "total", "text": "$42.00" }
-  ]
-}
-```
-
-Save this as `journey-draft.json`. You can also add `fill` steps with a `testId` and `value`.
-
-## Record once and compare
-
-Run the flow on a local or test environment using a Playwright browser context with [HAR recording](https://playwright.dev/docs/api/class-browser#browser-new-context-option-record-har). Use embedded response bodies and close the context to flush the recording. Keep the HAR local, and review the extracted JSON before sharing it. The importer reads only the listed HTTP 200 JSON responses from the supplied origin. It excludes request headers and cookies. You can supply reviewed response bodies directly as well.
-
-Run these commands from the app repository. Replace the example recording origin and use full SHAs for both commits.
+Install Traceyard from a checkout of this repository with Node 22, then install Chromium once.
 
 ```sh
 TRACEYARD=/path/to/traceyard
-node "$TRACEYARD/agent/cli.mjs" browser-fixtures journey-draft.json journey.har http://localhost:4173 > journey.json
-node "$TRACEYARD/agent/cli.mjs" compare-browser journey.json "$BASE_SHA" "$HEAD_SHA" > browser-result.json
+cd "$TRACEYARD"
+npm ci
+npx playwright install --with-deps chromium
 ```
 
-For pull requests, take the journey from a reviewed revision and use that copy for both runs. On GitHub Actions, the comparison writes a job summary automatically. Retain the JSON as a job artifact if reviewers need the assertion diagnostic or the list of missing requests.
+Start your app locally with test data. From the app repository, run the recorder and name any JSON API endpoint the journey uses.
 
-| Result          | Meaning                                                     | Exit |
-| --------------- | ----------------------------------------------------------- | ---- |
-| `FIXED`         | The original assertion failed and now passes.               | 0    |
-| `PASSED`        | Both revisions passed the journey.                          | 0    |
-| `REGRESSION`    | The candidate failed an assertion that the baseline passed. | 1    |
-| `STILL_FAILING` | Both revisions failed an assertion.                         | 1    |
-| `INCONCLUSIVE`  | A required action or response was unavailable.              | 2    |
+```sh
+node "$TRACEYARD/agent/cli.mjs" record-browser \
+  http://localhost:4173/checkout .traceyard/browser/checkout.json \
+  --capture /api/cart
+```
 
-Setup errors exit with a diagnostic. A successful verdict applies to the supplied journey, and the report includes the exact commit and journey hashes.
+Chromium opens with a recorder in the bottom right. Use the app as usual. Select **Assert text**, then click the text the app should show. Use **Assert URL** to check navigation. Select **Save journey** when you're done. For a repair, record the expected behavior on a working build.
 
-## Where to use it
+The recorder saves clicks and assertions. To record ordinary text inputs containing test data, add --inputs. Passwords and other sensitive input types are excluded. Add --capture once per approved API pathname. Only those JSON requests and responses are saved, with request bodies, response statuses and query strings used for matching. Use disposable test data and review the saved file before committing it. Session headers and cookies stay out of the file. The recorder stops when it cannot capture a required interaction.
 
-This version is for trusted test apps with committed static builds. It uses Playwright request interception, blocks service workers and WebSockets, and serves query-free same-origin GET JSON fixtures. It runs without a Traceyard account or a hosted runner. For untrusted commits, use an independently isolated runner with network egress disabled. Interactive recording, external services, writes, and visual diffs are outside this version.
+## Add the pull request check
+
+For an npm app with a lockfile and an npm run build script, pass the directory that contains the built index.html. Use the Traceyard checkout at a published commit so CI can fetch the same runner.
+
+```sh
+node "$TRACEYARD/agent/cli.mjs" setup-browser dist
+```
+
+Review and merge the generated workflow together with the journey. Later pull requests build both revisions independently and replay the journeys reviewed on the base branch. To add more coverage, record another JSON file in .traceyard/browser/ and merge it. The check supports up to 20 journeys per repository.
+
+The replay container runs without network access. Missing or unused API fixtures give an inconclusive result. The job summary reports each verdict. Download traceyard-browser-evidence from the run for the JSON results, side-by-side screenshots, and a pixel diff. Pixel changes are evidence for review. Text and URL assertions determine the verdict.
+
+| Verdict       | Meaning                                                               |
+| ------------- | --------------------------------------------------------------------- |
+| FIXED         | The same assertion failed on the base and passed on the candidate.    |
+| PASSED        | Both revisions passed.                                                |
+| REGRESSION    | An assertion passed on the base and failed on the candidate.          |
+| STILL_FAILING | Both revisions failed an assertion.                                   |
+| INCONCLUSIVE  | A required action, asset, or recorded response could not be replayed. |
+
+## Run locally against existing builds
+
+Run from the app repository with your base and candidate builds already produced. The example compares two directories and writes screenshots and a diff to browser-evidence.
+
+```sh
+node "$TRACEYARD/agent/cli.mjs" compare-browser \
+  .traceyard/browser/checkout.json "$BASE_SHA" "$HEAD_SHA" \
+  --baseline-build /path/to/base/dist --candidate-build /path/to/head/dist \
+  --evidence browser-evidence > browser-result.json
+```
+
+Browser interception is available locally for trusted builds. Use the generated GitHub workflow to replay untrusted build artifacts with network egress disabled. The runner supports static browser builds such as Vite or static exports, same-origin JSON APIs, and click, text, and URL assertions in Chromium. Keep production data, browser extensions, WebSockets, service workers, and live third-party endpoints out of recorded journeys.
+
+If you already capture HTTP Archives, the browser-fixtures command can import a reviewed set of same-origin GET JSON responses into a journey. For repositories that commit static browser assets, compare-browser can read the assets from Git when both build directory options are omitted.
