@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { InvestigationReport } from "./investigation-execution";
 export const verificationRequestSchema = z
   .object({
     commit: z.string().regex(/^[a-f0-9]{40}$/),
@@ -8,12 +9,23 @@ export const verificationRequestSchema = z
       .optional(),
   })
   .strict();
+export interface VerificationRun {
+  commit: string;
+  testPath: string;
+  status: InvestigationReport["status"];
+  evidenceId: string | null;
+  failure: InvestigationReport["failures"][number] | null;
+}
+
 export interface Verification {
   id: string;
   baselineId: string;
   candidateId: string;
   candidateCommit: string;
   verdict: "PENDING" | "PASSED" | "FAILED" | "BLOCKED" | "REVIEW_TEST_CHANGES" | "INCONCLUSIVE";
+  label: "Running" | "Confirmed" | "Passed with test changes" | "Still failing" | "Inconclusive";
+  baselineRun: VerificationRun | null;
+  candidateRun: VerificationRun | null;
   changedTests: string[];
   limitations: string[];
   summary: string;

@@ -435,6 +435,11 @@ export function ProjectPage() {
         }
       />
       <ErrorMessage error={run.error} />
+      {run.error instanceof ApiClientError && run.error.code === "CI_SETUP_REQUIRED" && (
+        <button className="btn" onClick={() => setEnableChecks(true)}>
+          Review workflow change
+        </button>
+      )}
       <SetupProgress catalog={d} refresh={() => void q.refetch()} />
       {d.executionProvider === "github" && !d.repository?.runner_enabled && (
         <p className="flow-notice">
@@ -872,7 +877,8 @@ export function OperationPage() {
           </p>
         </section>
       )}
-      <section className="flow-section">
+      <details className="flow-section disclosure">
+        <summary>Tools · Saved HTTP request tests</summary>
         <div className="flow-section-heading">
           <div>
             <h2>Saved tests</h2>
@@ -956,7 +962,7 @@ export function OperationPage() {
             ))}
           </div>
         )}
-      </section>
+      </details>
       <RunList projectId={projectId} runs={d.runs} title="Run history" />
       {newTest && (
         <CreateRequestTest
@@ -1009,139 +1015,112 @@ export function OperationPage() {
     </div>
   );
 }
-interface CISetupResult {
-  state: "READY" | "PREPARING" | "AWAITING_MERGE" | "MERGING" | "BLOCKED" | "SETUP_REQUIRED";
-  prNumber?: number;
-  headSha?: string;
+export interface CISetupResult {
+  state: "READY" | "PREPARING" | "AWAITING_MERGE" | "SETUP_REQUIRED";
+  prUrl?: string;
+  previewKey?: string;
+  defaultBranch?: string;
   workflow?: string;
-  message?: string;
+  previousWorkflow?: string | null;
 }
 export function EnableGitHubChecks({
-  enableOnly = false,
   projectId,
   close,
   onReady,
 }: {
-  enableOnly?: boolean;
   projectId: string;
   close: () => void;
   onReady: () => void;
 }) {
-  const prepared = useRef(false),
-    finished = useRef(false),
-    cache = useQueryClient();
+  const finished = useRef(false);
+  const cache = useQueryClient();
+  const queryKey = ["ci-setup", projectId];
   const setup = useQuery({
-    queryKey: ["ci-setup", projectId],
-    queryFn: async () => {
-      const result = await integrationRequest<CISetupResult>(
-        projectId,
-        "repository/setup",
-        prepared.current ? "GET" : "POST",
-      );
-      prepared.current = true;
-      return result;
-    },
+    queryKey,
+    queryFn: () => integrationRequest<CISetupResult>(projectId, "repository/setup"),
     refetchOnMount: "always",
-    refetchOnWindowFocus: false,
     retry: false,
     refetchInterval: (q) =>
-      ["PREPARING", "MERGING"].includes(q.state.data?.state ?? "") ? 10000 : false,
+      ["PREPARING", "AWAITING_MERGE"].includes(q.state.data?.state ?? "") ? 10000 : false,
   });
-  const approve = useMutation({
-    mutationFn: () =>
-      integrationRequest<CISetupResult>(projectId, "repository/enable", "POST", {
-        prNumber: setup.data?.prNumber,
-        headSha: setup.data?.headSha,
-      }),
+  const create = useMutation({
+    mutationFn: (previewKey: string) =>
+      integrationRequest<CISetupResult>(projectId, "repository/setup", "POST", { previewKey }),
     onSuccess: (result) => {
-      cache.setQueryData(["ci-setup", projectId], { ...setup.data, ...result });
-      void setup.refetch();
+      cache.setQueryData(queryKey, result);
+      if (result.state === "PREPARING") void setup.refetch();
     },
   });
+  const ready = setup.data?.state === "READY";
   useEffect(() => {
-    if (
-      prepared.current &&
-      !setup.isFetching &&
-      !setup.error &&
-      setup.data?.state === "READY" &&
-      !finished.current
-    ) {
+    if (ready && !setup.isFetching && !setup.error && !finished.current) {
       finished.current = true;
       onReady();
     }
-  }, [setup.data, setup.isFetching, setup.error, onReady]);
-  const busy =
-    setup.isPending || ["PREPARING", "MERGING", "READY"].includes(setup.data?.state ?? "");
+  }, [ready, setup.isFetching, setup.error, onReady]);
+
+  const preview = setup.data?.state === "SETUP_REQUIRED" ? setup.data : null;
+  const prUrl = setup.data?.state === "AWAITING_MERGE" ? setup.data.prUrl : undefined;
   return (
-    <Modal title="Enable GitHub checks" close={close}>
+    <Modal title="Review GitHub workflow setup" close={close}>
       <div className="flow-local-check">
-        <p>Traceyard runs your project on GitHub and brings the results back here.</p>
-        {busy ? (
-          <p role="status">
-            <Icon name="circle-notch" />{" "}
-            {setup.data?.state === "MERGING"
-              ? "GitHub is processing the setup merge. Required checks and repository rules still apply."
-              : setup.data?.state === "READY"
-                ? "Execution is ready…"
-                : "Preparing your setup change…"}
-          </p>
-        ) : (
+        {setup.isPending && <p role="status">Loading the workflow preview…</p>}
+        {setup.data?.state === "PREPARING" && (
+          <p role="status">Preparing the setup pull request…</p>
+        )}
+        {ready && <p role="status">The workflow is ready.</p>}
+        {preview && (
           <>
-            <div>
-              <h3>One workflow file</h3>
-              <p>
-                Enable checks adds or updates <code>.github/workflows/traceyard.yml</code>.
-                Traceyard handles the pull request and merge here when you approve.
-              </p>
-            </div>
             <p>
-              The runner connects automatically and uses your GitHub Actions allowance. Each check
-              has a 10-minute limit.
+              Review the exact change to <code>.github/workflows/traceyard.yml</code>. Traceyard
+              creates the pull request after you approve. Merge it into{" "}
+              <code>{preview.defaultBranch}</code> on GitHub to enable hosted tests.
             </p>
-            {setup.data?.workflow && (
+            {preview.previousWorkflow != null && (
               <details>
-                <summary>Review the workflow</summary>
-                <pre className="code">{setup.data.workflow}</pre>
+                <summary>Current workflow on {preview.defaultBranch}</summary>
+                <pre className="code">{preview.previousWorkflow}</pre>
               </details>
             )}
-            {setup.data?.state === "BLOCKED" && (
-              <p className="flow-notice" role="status">
-                {setup.data.message ??
-                  "GitHub requires reviews, checks or additional permissions before merging this setup."}
-              </p>
-            )}
+            <h3>Proposed workflow</h3>
+            <pre className="code">{preview.workflow}</pre>
           </>
         )}
-        <ErrorMessage error={setup.error || approve.error} />
+        {prUrl && (
+          <p role="status">
+            The setup pull request is open. Review and merge it on GitHub, then return here. If your
+            repository requires additional approval, ask a maintainer to review it.
+          </p>
+        )}
+        <ErrorMessage error={setup.error || create.error} />
         <div className="dialog-actions">
           <button className="btn" onClick={close}>
-            {busy ? "Close" : "Cancel"}
+            Close
           </button>
-          {setup.data?.headSha && !busy && (
-            <button
-              className="btn primary"
-              disabled={approve.isPending}
-              onClick={() => approve.mutate()}
-            >
-              {approve.isPending
-                ? "Requesting merge…"
-                : setup.data.state === "BLOCKED"
-                  ? "Retry merge"
-                  : enableOnly
-                    ? "Enable test execution"
-                    : "Enable and run"}
-            </button>
+          {prUrl && (
+            <a className="btn primary" href={prUrl} target="_blank" rel="noreferrer">
+              Open setup PR on GitHub
+            </a>
           )}
-          {(setup.error || setup.data?.state === "SETUP_REQUIRED") && (
+          {(setup.error || create.error || prUrl) && (
             <button
               className="btn"
-              disabled={setup.isFetching}
+              disabled={setup.isFetching || create.isPending}
               onClick={() => {
-                prepared.current = false;
+                create.reset();
                 void setup.refetch();
               }}
             >
-              Prepare again
+              {prUrl ? "Check merge status" : "Refresh workflow preview"}
+            </button>
+          )}
+          {preview?.previewKey && (
+            <button
+              className="btn primary"
+              disabled={setup.isFetching || create.isPending || !!create.error}
+              onClick={() => create.mutate(preview.previewKey!)}
+            >
+              {create.isPending ? "Creating pull request…" : "Create setup PR"}
             </button>
           )}
         </div>

@@ -7,7 +7,6 @@ import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persi
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import {
   prepareGitHubChecks,
-  approveGitHubChecks,
   dispatchGitHubChecks,
   bindGitHubDispatch,
   syncGitHubDispatches,
@@ -67,7 +66,8 @@ async function fixture() {
     pr: false,
     merged: false,
     closed: false,
-    blocked: false,
+    baseSha: "a".repeat(40),
+    previousWorkflow: null as string | null,
     head: "b".repeat(40),
     extraFile: false,
     tamper: false,
@@ -101,11 +101,14 @@ async function fixture() {
         remote.file = true;
         return Response.json({ commit: { sha: remote.head } });
       }
-      if (
-        (u.searchParams.get("ref") === "main" && !remote.merged) ||
-        (u.searchParams.get("ref") !== "main" && !remote.file)
-      )
-        return new Response(null, { status: 404 });
+      const ref = u.searchParams.get("ref");
+      if (ref === "main" || ref === remote.baseSha) {
+        const content = remote.merged ? workflow : remote.previousWorkflow;
+        return content === null
+          ? new Response(null, { status: 404 })
+          : Response.json({ content: btoa(content), sha: "c".repeat(40) });
+      }
+      if (!remote.file) return new Response(null, { status: 404 });
       return Response.json({
         content: btoa(workflow + (remote.tamper ? "# changed" : "")),
         sha: "c".repeat(40),
@@ -115,7 +118,16 @@ async function fixture() {
       return remote.exists
         ? Response.json({ object: { sha: remote.head } })
         : new Response(null, { status: 404 });
-    if (u.pathname.endsWith("/commits/main")) return Response.json({ sha: "a".repeat(40) });
+    if (u.pathname.endsWith("/commits/main")) return Response.json({ sha: remote.baseSha });
+    if (u.pathname.includes("/compare/"))
+      return Response.json({
+        files: [
+          {
+            filename: remote.extraFile ? "unrelated.ts" : ".github/workflows/traceyard.yml",
+            status: "added",
+          },
+        ],
+      });
     if (u.pathname.endsWith("/git/refs")) {
       remote.exists = true;
       remote.branch = String(body.ref).replace("refs/heads/", "");
@@ -123,13 +135,6 @@ async function fixture() {
     }
     if (u.pathname.endsWith("/pulls/4/files"))
       return Response.json([{ filename: ".github/workflows/traceyard.yml", status: "added" }]);
-    if (u.pathname.endsWith("/pulls/4/merge-async/merge-id"))
-      return Response.json({
-        status: remote.blocked ? "failed" : "pending",
-        details: { message: "Required review missing." },
-      });
-    if (u.pathname.endsWith("/pulls/4/merge-async"))
-      return Response.json({ status: "pending", details: { uuid: "merge-id" } }, { status: 202 });
     if (u.pathname.endsWith("/pulls/4")) return Response.json(pull());
     if (u.pathname.endsWith("/pulls")) {
       if (method === "POST") {
@@ -164,22 +169,14 @@ async function fixture() {
     );
   const prepare = async () => {
     const setup = await prepareGitHubChecks(configured, project, fetcher);
-    if (!("prNumber" in setup) || !setup.prNumber || !("headSha" in setup) || !setup.headSha)
-      throw Error("Expected workflow preview in fixture");
-    return { ...setup, prNumber: setup.prNumber, headSha: setup.headSha };
+    return setup.state === "SETUP_REQUIRED"
+      ? prepareGitHubChecks(configured, project, fetcher, setup.previewKey)
+      : setup;
   };
-  const approve = (s: { prNumber?: number; headSha?: string }) =>
-    approveGitHubChecks(
-      configured,
-      project,
-      { prNumber: s.prNumber!, headSha: s.headSha! },
-      fetcher,
-    );
   const enable = async () => {
-    const s = await prepare();
-    await approve(s);
+    await prepare();
     remote.merged = true;
-    await prepareGitHubChecks(configured, project, fetcher, false);
+    await prepareGitHubChecks(configured, project, fetcher);
   };
   const run = (id: string) => dispatchGitHubChecks(configured, project, id, fetcher);
   const manifest = async (requestId: string, runId = "1234") => {
@@ -226,28 +223,32 @@ async function fixture() {
     fetcher,
     call,
     prepare,
-    approve,
     enable,
     run,
     manifest,
   };
 }
 
-describe("GitHub checks approved within Traceyard", () => {
-  it("does not write a repository while reading setup; previews only the workflow before owner approval", async () => {
+describe("GitHub check setup", () => {
+  it("previews the current and proposed workflow before creating a pull request", async () => {
     const f = await fixture();
-    expect(await readSuccess(await f.call("repository/setup"))).toMatchObject({
+    f.remote.previousWorkflow = "name: Previous runner\n";
+    const preview = await readSuccess<{ previewKey: string }>(await f.call("repository/setup"));
+    expect(preview).toMatchObject({
       state: "SETUP_REQUIRED",
+      previousWorkflow: f.remote.previousWorkflow,
+      workflow: f.workflow,
+      defaultBranch: "main",
     });
     expect(f.remote.writes).toHaveLength(0);
+    expect((await f.call("repository/setup", "POST", {})).status).toBe(400);
     expect((await f.call("repository/analyze", "POST", { requestId: "first" })).status).toBe(409);
-    const setup = await readSuccess<{ state: string; headSha: string; workflow: string }>(
-      await f.call("repository/setup", "POST"),
+    const setup = await readSuccess(
+      await f.call("repository/setup", "POST", { previewKey: preview.previewKey }),
     );
     expect(setup).toMatchObject({
       state: "AWAITING_MERGE",
-      headSha: f.remote.head,
-      workflow: f.workflow,
+      prUrl: "https://github.com/ci-owner/app/pull/4",
     });
     expect(f.remote.writes.map((w) => w.path)).toEqual([
       "/repos/ci-owner/app/git/refs",
@@ -269,59 +270,45 @@ describe("GitHub checks approved within Traceyard", () => {
     await f.prepare();
     expect(f.remote.writes).toHaveLength(3);
   });
-  it("merges the displayed head with repository rules intact and waits for the actual default-branch file", async () => {
-    const f = await fixture(),
-      s = await f.prepare();
-    expect(await f.approve(s)).toEqual({ state: "MERGING" });
-    expect(f.remote.writes.at(-1)?.body).toEqual({
-      sha: f.remote.head,
-      merge_action: "default",
-      bypass_rules: false,
-    });
-    expect(await prepareGitHubChecks(f.configured, f.project, f.fetcher, false)).toMatchObject({
-      state: "MERGING",
-    });
+  it("requires a fresh preview after the default branch moves", async () => {
+    const f = await fixture();
+    const preview = await readSuccess<{ previewKey: string }>(await f.call("repository/setup"));
+    f.remote.baseSha = "d".repeat(40);
+    expect(
+      (await f.call("repository/setup", "POST", { previewKey: preview.previewKey })).status,
+    ).toBe(409);
+    expect(f.remote.writes).toHaveLength(0);
+  });
+  it("rejects extra changed files before opening the PR", async () => {
+    const f = await fixture();
+    f.remote.extraFile = true;
+    await expect(f.prepare()).rejects.toMatchObject({ code: "CI_SETUP_CHANGED" });
+    expect(f.remote.writes.some((w) => w.path.endsWith("/pulls"))).toBe(false);
+  });
+  it("leaves merging to GitHub and waits for the actual default-branch file", async () => {
+    const f = await fixture();
+    await f.prepare();
+    expect(
+      (await f.call("repository/enable", "POST", { prNumber: 4, headSha: f.remote.head })).status,
+    ).toBe(409);
+    expect(f.remote.writes.some((w) => w.path.includes("/merge"))).toBe(false);
     await expect(f.run("too-early")).rejects.toMatchObject({ code: "CI_SETUP_REQUIRED" });
     f.remote.merged = true;
-    expect(await prepareGitHubChecks(f.configured, f.project, f.fetcher, false)).toEqual({
+    expect(await prepareGitHubChecks(f.configured, f.project, f.fetcher)).toEqual({
       state: "READY",
     });
     expect((await f.run("first-run")).state).toBe("QUEUED");
   });
   it.each(["head", "extraFile", "tamper"] as const)(
-    "rejects a changed %s instead of merging unreviewed content",
+    "rejects a changed %s on an existing setup PR",
     async (mode) => {
-      const f = await fixture(),
-        s = await f.prepare();
+      const f = await fixture();
+      await f.prepare();
       if (mode === "head") f.remote.head = "d".repeat(40);
       else f.remote[mode] = true;
-      await expect(f.approve(s)).rejects.toMatchObject({ code: "CI_SETUP_CHANGED" });
-      expect(f.remote.writes.some((w) => w.path.endsWith("merge-async"))).toBe(false);
+      await expect(f.prepare()).rejects.toMatchObject({ code: "CI_SETUP_CHANGED" });
     },
   );
-  it("rejects stale and foreign approvals and reports merge protection without dispatching", async () => {
-    const f = await fixture(),
-      s = await f.prepare();
-    expect(
-      (await f.call("repository/enable", "POST", { prNumber: 4, headSha: "e".repeat(40) })).status,
-    ).toBe(409);
-    expect(
-      (
-        await f.call(
-          "repository/enable",
-          "POST",
-          { prNumber: 4, headSha: s.headSha },
-          (await createSession()).cookie,
-        )
-      ).status,
-    ).not.toBe(200);
-    await f.approve(s);
-    f.remote.blocked = true;
-    expect(await prepareGitHubChecks(f.configured, f.project, f.fetcher, false)).toMatchObject({
-      state: "BLOCKED",
-    });
-    expect(f.remote.writes.some((w) => w.path.endsWith("dispatches"))).toBe(false);
-  });
   it("dispatches a frozen manifest once and serializes competing requests", async () => {
     const f = await fixture();
     await f.enable();

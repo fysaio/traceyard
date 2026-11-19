@@ -4,12 +4,12 @@
 
 1. Sign in with GitHub and grant the Traceyard GitHub App access to selected repositories.
 2. Choose **Connect repo**. Traceyard creates or reopens the repository's project and starts source discovery.
-3. Open the project. Discovered operations become available without waiting for installation, build or tests to pass.
-4. Choose **Run checks**. On the first run, review the one-file workflow change and choose **Enable and run** inside Traceyard. Traceyard creates the setup PR and requests its merge without sending you to GitHub. Once GitHub confirms the workflow on the default branch, the check starts and reports here. Subsequent runs start directly. Default-branch pushes refresh discovery and request bounded checks after setup is enabled.
+3. In **Investigations**, choose **Review workflow change**, inspect the one-file preview, and choose **Create setup PR**. Hosted tests become available once you or a maintainer merge that PR into the default branch on GitHub. If you're blocked, use a maintainer-approved test fork or run the test locally at both commits and retain the output.
+4. In **Investigations**, select the existing Vitest test file and the full SHA checked out by the failing run. Traceyard can fill the SHA from a GitHub Actions link when it can identify one checkout for the repository in the job log. If the run has multiple failing jobs, provide the specific job link. For a custom checkout, enter the tested SHA yourself.
 
 Traceyard refreshes the signed-in personal account’s existing installation directly from GitHub. Installations created before the current deployment are recovered without a new installation webhook or reinstall. A failed GitHub lookup is shown as a refresh error rather than an empty install prompt.
 
-Connecting and scanning do not write repository files. An explicit first-run setup action creates or updates only `.github/workflows/traceyard.yml` through a PR. Approval is bound to the displayed PR head and exact workflow contents; another changed file or a changed head prevents merging. Traceyard never bypasses repository rules. A required human review or failed prerequisite is shown as a blocked setup inside Traceyard; it cannot be silently overridden. Existing Traceyard workflows that target an old deployment are updated through the same in-app approval.
+Connecting, scanning, and previewing do not write repository files. After you approve the exact preview, Traceyard opens a PR that creates or updates only `.github/workflows/traceyard.yml`. Merge it on GitHub under your repository rules. Existing workflows that use an older runner follow the same process.
 
 Source discovery finds supported entry points and direct static calls. These are candidate application operations, not proof of a complete business workflow or of successful execution. Actual runs appear only when tests or application activity produce supported telemetry.
 
@@ -115,7 +115,7 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 
 ### Focused tests
 
-Use a committed `package-lock.json` and a direct script such as `vitest run` or `jest`. When a package has several suites, use an explicit test path and a script named for that suite, such as `test:unit` for files under `tests/unit`. Traceyard retains the test result from the selected commit.
+Use a committed `package-lock.json` and a direct script such as `vitest run` or `jest`. When a package has several suites, use an explicit test path and a script named for that suite, such as `test:unit` for files under `tests/unit`. Traceyard retains the test result from the selected commit. Verification identifies test, fixture, mock and snapshot paths using common naming conventions. Review the candidate diff when your project keeps fixtures elsewhere.
 
 React and TypeScript use the project's existing transforms and test configuration. React Native runs JavaScript and component tests through Jest with the project's preset. Native device tests require their own iOS or Android runner. Interaction replay is available for eligible Vitest tests.
 
@@ -123,7 +123,7 @@ The GitHub download cache uses the repository and runner lockfiles. Each check i
 
 ## Runner update for existing deployments
 
-The [reviewed runner revision](../shared/repository/runner-version.ts) includes focused investigations, npm lockfile installs and Vitest interaction replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
+The [reviewed runner revision](../shared/repository/runner-version.ts) includes focused investigations, fresh-checkout Vitest flakiness checks, npm lockfile installs and Vitest interaction replay. Ordinary application ESM hooks and supported Node HTTP recording remain available. Focused tests have a two-minute budget and the GitHub job has a ten-minute limit. Existing deployments must update their server runner pin and review the generated workflow update; old runners are refused before receiving focused plans. See [production release](PRODUCTION_RELEASE.md).
 
 An existing deployment can select this immutable revision through its operator-controlled `TRACEYARD_RUNNER_REF` setting. The repository workflow must use the same revision; Traceyard validates the exact generated workflow before dispatch. Application test fixes and runner updates are separate changes. Mock-only tests do not establish observed application activity, and batch exporters may lose the final spans of a worker that is forcibly stopped.
 

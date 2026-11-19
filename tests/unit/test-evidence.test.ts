@@ -82,6 +82,7 @@ describe("focused investigation evidence", () => {
       expect(failed.status, JSON.stringify(failed)).toBe("FAILED");
       expect(failed.failures[0]?.name).toContain("adds numbers");
       expect(failed.command.testPath).toBe("sum.test.js");
+      expect(failed.output).toContain("vitest.mjs");
       expect(
         investigationReportSchema.safeParse({
           ...failed,

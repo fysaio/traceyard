@@ -3,6 +3,7 @@ import type {
   InvestigationPlan,
   InvestigationReport,
 } from "../../shared/contracts/investigation-execution";
+import { flakinessOutcome } from "../../shared/contracts/investigation-execution";
 import { redact } from "../../shared/contracts/traces";
 import { ApiError, badRequest, conflict, notFound } from "../api/errors";
 import { dispatchRepositoryChecks } from "../repositories/checks";
@@ -161,6 +162,7 @@ export async function startInvestigationExecution(
     initial?: boolean;
     changedFiles?: string[];
     captureInteractions?: boolean;
+    flakeCandidate?: string;
     replayRecording?: InvestigationPlan["replayRecording"];
   } = {},
   fetcher: typeof fetch = fetch,
@@ -191,6 +193,7 @@ export async function startInvestigationExecution(
     ...(options.testPath ? { testPath: options.testPath } : {}),
     ...(options.changedFiles ? { changedFiles: options.changedFiles, maxTestFiles: 3 } : {}),
     ...(options.captureInteractions ? { captureInteractions: true } : {}),
+    ...(options.flakeCandidate ? { flakeCandidate: options.flakeCandidate } : {}),
     ...(options.replayRecording ? { replayRecording: options.replayRecording } : {}),
     commit: inv.snapshot.commit,
     timeoutMs: 120000,
@@ -253,11 +256,12 @@ export async function startInvestigationExecution(
       ).bind(
         JSON.stringify({
           summary,
+          code: error instanceof ApiError ? error.code : undefined,
           basis: "observed",
           limitations: ["The selected test has not executed."],
           nextAction:
             error instanceof ApiError && error.code === "CI_SETUP_REQUIRED"
-              ? "Enable the reviewed GitHub integration inside Traceyard, then execute this investigation."
+              ? "Review the workflow change, create the setup PR, then merge it on GitHub and rerun this test."
               : "Inspect execution availability and retry when ready.",
         }),
         nowIso(),
@@ -289,6 +293,21 @@ export async function recordInvestigationReport(
   if (!row) throw notFound("Investigation attempt not found.");
   const plan = JSON.parse(row.plan_json) as InvestigationPlan;
   if (
+    report.flakeRuns &&
+    (!plan.flakeCandidate ||
+      !report.flakeRuns.every(
+        (run, index) =>
+          run.commit === (index < 3 ? plan.commit : plan.flakeCandidate) &&
+          run.attempt === (index % 3) + 1,
+      ))
+  )
+    throw conflict(
+      "FLAKE_RUN_MISMATCH",
+      "The reported flakiness attempts differ from the selected revisions.",
+    );
+  if (plan.flakeCandidate && !report.flakeRuns && report.status !== "BLOCKED")
+    throw conflict("FLAKE_RUNS_REQUIRED", "A flakiness result needs all six recorded attempts.");
+  if (
     plan.replayRecording &&
     report.status === "SUCCEEDED" &&
     (!report.replay ||
@@ -309,7 +328,7 @@ export async function recordInvestigationReport(
       "INVESTIGATION_REVISION_MISMATCH",
       "The executed revision differs from the investigation snapshot.",
     );
-  if (plan.testPath && report.command.testPath && plan.testPath !== report.command.testPath)
+  if (plan.testPath && report.status !== "BLOCKED" && plan.testPath !== report.command.testPath)
     throw conflict(
       "INVESTIGATION_TEST_MISMATCH",
       "The executed test differs from the requested test.",
@@ -328,7 +347,9 @@ export async function recordInvestigationReport(
       ? " " + report.failures[0].name + ": " + report.failures[0].message.slice(0, 1000)
       : "");
   const finding = {
-    summary: String(redact(summary)),
+    summary: String(
+      redact(report.flakeRuns ? flakinessOutcome(report.flakeRuns).summary : summary),
+    ),
     basis: "observed",
     limitations: [
       ...(report.truncated
@@ -336,8 +357,9 @@ export async function recordInvestigationReport(
         : []),
       "These results cover the selected test execution, not the entire application.",
     ],
-    nextAction:
-      report.status === "FAILED"
+    nextAction: plan.flakeCandidate
+      ? "Compare the attempts for each commit. Use the recorded counts and conditions when interpreting the result."
+      : report.status === "FAILED"
         ? "Inspect the failure evidence, repair the relevant code, then verify the candidate."
         : report.status === "BLOCKED"
           ? "Resolve the reported prerequisite or select an indexed test."
@@ -352,11 +374,12 @@ export async function recordInvestigationReport(
       .bind(report.status, json, at, row.id, id),
     db
       .prepare(
-        "INSERT INTO investigation_evidence(id,investigation_id,kind,basis,title,content_json,truncated,created_at) SELECT ?,?,'diagnostic','observed','Focused test execution',?,?,? WHERE NOT EXISTS(SELECT 1 FROM investigation_evidence WHERE id=?) AND EXISTS(SELECT 1 FROM investigation_attempts WHERE id=? AND report_json=?)",
+        "INSERT INTO investigation_evidence(id,investigation_id,kind,basis,title,content_json,truncated,created_at) SELECT ?,?,'diagnostic','observed',?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM investigation_evidence WHERE id=?) AND EXISTS(SELECT 1 FROM investigation_attempts WHERE id=? AND report_json=?)",
       )
       .bind(
         "evd_" + row.id.slice(4),
         id,
+        report.flakeRuns ? "Flakiness attempts" : "Focused test execution",
         json,
         Number(report.truncated),
         at,

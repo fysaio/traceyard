@@ -63,6 +63,7 @@ export interface Investigation {
   status: InvestigationStatus;
   snapshot: SourceSnapshot;
   finding: {
+    code?: string;
     summary: string;
     basis: "observed" | "source";
     limitations: string[];
@@ -79,7 +80,16 @@ export interface Investigation {
   recordings?: { id: string; eligible: boolean; createdAt: string }[];
   execution?: Pick<
     InvestigationReport,
-    "status" | "commit" | "command" | "counts" | "durationMs" | "exitCode" | "failures" | "coverage"
+    | "status"
+    | "commit"
+    | "command"
+    | "counts"
+    | "durationMs"
+    | "exitCode"
+    | "failures"
+    | "coverage"
+    | "output"
+    | "flakeRuns"
   >;
   verifications?: {
     id: string;

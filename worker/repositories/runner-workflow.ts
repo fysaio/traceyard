@@ -55,6 +55,7 @@ jobs:
           WRANGLER_SEND_ERROR_REPORTS: 'false'
           TRACEYARD_ORIGIN: ${JSON.stringify(origin)}
           TRACEYARD_RUN_REQUEST: \${{ inputs.run_request }}
+          TRACEYARD_GITHUB_FETCH_TOKEN: \${{ github.token }}
         run: node .traceyard-runner/runner/package/agent/cli.mjs run .
 `;
 }

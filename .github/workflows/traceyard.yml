@@ -26,7 +26,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: fysaio/traceyard
-          ref: 00b9dccd450eaa0753e38d5ea991b8634c157df5
+          ref: fcec074fd530295ff64a0ff2f1c5b6dcb5527669
           path: .traceyard-runner
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -52,4 +52,5 @@ jobs:
           WRANGLER_SEND_ERROR_REPORTS: 'false'
           TRACEYARD_ORIGIN: "https://traceyard.pilotsaviour229.workers.dev"
           TRACEYARD_RUN_REQUEST: ${{ inputs.run_request }}
+          TRACEYARD_GITHUB_FETCH_TOKEN: ${{ github.token }}
         run: node .traceyard-runner/runner/package/agent/cli.mjs run .

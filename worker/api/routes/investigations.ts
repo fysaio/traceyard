@@ -10,8 +10,22 @@ import {
 import { getRequestContext, readJsonBody, type AppEnv } from "../middleware";
 import { parseWith } from "../errors";
 import { beginInvestigation } from "../../services/investigation-execution";
+import { resolveCiRevision } from "../../services/ci-revision";
 
 export const investigationRoutes = new Hono<AppEnv>();
+export function investigationCiRoutes(fetcher: typeof fetch = fetch) {
+  const app = new Hono<AppEnv>();
+  app.post("/projects/:projectId/investigations/ci-revision", async (c) => {
+    const { projectId } = await ownedProject(c);
+    const { url } = parseWith(
+      z.object({ url: z.string().trim().max(500) }).strict(),
+      await readJsonBody(c),
+      "Paste a GitHub Actions run or job link.",
+    );
+    return c.json(payload(c, await resolveCiRevision(c.env, projectId, url, fetcher)));
+  });
+  return app;
+}
 const payload = (c: Parameters<typeof getRequestContext>[0], data: unknown) => ({
   data,
   meta: { requestId: getRequestContext(c).requestId },

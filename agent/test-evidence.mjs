@@ -154,7 +154,7 @@ export async function runTargetedTest(workspace, index, plan, env) {
           "--",
           ...(runner === "jest"
             ? ["--ci", "--watch=false", "--watchAll=false", "--runTestsByPath", "--json"]
-            : ["--run", "--reporter=json"]),
+            : ["--run", "--reporter=json", ...(plan.flakeCandidate ? ["--retry=0"] : [])]),
           testArgument,
           "--outputFile=" + output,
         ],
@@ -196,16 +196,27 @@ export async function runTargetedTest(workspace, index, plan, env) {
       });
     });
     let result;
+    const retainedOutput = sanitizeDiagnostic(tail.slice(-4000), 4000);
     try {
       const text = await readFile(output, "utf8");
       if (Buffer.byteLength(text) > 8_000_000)
         return blocked("The structured reporter exceeded the supported artifact size.");
-      if (timedOut) return blocked("The focused test exceeded its time budget.", command);
+      if (timedOut)
+        return {
+          ...blocked("The focused test exceeded its time budget.", command),
+          output: retainedOutput,
+        };
       const data = JSON.parse(text);
       if (!Array.isArray(data.testResults) || !data.testResults.length)
-        return blocked("The test runner did not report a result for the selected file.", command);
+        return {
+          ...blocked("The test runner did not report a result for the selected file.", command),
+          output: retainedOutput,
+        };
       if (data.testResults.some(({ name }) => relative(file, resolve(directory, String(name)))))
-        return blocked("The test script reported files outside the selected test.", command);
+        return {
+          ...blocked("The test script reported files outside the selected test.", command),
+          output: retainedOutput,
+        };
       result = normalizeVitestReport(data, exitCode, root);
     } catch {
       return {
@@ -215,11 +226,13 @@ export async function runTargetedTest(workspace, index, plan, env) {
             : summarizeCommandFailure(tail, "test", exitCode ?? "interrupted"),
           command,
         ),
+        output: retainedOutput,
         exitCode,
       };
     }
     return {
       ...result,
+      output: retainedOutput,
       durationMs: Date.now() - started,
       exitCode,
       nodeVersion: process.version,
