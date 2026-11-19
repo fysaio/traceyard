@@ -12,6 +12,7 @@ export const verificationRequestSchema = z
 export interface VerificationRun {
   commit: string;
   testPath: string;
+  testCase?: string;
   status: InvestigationReport["status"];
   evidenceId: string | null;
   failure: InvestigationReport["failures"][number] | null;

@@ -587,6 +587,72 @@ describe("explicit commit selection", () => {
     });
   });
 
+  it("binds Pytest evidence to the authorized case and its exact result count", async () => {
+    const a = await account(1007);
+    await connectedSource(a);
+    const commitSha = "c".repeat(40);
+    const inv = await beginInvestigation(
+      configured,
+      a.userId,
+      a.projectId,
+      investigationRequestSchema.parse({
+        mode: "execute",
+        question: "Reproduce the wallet checkout",
+        commit: commitSha,
+        testPath: "tests/test_checkout.py",
+        testCase: "TestCheckout::test_total[wallet]",
+      }),
+      mockGitHub(commitSha),
+    );
+
+    const attempt = (await getInvestigation(env.DB, a.userId, a.projectId, inv.id)).attempts![0]!;
+    await env.DB.prepare(
+      "UPDATE repository_check_requests SET runner_id='authorized-runner' WHERE id=?",
+    )
+      .bind(attempt.requestId)
+      .run();
+
+    const mismatchedReport: InvestigationReport = {
+      requestId: attempt.requestId,
+      runId: "authorized-runner",
+      commit: commitSha,
+      status: "SUCCEEDED",
+      command: {
+        directory: ".",
+        script: "pytest",
+        testPath: "tests/test_checkout.py",
+        testCase: "TestCheckout::test_total[card]",
+      },
+      counts: { passed: 1, failed: 0, skipped: 0 },
+      failures: [],
+      message: "One test passed",
+      durationMs: 150,
+      exitCode: 0,
+      truncated: false,
+      nodeVersion: "v22",
+    };
+
+    await expect(
+      recordInvestigationReport(env.DB, a.projectId, inv.id, mismatchedReport),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "INVESTIGATION_TEST_MISMATCH",
+    });
+    const correct = {
+      ...mismatchedReport,
+      command: { ...mismatchedReport.command, testCase: "TestCheckout::test_total[wallet]" },
+    };
+    await expect(
+      recordInvestigationReport(env.DB, a.projectId, inv.id, {
+        ...correct,
+        counts: { passed: 2, failed: 0, skipped: 0 },
+      }),
+    ).rejects.toMatchObject({ code: "INVESTIGATION_TEST_MISMATCH" });
+    await recordInvestigationReport(env.DB, a.projectId, inv.id, correct);
+    const stored = await getInvestigation(env.DB, a.userId, a.projectId, inv.id);
+    expect(stored.execution?.command.testCase).toBe("TestCheckout::test_total[wallet]");
+  });
+
   it("preserves replay compatibility without commit selection", async () => {
     const a = await account(998);
     await connectedSource(a);

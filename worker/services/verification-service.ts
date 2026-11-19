@@ -14,6 +14,11 @@ const testFile = (p: string) =>
     p,
   );
 
+const pytestInputs = (path: string) =>
+  /(?:^|\/)(?:test_[^/]+\.py|[^/]+_test\.py|conftest\.py|pytest\.ini|pyproject\.toml|setup\.cfg|tox\.ini|requirements[^/]*\.txt)$/.test(
+    path,
+  );
+
 export async function startFlakinessCheck(
   env: Env,
   userId: string,
@@ -34,6 +39,8 @@ export async function startFlakinessCheck(
       "FLAKE_HOSTED_ONLY",
       "Flakiness checks currently require the GitHub Actions runner.",
     );
+  if (testPath.endsWith(".py"))
+    throw badRequest("FLAKE_VITEST_REQUIRED", "The six-attempt flakiness check requires Vitest.");
   if (baseline.execution?.command.testPath !== testPath)
     throw badRequest("FLAKE_TEST_MISMATCH", "Select the same test file used in the baseline run.");
   const repo = await env.DB.prepare(
@@ -121,6 +128,7 @@ function runEvidence(
   return {
     commit: report.commit,
     testPath: report.command.testPath,
+    ...(report.command.testCase ? { testCase: report.command.testCase } : {}),
     status:
       report.checks?.find((check) => check.testPath === report.command.testPath)?.status ??
       report.status,
@@ -203,7 +211,9 @@ export async function getVerification(
     baselineRun = runEvidence(original, baseline),
     candidateRun = runEvidence(rerun, report);
   const changedFiles = JSON.parse(row.changed_files_json) as string[],
-    changedTests = changedFiles.filter(testFile);
+    changedTests = changedFiles.filter(
+      (path) => testFile(path) || (baselineRun?.testPath.endsWith(".py") && pytestInputs(path)),
+    );
   let verdict: Verification["verdict"] = "PENDING";
   let label: Verification["label"] = "Running";
   let summary = "Waiting for the candidate run. Its result will appear here.";
@@ -227,6 +237,7 @@ export async function getVerification(
     label = "Inconclusive";
     if (
       candidateRun?.testPath !== baselineRun.testPath ||
+      candidateRun.testCase !== baselineRun.testCase ||
       candidateRun.commit !== row.candidate_commit
     ) {
       summary =
@@ -428,6 +439,7 @@ export async function createVerification(
     {
       initial: true,
       testPath: report.command.testPath,
+      testCase: report.command.testCase,
       ...(recording ? { replayRecording: { id: recording.id, manifest: recording.manifest } } : {}),
     },
     fetcher,

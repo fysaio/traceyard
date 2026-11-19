@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { repositoryPathSchema } from "./repository-index";
-import type { InvestigationReport } from "./investigation-execution";
+import { pytestCaseSchema, type InvestigationReport } from "./investigation-execution";
 
 const reference = z.string().trim().min(1).max(200);
 export const investigationRepositorySchema = z
@@ -22,6 +22,7 @@ export const investigationRequestSchema = z
       .regex(/^rcd_[a-f0-9]{32}$/)
       .optional(),
     testPath: repositoryPathSchema.optional(),
+    testCase: pytestCaseSchema.optional(),
     expectedRepository: investigationRepositorySchema.optional(),
     commit: z
       .string()
@@ -35,7 +36,18 @@ export const investigationRequestSchema = z
       .optional(),
     outputChars: z.number().int().min(500).max(12000).default(3000),
   })
-  .strict();
+  .strict()
+  .refine(
+    (request) =>
+      !request.testCase ||
+      (request.mode === "execute" &&
+        request.testPath?.endsWith(".py") &&
+        !request.captureInteractions),
+    {
+      path: ["testCase"],
+      message: "Select a Pytest file and focused execution for a case selector.",
+    },
+  );
 export type InvestigationRequest = z.infer<typeof investigationRequestSchema>;
 export type InvestigationTarget = z.infer<typeof investigationTargetSchema>;
 export type InvestigationStatus =

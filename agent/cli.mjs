@@ -17,6 +17,7 @@ import {
   sanitizeDiagnostic,
 } from "./test-evidence.mjs";
 import { createHash } from "node:crypto";
+import { pytestEnvironment } from "./pytest.mjs";
 
 export async function scanDirectory(root) {
   const operations = [],
@@ -406,7 +407,7 @@ export async function main(args = process.argv.slice(2)) {
     !(await lstat(root)).isDirectory()
   )
     throw Error("The configured application directory is not inside this project.");
-  let repositoryIndex;
+  let repositoryIndex, pytestSandbox;
   try {
     const desired = manifest.investigation?.commit;
     if (manifest.investigation?.flakeCandidate) {
@@ -511,7 +512,8 @@ export async function main(args = process.argv.slice(2)) {
     }
     let pkg,
       packageDirectory = root,
-      focusedRunner;
+      focusedRunner,
+      focusedRequirements;
     if (manifest.investigation) {
       repositoryIndex ??= await indexRepository(workspaceRoot);
       const prepared = await prepareTargetedTest(
@@ -522,6 +524,7 @@ export async function main(args = process.argv.slice(2)) {
       if (prepared.reason) throw new Error(prepared.reason);
       packageDirectory = prepared.directory;
       focusedRunner = prepared.runner;
+      focusedRequirements = prepared.requirements;
     } else {
       try {
         pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
@@ -551,29 +554,61 @@ export async function main(args = process.argv.slice(2)) {
     delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     await report("install", "RUNNING", "Installing project dependencies.");
-    const installRoot = await findInstallRoot(workspaceRoot, packageDirectory);
-    if (!installRoot) {
-      const message =
-        "A package-lock.json is required in this application or its npm workspace root.";
-      if (manifest.investigation) throw new Error(message);
-      await report("complete", "SKIPPED", message);
-      completed = true;
-      return;
+    let pytestPython;
+    if (focusedRunner === "pytest") {
+      const python = process.platform === "win32" ? "python.exe" : "python3";
+      pytestSandbox = await mkdtemp(join(tmpdir(), "traceyard-pytest-"));
+      const options = { cwd: packageDirectory, env: pytestEnvironment(env, true) };
+      await execute(python, ["-I", "-m", "venv", pytestSandbox], options, "install");
+      pytestPython =
+        process.platform === "win32"
+          ? join(pytestSandbox, "Scripts", "python.exe")
+          : join(pytestSandbox, "bin", "python");
+      await execute(
+        pytestPython,
+        [
+          "-I",
+          "-m",
+          "pip",
+          "--isolated",
+          "--disable-pip-version-check",
+          "install",
+          "--only-binary=:all:",
+          "--retries",
+          "1",
+          "--timeout",
+          "20",
+          "-r",
+          focusedRequirements,
+        ],
+        options,
+        "install",
+      );
+    } else {
+      const installRoot = await findInstallRoot(workspaceRoot, packageDirectory);
+      if (!installRoot) {
+        const message =
+          "A package-lock.json is required in this application or its npm workspace root.";
+        if (manifest.investigation) throw new Error(message);
+        await report("complete", "SKIPPED", message);
+        completed = true;
+        return;
+      }
+      const replaying = Boolean(manifest.investigation?.replayRecording);
+      const installEnv = replaying
+        ? Object.fromEntries(
+            Object.entries(env).filter(([name]) =>
+              ["PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR", "CI"].includes(name),
+            ),
+          )
+        : env;
+      await execute(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        replaying ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"] : ["ci"],
+        { cwd: installRoot, env: installEnv },
+        "install",
+      );
     }
-    const replaying = Boolean(manifest.investigation?.replayRecording);
-    const installEnv = replaying
-      ? Object.fromEntries(
-          Object.entries(env).filter(([name]) =>
-            ["PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR", "CI"].includes(name),
-          ),
-        )
-      : env;
-    await execute(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      replaying ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"] : ["ci"],
-      { cwd: installRoot, env: installEnv },
-      "install",
-    );
     await report("install", "SUCCEEDED", "Dependencies installed.");
     if (pkg?.scripts?.build && !manifest.cases.length && !manifest.investigation) {
       await report("build", "RUNNING", "Running the existing build script.");
@@ -610,30 +645,34 @@ export async function main(args = process.argv.slice(2)) {
     await report(
       "test",
       "RUNNING",
-      "Running the existing test script with supported Node.js tracing.",
+      pytestPython
+        ? "Running the selected Pytest test."
+        : "Running the existing test script with supported Node.js tracing.",
     );
     const preload = fileURLToPath(new URL("./register.cjs", import.meta.url));
     const esmPreload = new URL("./esm-register.mjs", import.meta.url).href;
-    const key = await credential();
-    const testEnv = {
-      ...env,
-      CI: "true",
-      TRACEYARD_RUN_ID: id,
-      NODE_OPTIONS: `--require ${JSON.stringify(preload)} --import ${JSON.stringify(esmPreload)}`,
-      OTEL_SERVICE_NAME: basename(root),
-      OTEL_RESOURCE_ATTRIBUTES: `traceyard.run.id=${id}`,
-      OTEL_TRACES_EXPORTER: "otlp",
-      OTEL_TRACES_SAMPLER: "always_on",
-      OTEL_METRICS_EXPORTER: "none",
-      OTEL_LOGS_EXPORTER: "none",
-      OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
-      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: origin + "/api/v1/otlp/v1/traces",
-      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer%20" + encodeURIComponent(key),
-      OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "32",
-      OTEL_BSP_SCHEDULE_DELAY: "200",
-      OTEL_NODE_RESOURCE_DETECTORS: "env,process",
-      OTEL_EXPORTER_OTLP_TIMEOUT: "3000",
-    };
+    const key = pytestPython ? "" : await credential();
+    const testEnv = pytestPython
+      ? { ...pytestEnvironment(env), CI: "true", TRACEYARD_PYTEST_PYTHON: pytestPython }
+      : {
+          ...env,
+          CI: "true",
+          TRACEYARD_RUN_ID: id,
+          NODE_OPTIONS: `--require ${JSON.stringify(preload)} --import ${JSON.stringify(esmPreload)}`,
+          OTEL_SERVICE_NAME: basename(root),
+          OTEL_RESOURCE_ATTRIBUTES: `traceyard.run.id=${id}`,
+          OTEL_TRACES_EXPORTER: "otlp",
+          OTEL_TRACES_SAMPLER: "always_on",
+          OTEL_METRICS_EXPORTER: "none",
+          OTEL_LOGS_EXPORTER: "none",
+          OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: origin + "/api/v1/otlp/v1/traces",
+          OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer%20" + encodeURIComponent(key),
+          OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "32",
+          OTEL_BSP_SCHEDULE_DELAY: "200",
+          OTEL_NODE_RESOURCE_DETECTORS: "env,process",
+          OTEL_EXPORTER_OTLP_TIMEOUT: "3000",
+        };
     if (manifest.investigation) {
       const plan = manifest.investigation;
       const capture =
@@ -657,7 +696,7 @@ export async function main(args = process.argv.slice(2)) {
             }
           : testEnv,
       );
-      if (plan.captureInteractions && focusedRunner === "jest")
+      if (plan.captureInteractions && focusedRunner !== "vitest")
         focused.message =
           focused.message.slice(0, 1850) + " Interaction recording requires Vitest.";
       try {
@@ -811,6 +850,8 @@ export async function main(args = process.argv.slice(2)) {
         );
       }
     throw error;
+  } finally {
+    if (pytestSandbox) await rm(pytestSandbox, { recursive: true, force: true }).catch(() => {});
   }
 }
 if (

@@ -98,6 +98,7 @@ export async function beginInvestigation(
       {
         initial: true,
         testPath: request.testPath,
+        testCase: request.testCase,
         captureInteractions: request.captureInteractions,
       },
       fetcher,
@@ -141,6 +142,7 @@ export async function beginInvestigation(
         {
           initial: true,
           testPath: request.testPath ?? recording?.manifest.testPath,
+          testCase: request.testCase,
           captureInteractions: request.captureInteractions,
           replayRecording: recording
             ? { id: recording.id, manifest: recording.manifest }
@@ -159,6 +161,7 @@ export async function startInvestigationExecution(
   id: string,
   options: {
     testPath?: string;
+    testCase?: string;
     initial?: boolean;
     changedFiles?: string[];
     captureInteractions?: boolean;
@@ -191,6 +194,7 @@ export async function startInvestigationExecution(
     requestId,
     question: inv.question,
     ...(options.testPath ? { testPath: options.testPath } : {}),
+    ...(options.testCase ? { testCase: options.testCase } : {}),
     ...(options.changedFiles ? { changedFiles: options.changedFiles, maxTestFiles: 3 } : {}),
     ...(options.captureInteractions ? { captureInteractions: true } : {}),
     ...(options.flakeCandidate ? { flakeCandidate: options.flakeCandidate } : {}),
@@ -328,7 +332,12 @@ export async function recordInvestigationReport(
       "INVESTIGATION_REVISION_MISMATCH",
       "The executed revision differs from the investigation snapshot.",
     );
-  if (plan.testPath && report.status !== "BLOCKED" && plan.testPath !== report.command.testPath)
+  if (
+    report.status !== "BLOCKED" &&
+    ((plan.testPath && plan.testPath !== report.command.testPath) ||
+      plan.testCase !== report.command.testCase ||
+      (plan.testCase && report.counts.passed + report.counts.failed + report.counts.skipped !== 1))
+  )
     throw conflict(
       "INVESTIGATION_TEST_MISMATCH",
       "The executed test differs from the requested test.",
