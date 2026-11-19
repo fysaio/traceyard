@@ -40,6 +40,15 @@ test("JUnit keeps portable test identities and omits raw assertions and logs", (
   assert.throws(() => readJUnit("<testsuite><testcase", "x", "/repo"));
 });
 
+test("extracts an exact Pytest class and parameter from JUnit with source metadata", () => {
+  const [item] = readJUnit(
+    '<testsuite name="pytest"><testcase file="tests/test_checkout.py" classname="tests.test_checkout.TestCheckout" name="test_total[wallet]" /></testsuite>',
+    "pytest.xml",
+    "/repo",
+  );
+  assert.equal(item.testCase, "TestCheckout::test_total[wallet]");
+});
+
 test("repeated identities keep observed execution counts and are excluded from history", async () => {
   const root = await mkdtemp(join(tmpdir(), "traceyard-junit-"));
   try {

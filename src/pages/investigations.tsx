@@ -9,7 +9,12 @@ import { integrationRequest } from "../lib/integrations-api";
 import { newIdempotencyKey } from "../lib/api";
 import { ConnectRepository } from "./project-overview";
 import { EnableGitHubChecks, type CISetupResult } from "./project-experience";
-import type { Investigation } from "../../shared/contracts/investigations";
+import {
+  investigationRepositorySchema,
+  type Investigation,
+} from "../../shared/contracts/investigations";
+import { pytestCaseSchema } from "../../shared/contracts/investigation-execution";
+import { repositoryPathSchema } from "../../shared/contracts/repository-index";
 import type { Catalog } from "../../shared/repository/workspace";
 import { ExecutionSummary } from "../components/execution-summary";
 
@@ -39,7 +44,7 @@ function ExistingTest({
         required={required}
         list="indexed-tests"
         value={value}
-        maxLength={300}
+        maxLength={240}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Inferred from your question when possible"
       />
@@ -52,13 +57,36 @@ function ExistingTest({
         {index.data?.truncated
           ? "Showing the first 100 indexed tests. You can enter another existing path."
           : required
-            ? "Enter the path of the failing Vitest file from the repository root."
+            ? "Enter the failing test file path from the repository root."
             : "Type a test file path, or leave it blank to let Traceyard choose."}
       </span>
       <ErrorMessage error={index.error} />
     </label>
   );
 }
+function PytestCaseInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      Pytest case (optional)
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        maxLength={240}
+        placeholder="TestCheckout::test_total[wallet]"
+      />
+      <span className="hint">
+        Enter the case after the file path in the Pytest node ID. Leave it blank to run the file.
+      </span>
+    </label>
+  );
+}
+
 function State({ value }: { value: string }) {
   const labels: Record<string, string> = {
     EVIDENCE_READY: "Evidence ready",
@@ -85,15 +113,32 @@ export function InvestigationsPage() {
     navigate = useNavigate(),
     cache = useQueryClient();
   const project = projects.find((p) => p.id === projectId);
+  const [params] = useSearchParams();
+  const ciRepository = investigationRepositorySchema.safeParse(params.get("ciRepository")).data;
+  const ciTest = repositoryPathSchema.safeParse(params.get("ciTest")).data;
+  const ciCase = pytestCaseSchema.safeParse(params.get("ciCase")).data;
+  const ciCommit = params.get("ciCommit");
+  const handoff =
+    ciRepository &&
+    ciTest?.endsWith(".py") &&
+    ciCase &&
+    ciCommit &&
+    /^[a-f0-9]{40}$/.test(ciCommit);
+  const ciProject = handoff
+    ? projects.find((p) => p.repository?.toLowerCase() === ciRepository.toLowerCase())
+    : undefined;
+  const prefill = ciProject?.id === projectId && !!projectId;
   const [question, setQuestion] = useState(""),
     [mode, setMode] = useState<"execute" | "analyze">("execute"),
     [capture, setCapture] = useState(false),
-    [testPath, setTestPath] = useState(""),
-    [commit, setCommit] = useState(""),
+    [testPath, setTestPath] = useState(prefill ? (ciTest ?? "") : ""),
+    [testCase, setTestCase] = useState(prefill ? (ciCase ?? "") : ""),
+    [commit, setCommit] = useState(prefill ? (ciCommit ?? "") : ""),
     [ciUrl, setCiUrl] = useState(""),
     [setup, setSetup] = useState(false),
     [connect, setConnect] = useState(false),
     [key, setKey] = useState(newIdempotencyKey);
+  const python = testPath.endsWith(".py");
   const catalog = useQuery({
     queryKey: ["catalog", projectId],
     queryFn: () => integrationRequest<Catalog>(projectId, "catalog"),
@@ -120,8 +165,9 @@ export function InvestigationsPage() {
       investigations.create(projectId, {
         question: question.trim() || `Reproduce ${testPath}`,
         mode,
-        captureInteractions: mode === "execute" && capture,
+        captureInteractions: mode === "execute" && capture && !python,
         testPath: mode === "execute" ? testPath || undefined : undefined,
+        testCase: mode === "execute" && python ? testCase.trim() || undefined : undefined,
         expectedRepository: project?.repository ?? undefined,
         commit: mode === "execute" ? commit || undefined : undefined,
         requestKey: key,
@@ -152,6 +198,28 @@ export function InvestigationsPage() {
           <Icon name="plug" /> {project ? "Project setup" : "Agent setup"}
         </Link>
       </div>
+      {handoff && !prefill && (
+        <div className="connected-panel section">
+          <p>
+            This CI failure belongs to <strong>{ciRepository}</strong>.
+          </p>
+          {ciProject ? (
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                const target = new URLSearchParams(params);
+                target.set("project", ciProject.id);
+                navigate("/investigations?" + target.toString());
+              }}
+            >
+              Open the connected repository
+            </button>
+          ) : (
+            <p className="hint">Connect that repository, then open the CI link again.</p>
+          )}
+        </div>
+      )}
       {!project?.repository ? (
         <section className="investigation-connect connected-panel">
           <Icon name="code-branch" />
@@ -219,8 +287,8 @@ export function InvestigationsPage() {
             <p className="hint">
               {mode === "execute"
                 ? catalog.data?.executionProvider === "github"
-                  ? "Focused runs require an npm lockfile and a direct Vitest or Jest script. GitHub Actions usage counts toward your allowance."
-                  : "Focused runs require an npm lockfile and a direct Vitest or Jest script."
+                  ? "Focused runs support Vitest, Jest, and Pytest. GitHub Actions usage counts toward your allowance."
+                  : "Focused runs support Vitest, Jest, and Pytest."
                 : "Looks through code and saved evidence without running tests."}
             </p>
             {mode === "execute" && !ready && !checkingSetup && (
@@ -237,9 +305,22 @@ export function InvestigationsPage() {
                   value={testPath}
                   onChange={(value) => {
                     setTestPath(value);
+                    setTestCase("");
                     setKey(newIdempotencyKey());
                   }}
                 />
+                {python && (
+                  <PytestCaseInput
+                    value={testCase}
+                    onChange={(value) => {
+                      setTestCase(value);
+                      setKey(newIdempotencyKey());
+                    }}
+                  />
+                )}
+                {prefill && (
+                  <p className="hint">Review the test and commit from CI before running.</p>
+                )}
                 <label htmlFor="investigation-ci-link">GitHub Actions link (optional)</label>
                 <div className="actions ci-revision-input">
                   <input
@@ -288,24 +369,26 @@ export function InvestigationsPage() {
                   Use the full SHA that ran the failing test. Push local commits before running them
                   here.
                 </p>
-                <details className="disclosure">
-                  <summary>Interaction recording</summary>
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={capture}
-                      onChange={(e) => {
-                        setCapture(e.target.checked);
-                        setKey(newIdempotencyKey());
-                      }}
-                    />{" "}
-                    Retain supported JSON interactions for isolated replay
-                  </label>
-                  <p className="hint">
-                    Optional capture retains application bodies. Headers and credential values are
-                    omitted. Incomplete recordings cannot replay.
-                  </p>
-                </details>
+                {!python && (
+                  <details className="disclosure">
+                    <summary>Interaction recording</summary>
+                    <label className="checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={capture}
+                        onChange={(e) => {
+                          setCapture(e.target.checked);
+                          setKey(newIdempotencyKey());
+                        }}
+                      />{" "}
+                      Retain supported JSON interactions for isolated replay
+                    </label>
+                    <p className="hint">
+                      Optional capture retains application bodies. Headers and credential values are
+                      omitted. Incomplete recordings cannot replay.
+                    </p>
+                  </details>
+                )}
               </>
             )}
             {mode === "analyze" && (
@@ -481,6 +564,7 @@ function InvestigationDetail() {
     [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(params.get("evidence") ?? ""),
     [testPath, setTestPath] = useState(""),
+    [testCase, setTestCase] = useState(""),
     [commit, setCommit] = useState(""),
     [flakeCommit, setFlakeCommit] = useState<string | null>(null),
     [setup, setSetup] = useState(false);
@@ -494,7 +578,13 @@ function InvestigationDetail() {
     void cache.invalidateQueries({ queryKey: ["investigations", projectId] });
   };
   const execute = useMutation({
-    mutationFn: () => investigations.execute(projectId, id, testPath || undefined),
+    mutationFn: () =>
+      investigations.execute(
+        projectId,
+        id,
+        testPath || undefined,
+        testPath.endsWith(".py") ? testCase.trim() || undefined : undefined,
+      ),
     onSuccess: update,
   });
   const cancel = useMutation({
@@ -555,6 +645,7 @@ function InvestigationDetail() {
       i.execution.failures.some((failure) => failure.file === i.execution?.command.testPath);
   const didNotReproduce =
     i.execution?.status === "SUCCEEDED" && !i.execution.flakeRuns && !verificationId;
+  const python = i.execution?.command.testPath?.endsWith(".py");
   const earlierFailure = i.attempts?.some((attempt) => attempt.status === "FAILED");
   const flakePrompt =
     didNotReproduce ||
@@ -602,7 +693,9 @@ function InvestigationDetail() {
             {earlierFailure
               ? "The latest run passed after an earlier failure in this investigation."
               : "The test passed at the selected failing commit."}{" "}
-            Check the commit and test file or check for flakiness below.
+            {python
+              ? "Check the commit and selected case."
+              : "Check the commit and test file or check for flakiness below."}
           </p>
         )}
         {i.finding.nextAction && !busy(i) && !i.execution && <p>{i.finding.nextAction}</p>}
@@ -696,7 +789,11 @@ function InvestigationDetail() {
                           : run.status === "FAILED"
                             ? "Failed"
                             : "Blocked"}{" "}
-                        · <code>{run.testPath}</code>
+                        ·{" "}
+                        <code>
+                          {run.testPath}
+                          {run.testCase && "::" + run.testCase}
+                        </code>
                         {run.failure && <pre className="code">{run.failure.message}</pre>}
                         <a
                           className="text-link"
@@ -733,6 +830,7 @@ function InvestigationDetail() {
       )}
       {!busy(i) &&
         !flakeResults &&
+        !python &&
         i.execution?.command.testPath &&
         i.snapshot.commit &&
         i.status === "EVIDENCE_READY" &&
@@ -850,7 +948,17 @@ function InvestigationDetail() {
               execute.mutate();
             }}
           >
-            <ExistingTest projectId={projectId} value={testPath} onChange={setTestPath} />
+            <ExistingTest
+              projectId={projectId}
+              value={testPath}
+              onChange={(path) => {
+                setTestPath(path);
+                setTestCase("");
+              }}
+            />
+            {testPath.endsWith(".py") && (
+              <PytestCaseInput value={testCase} onChange={setTestCase} />
+            )}
             <p className="hint">
               Uses the connected executor and its execution allowance. Each investigation has a
               three-attempt limit.

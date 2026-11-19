@@ -2,6 +2,7 @@ import { readdir, readFile, lstat, realpath } from "node:fs/promises";
 import { posix, resolve, relative, join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse } from "@babel/parser";
+import { isPytestFile } from "./pytest.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const isCode = (path) => /\.[cm]?[jt]sx?$/.test(path) && !/\.d\.[cm]?[jt]s$/.test(path);
@@ -127,6 +128,11 @@ export function analyzeRepositoryFiles(input) {
       }
     return null;
   };
+  const pythonPackages = new Set(
+    files
+      .filter((f) => /(?:^|\/)(?:requirements-test\.txt|requirements\.txt)$/.test(f.path))
+      .map((f) => posix.dirname(f.path)),
+  );
   const indexed = [];
   for (const f of files.filter((f) => isCode(f.path))) {
     const record = {
@@ -204,6 +210,26 @@ export function analyzeRepositoryFiles(input) {
     }
     indexed.push(record);
   }
+  for (const file of files.filter((f) => isPytestFile(f.path))) {
+    let directory = posix.dirname(file.path);
+    while (directory !== "." && !pythonPackages.has(directory))
+      directory = posix.dirname(directory);
+    const tests = [];
+    const lines = file.content.split("\n");
+    for (const [index, line] of lines.entries()) {
+      const match = /^\s*(?:async\s+)?def\s+(test_\w+)\s*\(/.exec(line);
+      if (match && tests.length < 40) tests.push({ name: match[1].slice(0, 200), line: index + 1 });
+    }
+    indexed.push({
+      path: file.path,
+      hash: hash(file.content),
+      imports: [],
+      tests,
+      definitions: [],
+      isTest: true,
+      packageDirectory: directory,
+    });
+  }
   return {
     schemaVersion: 1,
     snapshotId: hash(JSON.stringify(files.map((f) => [f.path, hash(f.content)]))),
@@ -252,6 +278,8 @@ export async function indexRepository(directory) {
       }
       if (!(
         isCode(path) ||
+        isPytestFile(path) ||
+        /(?:^|\/)(?:requirements-test\.txt|requirements\.txt)$/.test(path) ||
         /(?:^|\/)(?:package\.json|tsconfig[^/]*\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(
           path,
         )

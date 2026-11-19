@@ -1,12 +1,18 @@
 import { z } from "zod";
 import { repositoryPathSchema } from "./repository-index";
 import { recordingManifestSchema } from "./recordings";
+export const pytestCaseSchema = z
+  .string()
+  .max(240)
+  .regex(/^[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*(?:\[[^\p{Cc}]{0,150}\])?$/u);
+
 export const investigationPlanSchema = z
   .object({
     investigationId: z.string().regex(/^inv_[a-f0-9]{32}$/),
     requestId: z.string().regex(/^req_[a-f0-9]{32}$/),
     question: z.string().min(3).max(1000),
     testPath: repositoryPathSchema.optional(),
+    testCase: pytestCaseSchema.optional(),
     changedFiles: z.array(repositoryPathSchema).max(100).optional(),
     maxTestFiles: z.number().int().min(1).max(5).optional(),
     captureInteractions: z.boolean().optional(),
@@ -39,6 +45,7 @@ export const investigationReportSchema = z
         directory: repositoryPathSchema,
         script: z.string().max(80),
         testPath: repositoryPathSchema.nullable(),
+        testCase: pytestCaseSchema.optional(),
       })
       .strict(),
     counts: z
