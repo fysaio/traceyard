@@ -10,12 +10,12 @@ In Antigravity, copy the setup request from Traceyard’s **Connections** page, 
 
 ## Tools
 
-| Tool          | Use                                                                                    |
-| ------------- | -------------------------------------------------------------------------------------- |
-| `investigate` | Read indexed source or run an existing Vitest test in the configured repository.       |
-| `inspect`     | Read findings, exact-revision source, evidence, or a verification result.              |
-| `verify`      | Rerun a saved failing test at a candidate commit and report changes to its test files. |
-| `recover`     | Resume or restart an owned Traceyard workflow with the recovery scope.                 |
+| Tool          | Use                                                                                      |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `investigate` | Read indexed source or run an existing Vitest or Jest test in the configured repository. |
+| `inspect`     | Read findings, exact-revision source, evidence, or a verification result.                |
+| `verify`      | Rerun a saved failing test at a candidate commit and report changes to its test files.   |
+| `recover`     | Resume or restart an owned Traceyard workflow with the recovery scope.                   |
 
 Connections are account-wide. Each project approval controls which repository the agent can access. Use **Manage agent access** to remove a project approval or disconnect the agent. For multiple approved projects, pass `projectId` when the client exposes it.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readdir, readFile, lstat, appendFile, mkdtemp, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { resolve, join, relative, basename } from "node:path";
+import { resolve, join, relative, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
@@ -10,7 +10,7 @@ import { discoverFile } from "./discovery.mjs";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
 import { buildRecording } from "./recording.mjs";
 import { indexRepository } from "./repository-index.mjs";
-import { runInvestigationPlan, sanitizeDiagnostic } from "./test-evidence.mjs";
+import { prepareTargetedTest, runInvestigationPlan, sanitizeDiagnostic } from "./test-evidence.mjs";
 import { createHash } from "node:crypto";
 
 export async function scanDirectory(root) {
@@ -105,6 +105,18 @@ function execute(program, args, options, phase) {
       else reject(new Error(summarizeCommandFailure(output, phase, signal ?? code)));
     });
   });
+}
+async function findInstallRoot(workspaceRoot, packageDirectory) {
+  for (let directory = packageDirectory; ; directory = dirname(directory)) {
+    try {
+      const lock = JSON.parse(await readFile(join(directory, "package-lock.json"), "utf8"));
+      const workspace = relative(directory, packageDirectory).split("\\").join("/");
+      if (!workspace || lock.packages?.[workspace]) return directory;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (directory === workspaceRoot) return null;
+  }
 }
 export async function main(args = process.argv.slice(2)) {
   const [command = "help", directory = "."] = args;
@@ -336,30 +348,40 @@ export async function main(args = process.argv.slice(2)) {
       console.log("Connected. Open the project in Traceyard.");
       return;
     }
-    let pkg;
-    try {
-      pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    } catch {
-      await report(
-        "complete",
-        "SKIPPED",
-        "This runner supports npm projects. Configure a supported runtime to execute tests.",
+    let pkg,
+      packageDirectory = root,
+      focusedRunner;
+    if (manifest.investigation) {
+      repositoryIndex ??= await indexRepository(workspaceRoot);
+      const prepared = await prepareTargetedTest(
+        workspaceRoot,
+        repositoryIndex,
+        manifest.investigation,
       );
-      completed = true;
-      return;
-    }
-    if (
-      !manifest.cases.length &&
-      !pkg.scripts?.build &&
-      (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
-    ) {
-      await report(
-        "complete",
-        "SKIPPED",
-        "No build or tests configured. Source discovery is available; no application commands were run.",
-      );
-      completed = true;
-      return;
+      if (prepared.reason) throw new Error(prepared.reason);
+      packageDirectory = prepared.directory;
+      focusedRunner = prepared.runner;
+    } else {
+      try {
+        pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+      } catch {
+        await report("complete", "SKIPPED", "This runner needs an npm project to execute tests.");
+        completed = true;
+        return;
+      }
+      if (
+        !manifest.cases.length &&
+        !pkg.scripts?.build &&
+        (!pkg.scripts?.test || /no test specified/.test(pkg.scripts.test))
+      ) {
+        await report(
+          "complete",
+          "SKIPPED",
+          "No build or tests configured. Source discovery is available; no application commands were run.",
+        );
+        completed = true;
+        return;
+      }
     }
     const env = { ...process.env };
     delete env.TRACEYARD_KEY;
@@ -368,26 +390,14 @@ export async function main(args = process.argv.slice(2)) {
     delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
     delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
     await report("install", "RUNNING", "Installing project dependencies.");
-    let installRoot = root;
-    try {
-      await lstat(join(installRoot, "package-lock.json"));
-    } catch {
-      // npm workspaces install from their shared lockfile, while application
-      // commands still run in the selected directory.
-      try {
-        const lock = JSON.parse(await readFile(join(workspaceRoot, "package-lock.json"), "utf8"));
-        const workspace = relative(workspaceRoot, root).split("\\").join("/");
-        if (!workspace || !lock.packages?.[workspace]) throw Error("Not an npm workspace");
-        installRoot = workspaceRoot;
-      } catch {
-        await report(
-          "complete",
-          "SKIPPED",
-          "A package-lock.json is required in this application or its npm workspace root.",
-        );
-        completed = true;
-        return;
-      }
+    const installRoot = await findInstallRoot(workspaceRoot, packageDirectory);
+    if (!installRoot) {
+      const message =
+        "A package-lock.json is required in this application or its npm workspace root.";
+      if (manifest.investigation) throw new Error(message);
+      await report("complete", "SKIPPED", message);
+      completed = true;
+      return;
     }
     const replaying = Boolean(manifest.investigation?.replayRecording);
     const installEnv = replaying
@@ -404,7 +414,7 @@ export async function main(args = process.argv.slice(2)) {
       "install",
     );
     await report("install", "SUCCEEDED", "Dependencies installed.");
-    if (pkg.scripts?.build && !manifest.cases.length && !manifest.investigation) {
+    if (pkg?.scripts?.build && !manifest.cases.length && !manifest.investigation) {
       await report("build", "RUNNING", "Running the existing build script.");
       await execute(
         process.platform === "win32" ? "npm.cmd" : "npm",
@@ -422,7 +432,9 @@ export async function main(args = process.argv.slice(2)) {
         "SKIPPED",
         manifest.cases.length
           ? "Starting the selected application directly for its request test."
-          : "No build script configured.",
+          : manifest.investigation
+            ? "Running the selected test directly."
+            : "No build script configured.",
       );
     if (
       !manifest.cases.length &&
@@ -464,7 +476,7 @@ export async function main(args = process.argv.slice(2)) {
     if (manifest.investigation) {
       const plan = manifest.investigation;
       const capture =
-        plan.captureInteractions && !plan.replayRecording
+        plan.captureInteractions && !plan.replayRecording && focusedRunner === "vitest"
           ? await mkdtemp(join(tmpdir(), "traceyard-capture-"))
           : null;
       const captureFile = capture ? join(capture, "interactions.jsonl") : null;
@@ -484,6 +496,9 @@ export async function main(args = process.argv.slice(2)) {
             }
           : testEnv,
       );
+      if (plan.captureInteractions && focusedRunner === "jest")
+        focused.message =
+          focused.message.slice(0, 1850) + " Interaction recording requires Vitest.";
       try {
         if (captureFile && focused.command.testPath) {
           const recording = await buildRecording(captureFile, sha, focused.command.testPath);

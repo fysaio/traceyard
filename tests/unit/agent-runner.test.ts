@@ -15,6 +15,7 @@ it.each([
   ["SUCCEEDED", "managed"],
   ["FAILED", "managed"],
   ["SUCCEEDED", "managed-workspace"],
+  ["SUCCEEDED", "managed-focused-workspace"],
   ["SUCCEEDED", "vitest"],
   ["FAILED", "vitest"],
 ])(
@@ -22,7 +23,11 @@ it.each([
   async (expectedStatus, mode) => {
     const root = await mkdtemp(join(tmpdir(), "traceyard-agent-"));
     const managed = mode.startsWith("managed");
-    const appRoot = mode === "managed-workspace" ? join(root, "apps", "api") : root;
+    const focused = mode === "managed-focused-workspace";
+    const workspace = focused || mode === "managed-workspace";
+    const appRoot = workspace ? join(root, "apps", "api") : root;
+    const selectedTest = "apps/api/tests/unit/target.test.ts";
+    const investigationId = "inv_" + "a".repeat(32);
     await mkdir(appRoot, { recursive: true });
     const received: {
       path: string;
@@ -37,11 +42,23 @@ it.each([
           JSON.stringify({
             data: {
               config: {
-                directory: mode === "managed-workspace" ? "apps/api" : ".",
+                directory: workspace && !focused ? "apps/api" : ".",
                 startScript: "",
                 port: 3000,
               },
               cases: [],
+              ...(focused
+                ? {
+                    investigation: {
+                      investigationId,
+                      requestId: "req_" + "b".repeat(32),
+                      question: "Run the selected workspace test",
+                      testPath: selectedTest,
+                      commit: null,
+                      timeoutMs: 20000,
+                    },
+                  }
+                : {}),
             },
           }),
         );
@@ -90,9 +107,9 @@ it.each([
             "": {
               name: "agent-fixture",
               version: "1.0.0",
-              ...(mode === "managed-workspace" ? { workspaces: ["apps/api"] } : {}),
+              ...(workspace ? { workspaces: ["apps/api"] } : {}),
             },
-            ...(mode === "managed-workspace"
+            ...(workspace
               ? {
                   "apps/api": { name: "agent-fixture-api", version: "1.0.0" },
                   "node_modules/agent-fixture-api": { resolved: "apps/api", link: true },
@@ -101,7 +118,7 @@ it.each([
           },
         }),
       );
-      if (mode === "managed-workspace") {
+      if (workspace) {
         await writeFile(
           join(root, "package.json"),
           JSON.stringify({ name: "agent-fixture", version: "1.0.0", workspaces: ["apps/api"] }),
@@ -110,7 +127,11 @@ it.each([
           name: "agent-fixture-api",
           version: "1.0.0",
           type: "module",
-          scripts: { test: "node --test test.mjs" },
+          scripts: focused
+            ? {
+                "test:unit": `node ${JSON.stringify(resolve("node_modules/vitest/vitest.mjs"))} run`,
+              }
+            : { test: "node --test test.mjs" },
         };
         await writeFile(join(appRoot, "package.json"), JSON.stringify(appPackage));
       }
@@ -127,6 +148,24 @@ it.each([
         join(appRoot, "test.mjs"),
         `import {test} from ${JSON.stringify(mode === "vitest" ? pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href : "node:test")};import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${mode === "vitest" ? "await new Promise(r=>setTimeout(r,700));" : ""}${expectedStatus === "FAILED" ? "throw new Error('supabaseUrl is required. private@example.test');" : ""}});`,
       );
+      if (focused) {
+        await mkdir(join(appRoot, "tests", "unit"), { recursive: true });
+        await writeFile(
+          join(root, selectedTest),
+          `import {test} from ${JSON.stringify(pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href)};
+           import {createServer} from 'node:http';
+           import {once} from 'node:events';
+           test('workspace HTTP check', async () => {
+             const server = createServer((_req, res) => res.end('ok')).listen(0, '127.0.0.1');
+             await once(server, 'listening');
+             try {
+               const response = await fetch('http://127.0.0.1:' + server.address().port + '/interpret');
+               if (await response.text() !== 'ok') throw new Error('Unexpected body');
+             } finally { server.closeAllConnections(); server.close(); }
+             await new Promise(resolve => setTimeout(resolve, 700));
+           });`,
+        );
+      }
       const result = await new Promise<{ code: number | null; output: string }>((done, reject) => {
         const child = spawn(process.execPath, [resolve("agent/cli.mjs"), "run", root], {
           env: {
@@ -164,6 +203,15 @@ it.each([
         );
       expect(reports.find((r) => r.operations)?.operations?.[0]?.name).toBe("POST /interpret");
       expect(reports.at(-1)).toMatchObject({ phase: "complete", status: expectedStatus });
+      if (focused) {
+        expect(
+          received.find((r) => r.path.endsWith(investigationId + "/report"))?.body,
+        ).toMatchObject({
+          status: "SUCCEEDED",
+          command: { directory: "apps/api", script: "test:unit", testPath: selectedTest },
+          counts: { passed: 1, failed: 0, skipped: 0 },
+        });
+      }
       if (expectedStatus === "FAILED") {
         expect(reports.find((r) => r.phase === "test" && r.status === "FAILED")?.message).toContain(
           "Supabase test configuration is missing",
@@ -192,7 +240,7 @@ it.each([
         result.output,
       ).toBe(true);
       expect(spans[0]?.attributes.service).toContain(
-        mode === "managed-workspace" ? "api" : "traceyard-agent-",
+        workspace && !focused ? "api" : "traceyard-agent-",
       );
       expect((spans[0]?.attributes as Record<string, unknown>)["traceyard.run.id"]).toMatch(
         managed ? /^managed_/ : /^local-/,
