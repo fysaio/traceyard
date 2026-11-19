@@ -20,7 +20,7 @@
     {
       "action": "expectText",
       "selector": "[role=\"alert\"]",
-      "text": "That sign-in link expired or could not be verified. Continue with GitHub to try again."
+      "text": "This candidate assertion must never be used."
     }
   ]
 }
