@@ -207,8 +207,8 @@ export function InvestigationsPage() {
             <p className="hint">
               {mode === "execute"
                 ? catalog.data?.executionProvider === "github"
-                  ? "Focused runs require an npm lockfile and a direct Vitest script. GitHub Actions usage counts toward your allowance."
-                  : "Focused runs require an npm lockfile and a direct Vitest script."
+                  ? "Focused runs require an npm lockfile and a direct Vitest or Jest script. GitHub Actions usage counts toward your allowance."
+                  : "Focused runs require an npm lockfile and a direct Vitest or Jest script."
                 : "Looks through code and saved evidence without running tests."}
             </p>
             {mode === "execute" && !ready && !catalog.isPending && (

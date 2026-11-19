@@ -1,4 +1,4 @@
-import { relative } from "node:path";
+import { isAbsolute, relative } from "node:path";
 export function sanitizeDiagnostic(value, max = 1500) {
   return String(value)
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]")
@@ -10,10 +10,8 @@ export function normalizeVitestReport(data, exitCode, root = "") {
   const failures = [];
   let omitted = false;
   for (const file of data.testResults ?? []) {
-    const fileName =
-      root && String(file.name ?? "").startsWith(root)
-        ? relative(root, file.name).split("\\").join("/")
-        : String(file.name ?? "");
+    const path = String(file.name ?? "");
+    const fileName = (root && isAbsolute(path) ? relative(root, path) : path).split("\\").join("/");
     for (const test of file.assertionResults ?? [])
       if (test.status === "failed") {
         if (failures.length === 8) {

@@ -26,21 +26,24 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: fysaio/traceyard
-          ref: cea08ac268b570dd0724c1d693a79acecd6d84c0
+          ref: 00b9dccd450eaa0753e38d5ea991b8634c157df5
           path: .traceyard-runner
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: ${{ hashFiles('package-lock.json') != '' && 'package-lock.json' || '**/package-lock.json' }}
+          cache-dependency-path: |
+            **/package-lock.json
+            .traceyard-runner/runner/package/package-lock.json
       - name: Install runner dependencies
-        run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund
+        run: npm ci --prefix .traceyard-runner/runner/package --omit=dev --ignore-scripts --no-audit --no-fund --prefer-offline
       - name: Prepare trusted runner
         run: node .traceyard-runner/runner/prepare.mjs
       - name: Discover, build and test
         env:
           CI: 'true'
+          NPM_CONFIG_PREFER_OFFLINE: 'true'
           NPM_CONFIG_AUDIT: 'false'
           NPM_CONFIG_FUND: 'false'
           NPM_CONFIG_FETCH_TIMEOUT: '30000'

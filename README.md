@@ -17,6 +17,8 @@ Start with the path of a failing Vitest test, the commit that failed, and a push
 
 If the failure does not reproduce, **Check for flakiness** can run three fresh checkouts at each commit on GitHub Actions. Allow up to about 10 extra minutes on the runner plus queue time. The result shows each attempt.
 
+Focused Jest runs are also available for supported npm packages. The flakiness check uses Vitest.
+
 ## More
 
 [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [MIT license](LICENSE)
