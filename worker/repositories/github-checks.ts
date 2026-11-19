@@ -10,7 +10,6 @@ interface Setup {
   branch: string;
   number: number;
   headSha: string;
-  mergeId?: string;
 }
 interface Pull {
   number: number;
@@ -130,78 +129,62 @@ export async function prepareGitHubChecks(
   env: Env,
   projectId: string,
   fetcher: typeof fetch = fetch,
-  create = true,
+  approvedPreview?: string,
 ) {
   const repo = await connected(env, projectId),
     gh = await repositoryGitHubClient(env, repo.installation_id, repo.repository_id, fetcher);
   const path = `/repos/${repo.full_name}`,
     workflow = contentFor(env);
-  const existing = await optional(
-    gh<{ content: string; sha: string }>(
-      `${path}/contents/${FILE}?ref=${encodeURIComponent(repo.default_branch)}`,
-    ),
+  const { sha: baseSha } = await gh<{ sha: string }>(
+    `${path}/commits/${encodeURIComponent(repo.default_branch)}`,
   );
-  if (existing?.content.replace(/\s/g, "") === encoded(workflow)) return ready(env, projectId);
+  const existing = await optional(
+    gh<{ content: string; sha: string }>(`${path}/contents/${FILE}?ref=${baseSha}`),
+  );
+  if (existing?.content.replace(/\s/g, "") === encoded(workflow))
+    return repo.runner_enabled ? { state: "READY" as const } : ready(env, projectId);
+
+  const workflowHash = await sha256Hex(workflow);
+  const branchPrefix = `traceyard/checks-${projectId}-${workflowHash.slice(0, 10)}`;
   const setup = repo.ci_setup_json ? (JSON.parse(repo.ci_setup_json) as Setup) : null;
-  if (setup?.number) {
+  if (
+    setup?.number &&
+    (setup.branch === branchPrefix || setup.branch.startsWith(branchPrefix + "-"))
+  ) {
     const pr = await checkPull(gh, repo, setup, workflow);
-    if (!pr.merged && pr.state === "open") {
-      if (setup.mergeId) {
-        const merge = await gh<{ status: string; details?: { message?: string } }>(
-          `${path}/pulls/${setup.number}/merge-async/${setup.mergeId}`,
-          { headers: { "X-GitHub-Api-Version": "2026-03-10" } },
-        );
-        if (merge.status === "failed") {
-          await state(
-            env,
-            projectId,
-            "BLOCKED",
-            "GitHub could not merge this setup: " +
-              (merge.details?.message ?? "repository requirements are not satisfied."),
-          );
-          return {
-            state: "BLOCKED" as const,
-            prNumber: setup.number,
-            headSha: setup.headSha,
-            workflow,
-            message:
-              "GitHub has not accepted the merge. Required checks, reviews or permissions may still be outstanding.",
-          };
-        }
-        return {
-          state: "MERGING" as const,
-          prNumber: setup.number,
-          headSha: setup.headSha,
-          workflow,
-        };
-      }
-      if (repo.check_setup_state === "MERGING")
-        return { state: "MERGING" as const, message: "Waiting for GitHub to confirm the merge." };
+    if (pr.state === "open") {
       return {
-        state:
-          repo.check_setup_state === "BLOCKED" ? ("BLOCKED" as const) : ("AWAITING_MERGE" as const),
-        message: repo.check_setup_error ?? undefined,
+        state: "AWAITING_MERGE" as const,
+        prUrl: pr.html_url,
         prNumber: setup.number,
         headSha: setup.headSha,
-        workflow,
       };
     }
-    if (pr.merged)
-      return {
-        state: "MERGING" as const,
-        message: "GitHub is making the merged workflow available.",
-      };
-    if (!create) return { state: "SETUP_REQUIRED" as const };
   }
-  if (!create) {
-    if (
-      repo.check_setup_state === "PREPARING" &&
-      repo.check_setup_updated_at &&
-      Date.parse(repo.check_setup_updated_at) > Date.now() - 120000
-    )
-      return { state: "PREPARING" as const };
-    return { state: "SETUP_REQUIRED" as const };
-  }
+  const preview = {
+    state: "SETUP_REQUIRED" as const,
+    previousWorkflow: existing
+      ? new TextDecoder().decode(Uint8Array.from(atob(existing.content), (c) => c.charCodeAt(0)))
+      : null,
+    workflow,
+    defaultBranch: repo.default_branch,
+    previewKey: await sha256Hex(
+      JSON.stringify([
+        repo.repository_id,
+        repo.default_branch,
+        baseSha,
+        existing?.sha,
+        workflowHash,
+      ]),
+    ),
+  };
+  if (!approvedPreview) return preview;
+  if (approvedPreview !== preview.previewKey)
+    throw conflict(
+      "CI_PREVIEW_STALE",
+      "The default branch or workflow changed. Refresh the preview before creating the pull request.",
+    );
+
   const at = nowIso();
   const claim = await env.DB.prepare(
     "UPDATE project_repositories SET check_setup_state='PREPARING',check_setup_error=NULL,check_setup_updated_at=? WHERE project_id=? AND (check_setup_state!='PREPARING' OR check_setup_updated_at<?) RETURNING project_id",
@@ -210,17 +193,14 @@ export async function prepareGitHubChecks(
     .first();
   if (!claim) return { state: "PREPARING" as const };
   try {
-    const branch = `traceyard/checks-${projectId}-${(await sha256Hex(workflow)).slice(0, 10)}`;
+    const branch = `${branchPrefix}-${baseSha.slice(0, 10)}`;
     const branchRef = await optional(
       gh<{ object: { sha: string } }>(`${path}/git/ref/heads/${branch}`),
     );
     if (!branchRef) {
-      const commit = await gh<{ sha: string }>(
-        `${path}/commits/${encodeURIComponent(repo.default_branch)}`,
-      );
       await gh(`${path}/git/refs`, {
         method: "POST",
-        body: JSON.stringify({ ref: "refs/heads/" + branch, sha: commit.sha }),
+        body: JSON.stringify({ ref: "refs/heads/" + branch, sha: baseSha }),
       });
     }
     const file = await optional(
@@ -228,13 +208,14 @@ export async function prepareGitHubChecks(
         `${path}/contents/${FILE}?ref=${encodeURIComponent(branch)}`,
       ),
     );
+    let approvedHead = branchRef?.object.sha;
     if (file?.content.replace(/\s/g, "") !== encoded(workflow)) {
       if (branchRef && file?.content.replace(/\s/g, "") !== existing?.content.replace(/\s/g, ""))
         throw conflict(
           "CI_SETUP_CHANGED",
           "The setup branch contains an unexpected workflow change.",
         );
-      await gh(`${path}/contents/${FILE}`, {
+      const updated = await gh<{ commit: { sha: string } }>(`${path}/contents/${FILE}`, {
         method: "PUT",
         body: JSON.stringify({
           message: "Enable Traceyard checks",
@@ -243,7 +224,28 @@ export async function prepareGitHubChecks(
           ...(file ? { sha: file.sha } : {}),
         }),
       });
+      approvedHead = updated.commit.sha;
     }
+    if (!approvedHead)
+      throw conflict(
+        "CI_SETUP_CHANGED",
+        "The setup branch changed during preparation. Refresh the preview.",
+      );
+    const difference = await gh<{
+      files?: { filename: string; status: string; previous_filename?: string }[];
+    }>(`${path}/compare/${baseSha}...${approvedHead}`);
+    const changed = difference.files?.[0];
+    if (
+      difference.files?.length !== 1 ||
+      changed?.filename !== FILE ||
+      !["added", "modified"].includes(changed.status) ||
+      changed.previous_filename
+    )
+      throw conflict(
+        "CI_SETUP_CHANGED",
+        "The setup branch contains changes outside the reviewed workflow.",
+      );
+
     const prs = await gh<Pull[]>(
       `${path}/pulls?state=open&head=${encodeURIComponent(repo.full_name.split("/")[0] + ":" + branch)}&base=${encodeURIComponent(repo.default_branch)}`,
     );
@@ -255,21 +257,21 @@ export async function prepareGitHubChecks(
           title: "Enable Traceyard checks",
           head: branch,
           base: repo.default_branch,
-          body: "Adds or updates only the Traceyard CI workflow. Approve and merge from Traceyard. Runs on your GitHub Actions allowance with a 10-minute job limit. Uses GitHub OIDC; no Traceyard API key or application credentials are added. Application source remains unchanged.",
+          body: "Adds or updates only the Traceyard CI workflow. Review and merge this pull request on GitHub. Runs on your GitHub Actions allowance with a 10-minute job limit. Uses GitHub OIDC; no Traceyard API key or application credentials are added. Application source remains unchanged.",
         }),
       }));
-    const saved: Setup = { branch, number: pr.number, headSha: pr.head.sha };
+    const saved: Setup = { branch, number: pr.number, headSha: approvedHead };
+    await checkPull(gh, repo, saved, workflow);
     await env.DB.prepare(
       "UPDATE project_repositories SET ci_setup_json=?,setup_pr_url=?,runner_enabled=0,check_setup_state='AWAITING_MERGE',check_setup_error=NULL,check_setup_updated_at=? WHERE project_id=?",
     )
       .bind(JSON.stringify(saved), pr.html_url, nowIso(), projectId)
       .run();
-    await checkPull(gh, repo, saved, workflow);
     return {
       state: "AWAITING_MERGE" as const,
+      prUrl: pr.html_url,
       prNumber: pr.number,
       headSha: pr.head.sha,
-      workflow,
     };
   } catch (e) {
     await state(
@@ -280,53 +282,6 @@ export async function prepareGitHubChecks(
     );
     throw e;
   }
-}
-export async function approveGitHubChecks(
-  env: Env,
-  projectId: string,
-  input: { prNumber: number; headSha: string },
-  fetcher: typeof fetch = fetch,
-) {
-  const repo = await connected(env, projectId),
-    setup = repo.ci_setup_json ? (JSON.parse(repo.ci_setup_json) as Setup) : null;
-  if (!setup || input.prNumber !== setup.number || input.headSha !== setup.headSha)
-    throw conflict(
-      "CI_APPROVAL_STALE",
-      "This approval does not match the displayed change. Refresh it first.",
-    );
-  const gh = await repositoryGitHubClient(env, repo.installation_id, repo.repository_id, fetcher),
-    path = `/repos/${repo.full_name}`;
-  const pr = await checkPull(gh, repo, setup, contentFor(env));
-  if (pr.merged) return prepareGitHubChecks(env, projectId, fetcher, false);
-  if (pr.state !== "open")
-    throw conflict("CI_SETUP_CLOSED", "This setup PR is closed. Prepare a new setup.");
-  if (repo.check_setup_state === "MERGING")
-    return prepareGitHubChecks(env, projectId, fetcher, false);
-  const result = await gh<{
-    status?: string;
-    uuid?: string;
-    id?: string;
-    details?: { message?: string; uuid?: string };
-  }>(`${path}/pulls/${setup.number}/merge-async`, {
-    method: "PUT",
-    headers: { "X-GitHub-Api-Version": "2026-03-10" },
-    body: JSON.stringify({ sha: setup.headSha, merge_action: "default", bypass_rules: false }),
-  });
-  if (result.status === "failed") {
-    await state(env, projectId, "BLOCKED", "GitHub repository requirements block this merge.");
-    return {
-      state: "BLOCKED" as const,
-      message:
-        "GitHub requires checks, approval or additional permissions before this setup can merge.",
-    };
-  }
-  const mergeId = result.uuid ?? result.id ?? result.details?.uuid;
-  await env.DB.prepare(
-    "UPDATE project_repositories SET ci_setup_json=?,check_setup_state='MERGING',check_setup_error=NULL,check_setup_updated_at=? WHERE project_id=?",
-  )
-    .bind(JSON.stringify({ ...setup, ...(mergeId ? { mergeId } : {}) }), nowIso(), projectId)
-    .run();
-  return { state: "MERGING" as const };
 }
 export async function dispatchGitHubChecks(
   env: Env,
@@ -354,7 +309,7 @@ export async function dispatchGitHubChecks(
   if (!repo.runner_enabled)
     throw conflict(
       "CI_SETUP_REQUIRED",
-      "Enable GitHub checks inside Traceyard before running this check.",
+      "Hosted tests need setup. Review the workflow change, create the setup PR, then merge it on GitHub.",
     );
   const count = await env.DB.prepare(
     "SELECT COUNT(*) AS n FROM github_check_dispatches WHERE project_id=? AND created_at>?",
@@ -383,11 +338,15 @@ export async function dispatchGitHubChecks(
       `${path}/contents/${FILE}?ref=${encodeURIComponent(repo.default_branch)}`,
     ),
   );
-  if (file?.content.replace(/\s/g, "") !== encoded(contentFor(env)))
+  if (file?.content.replace(/\s/g, "") !== encoded(contentFor(env))) {
+    await env.DB.prepare("UPDATE project_repositories SET runner_enabled=0 WHERE project_id=?")
+      .bind(projectId)
+      .run();
     throw conflict(
       "CI_SETUP_REQUIRED",
-      "The GitHub workflow needs an update. Review it inside Traceyard first.",
+      "The GitHub workflow needs an update. Review the change, create the setup PR, then merge it on GitHub.",
     );
+  }
   const config = await env.DB.prepare(
     "SELECT config_json FROM repository_runner_configs WHERE project_id=?",
   )

@@ -256,11 +256,12 @@ export async function startInvestigationExecution(
       ).bind(
         JSON.stringify({
           summary,
+          code: error instanceof ApiError ? error.code : undefined,
           basis: "observed",
           limitations: ["The selected test has not executed."],
           nextAction:
             error instanceof ApiError && error.code === "CI_SETUP_REQUIRED"
-              ? "Enable the reviewed GitHub integration inside Traceyard, then execute this investigation."
+              ? "Review the workflow change, create the setup PR, then merge it on GitHub and rerun this test."
               : "Inspect execution availability and retry when ready.",
         }),
         nowIso(),

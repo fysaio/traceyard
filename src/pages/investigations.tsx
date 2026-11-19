@@ -8,7 +8,7 @@ import { investigations } from "../lib/investigations-api";
 import { integrationRequest } from "../lib/integrations-api";
 import { newIdempotencyKey } from "../lib/api";
 import { ConnectRepository } from "./project-overview";
-import { EnableGitHubChecks } from "./project-experience";
+import { EnableGitHubChecks, type CISetupResult } from "./project-experience";
 import type { Investigation } from "../../shared/contracts/investigations";
 import type { Catalog } from "../../shared/repository/workspace";
 import { ExecutionSummary } from "../components/execution-summary";
@@ -91,6 +91,7 @@ export function InvestigationsPage() {
     [testPath, setTestPath] = useState(""),
     [commit, setCommit] = useState(""),
     [ciUrl, setCiUrl] = useState(""),
+    [setup, setSetup] = useState(false),
     [connect, setConnect] = useState(false),
     [key, setKey] = useState(newIdempotencyKey);
   const catalog = useQuery({
@@ -98,9 +99,16 @@ export function InvestigationsPage() {
     queryFn: () => integrationRequest<Catalog>(projectId, "catalog"),
     enabled: !!project?.repository,
   });
+  const githubSetup = useQuery({
+    queryKey: ["ci-setup", projectId],
+    queryFn: () => integrationRequest<CISetupResult>(projectId, "repository/setup"),
+    enabled: !!project?.repository && catalog.data?.executionProvider === "github",
+    retry: false,
+  });
+  const usesGitHub = catalog.data?.executionProvider === "github";
+  const checkingSetup = catalog.isPending || (usesGitHub && githubSetup.isPending);
   const ready =
-    catalog.data?.executionAvailable &&
-    (catalog.data.executionProvider === "managed" || catalog.data.repository?.runner_enabled !== 0);
+    catalog.data?.executionAvailable && (!usesGitHub || githubSetup.data?.state === "READY");
   const q = useQuery({
     queryKey: ["investigations", projectId],
     queryFn: () => investigations.list(projectId),
@@ -161,19 +169,23 @@ export function InvestigationsPage() {
           <div className="readiness-strip">
             <span>
               <span className={ready ? "readiness-dot ready" : "readiness-dot"} />
-              {catalog.isPending
+              {checkingSetup
                 ? "Checking test execution…"
                 : ready
                   ? "Test execution enabled"
-                  : "Tests need setup"}
+                  : githubSetup.data?.state === "AWAITING_MERGE"
+                    ? "Setup PR needs merging on GitHub"
+                    : githubSetup.data?.previousWorkflow
+                      ? "GitHub workflow needs an update"
+                      : "Tests need setup"}
             </span>
-            {!ready && !catalog.isPending && (
-              <Link className="text-link" to="/connections">
-                Finish setup <Icon name="arrow-right" />
-              </Link>
+            {!ready && !checkingSetup && usesGitHub && (
+              <button className="btn" onClick={() => setSetup(true)}>
+                Review workflow change <Icon name="arrow-right" />
+              </button>
             )}
           </div>
-          <ErrorMessage error={catalog.error} />
+          <ErrorMessage error={catalog.error || githubSetup.error} />
           <form
             className="investigation-composer connected-panel"
             onSubmit={(e) => {
@@ -211,13 +223,10 @@ export function InvestigationsPage() {
                   : "Focused runs require an npm lockfile and a direct Vitest or Jest script."
                 : "Looks through code and saved evidence without running tests."}
             </p>
-            {mode === "execute" && !ready && !catalog.isPending && (
+            {mode === "execute" && !ready && !checkingSetup && (
               <p className="hint">
-                You can inspect source evidence now, or{" "}
-                <Link className="text-link" to="/connections">
-                  enable test execution
-                </Link>{" "}
-                first.
+                Hosted tests need the current workflow merged into the default branch. You can
+                inspect source evidence now.
               </p>
             )}
             {mode === "execute" && ready && (
@@ -386,6 +395,16 @@ export function InvestigationsPage() {
           )}
         </section>
       )}
+      {setup && (
+        <EnableGitHubChecks
+          projectId={projectId}
+          close={() => setSetup(false)}
+          onReady={() => {
+            setSetup(false);
+            void catalog.refetch();
+          }}
+        />
+      )}
       {connect && (
         <ConnectRepository
           destination="investigate"
@@ -463,7 +482,8 @@ function InvestigationDetail() {
   const [selected, setSelected] = useState(params.get("evidence") ?? ""),
     [testPath, setTestPath] = useState(""),
     [commit, setCommit] = useState(""),
-    [flakeCommit, setFlakeCommit] = useState<string | null>(null);
+    [flakeCommit, setFlakeCommit] = useState<string | null>(null),
+    [setup, setSetup] = useState(false);
   const q = useQuery({
     queryKey: ["investigation", projectId, id],
     queryFn: () => investigations.get(projectId, id),
@@ -605,10 +625,10 @@ function InvestigationDetail() {
             </p>
           </>
         )}
-        {i.status === "BLOCKED" && (
-          <Link className="btn" to="/connections">
-            Review test setup
-          </Link>
+        {i.status === "BLOCKED" && i.finding.code === "CI_SETUP_REQUIRED" && (
+          <button className="btn primary" onClick={() => setSetup(true)}>
+            Review workflow change
+          </button>
         )}
         <ErrorMessage error={cancel.error} />
       </section>
@@ -841,6 +861,16 @@ function InvestigationDetail() {
             <ErrorMessage error={execute.error} />
           </form>
         </details>
+      )}
+      {setup && (
+        <EnableGitHubChecks
+          projectId={projectId}
+          close={() => setSetup(false)}
+          onReady={() => {
+            setSetup(false);
+            void cache.invalidateQueries({ queryKey: ["catalog", projectId] });
+          }}
+        />
       )}
       {!!i.attempts?.length && (
         <details className="disclosure section">
@@ -1201,7 +1231,6 @@ export function ConnectionsPage() {
       )}
       {setup && (
         <EnableGitHubChecks
-          enableOnly
           projectId={projectId}
           close={() => setSetup(false)}
           onReady={() => {

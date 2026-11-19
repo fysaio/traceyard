@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { reportSchema } from "../../../shared/repository/contracts";
 import { spanBatchSchema, redact } from "../../../shared/contracts/traces";
-import { prepareGitHubChecks, approveGitHubChecks } from "../../repositories/github-checks";
+import { prepareGitHubChecks } from "../../repositories/github-checks";
 import { dispatchRepositoryChecks } from "../../repositories/checks";
 import { getOwnedProject } from "../../persistence/projects";
 import {
@@ -445,25 +445,23 @@ export function createRepositoryRoutes(fetcher: typeof fetch = fetch) {
   });
   routes.get("/projects/:projectId/repository/setup", async (c) => {
     const { projectId } = await ownedProject(c);
-    return c.json(data(c, await prepareGitHubChecks(c.env, projectId, fetcher, false)));
+    return c.json(data(c, await prepareGitHubChecks(c.env, projectId, fetcher)));
   });
   routes.post("/projects/:projectId/repository/setup", async (c) => {
     const { projectId } = await ownedProject(c);
-    return c.json(data(c, await prepareGitHubChecks(c.env, projectId, fetcher)));
+    const { previewKey } = parseWith(
+      z.object({ previewKey: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+      await readJsonBody(c),
+      "Review the exact workflow change before creating the setup pull request.",
+    );
+    return c.json(data(c, await prepareGitHubChecks(c.env, projectId, fetcher, previewKey)));
   });
   routes.post("/projects/:projectId/repository/enable", async (c) => {
-    const { projectId } = await ownedProject(c);
-    const b = parseWith(
-      z
-        .object({
-          prNumber: z.number().int().positive(),
-          headSha: z.string().regex(/^[a-f0-9]{40}$/),
-        })
-        .strict(),
-      await readJsonBody(c),
-      "Approve the displayed setup version.",
+    await ownedProject(c);
+    throw conflict(
+      "CI_MANUAL_MERGE_REQUIRED",
+      "Open the setup pull request and merge it on GitHub.",
     );
-    return c.json(data(c, await approveGitHubChecks(c.env, projectId, b, fetcher)));
   });
   routes.post("/projects/:projectId/repository/run", async (c) => {
     const { projectId } = await ownedProject(c);
