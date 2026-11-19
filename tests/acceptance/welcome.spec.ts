@@ -25,14 +25,18 @@ test("an anonymous visitor can explore the example and find sign-in at every wid
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    expect(
-      await headline.evaluate(
-        (element) =>
-          element.getBoundingClientRect().height <
-          2.5 * parseFloat(getComputedStyle(element).lineHeight),
-      ),
-      `The headline keeps its two lines at ${width}px`,
-    ).toBe(true);
+    await expect
+      .poll(
+        () =>
+          headline.evaluate((element) => {
+            const lines =
+              element.getBoundingClientRect().height /
+              parseFloat(getComputedStyle(element).lineHeight);
+            return Math.round(lines * 10) / 10;
+          }),
+        { message: `The headline keeps its two lines at ${width}px` },
+      )
+      .toBeLessThan(2.5);
     const path = testInfo.outputPath(`welcome-${width}.png`);
     await page.screenshot({ path, fullPage: true });
     await testInfo.attach(`welcome-${width}`, { path, contentType: "image/png" });
