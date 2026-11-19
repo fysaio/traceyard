@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Run focused Vitest and Jest tests from the selected npm package, including nested workspaces and named scripts such as `test:unit`.
+- Cache npm downloads for GitHub checks using the application and runner lockfiles. Each check still installs dependencies and runs the selected tests.
+
 ## 2026-11-19
 
 - Shortened the README to the first investigation and added a contributor guide.

@@ -10,7 +10,7 @@ A failed test can get buried in CI logs. By the time a fix is ready, it’s easy
 
 1. Open [Traceyard](https://traceyard.pilotsaviour229.workers.dev). **See an example** works without an account.
 2. Sign in with GitHub and connect a repository. To run tests, enable the reviewed GitHub Actions workflow from **Connections**.
-3. In **Investigations**, describe the failure and pick an existing test. Focused execution supports npm projects that run Vitest.
+3. In **Investigations**, describe the failure and pick an existing test. Focused execution supports npm projects that run Vitest or Jest.
 4. Push your fix and choose **Verify a repair** on the result. Enter the new commit SHA to rerun the original test.
 
 You can also connect an agent over MCP. Sign in first, then grant the agent project access when you need it. [Connect a coding agent](docs/MCP.md)

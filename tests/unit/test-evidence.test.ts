@@ -115,3 +115,55 @@ describe("focused investigation evidence", () => {
     }
   }, 60000);
 });
+
+it.each(["vitest", "jest"] as const)(
+  "runs only the selected React or JavaScript test through the real %s CLI",
+  async (runner) => {
+    const root = await mkdtemp(join(resolve("."), ".traceyard-package-"));
+    try {
+      const isJest = runner === "jest";
+      const command = isJest ? "jest --maxWorkers=2" : "vitest run";
+      const file = isJest ? "checkout.test.cjs" : "checkout.test.tsx";
+      const test = isJest
+        ? "const { label } = require('./checkout.cjs'); test('checkout label', () => expect(label).toBe('Done'));"
+        : "import React from 'react'; import {renderToStaticMarkup} from 'react-dom/server'; import {test,expect} from 'vitest'; import {label} from './checkout.cjs'; test('checkout label',()=>expect(renderToStaticMarkup(<button>{label}</button>)).toBe('<button>Done</button>'));";
+      await writeFile(
+        join(root, "package.json"),
+        JSON.stringify({ scripts: { "test:unit": command } }),
+      );
+      await writeFile(join(root, file), test);
+      await writeFile(
+        join(root, "unrelated.test.cjs"),
+        "test('must not run',()=>{ throw Error('unrelated'); });",
+      );
+      const plan = {
+        investigationId: "inv_" + "a".repeat(32),
+        requestId: "req_" + "b".repeat(32),
+        question: "Run checkout test",
+        testPath: file,
+        commit: null,
+        timeoutMs: 20000,
+      };
+      await writeFile(join(root, "checkout.cjs"), "exports.label = 'Broken';");
+      const run = async () =>
+        runTargetedTest(root, await indexRepository(root), plan, {
+          ...process.env,
+          CI: "true",
+          VITEST: "",
+        });
+      const baseline = await run();
+      expect(baseline.status, baseline.message).toBe("FAILED");
+      expect(baseline.failures).toHaveLength(1);
+      expect(baseline.failures[0]?.file).toBe(file);
+      expect(baseline.failures[0]?.name).toContain("checkout label");
+      await writeFile(join(root, "checkout.cjs"), "exports.label = 'Done';");
+      const repaired = await run();
+      expect(repaired.status, repaired.message).toBe("SUCCEEDED");
+      expect(repaired.counts).toMatchObject({ passed: 1, failed: 0 });
+      expect(repaired.command.testPath).toBe(file);
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    }
+  },
+  60000,
+);
