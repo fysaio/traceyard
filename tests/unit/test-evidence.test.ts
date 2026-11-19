@@ -122,7 +122,7 @@ it.each(["vitest", "jest"] as const)(
     const root = await mkdtemp(join(resolve("."), ".traceyard-package-"));
     try {
       const isJest = runner === "jest";
-      const command = isJest ? "jest" : "vitest run";
+      const command = isJest ? "jest --maxWorkers=2" : "vitest run";
       const file = isJest ? "checkout.test.cjs" : "checkout.test.tsx";
       const test = isJest
         ? "const { label } = require('./checkout.cjs'); test('checkout label', () => expect(label).toBe('Done'));"
