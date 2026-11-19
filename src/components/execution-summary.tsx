@@ -53,7 +53,10 @@ export function ExecutionSummary({
         <div>
           <dt>Test</dt>
           <dd>
-            <code>{execution.command.testPath ?? "Selected checks"}</code>
+            <code>
+              {execution.command.testPath ?? "Selected checks"}
+              {execution.command.testCase && "::" + execution.command.testCase}
+            </code>
           </dd>
         </div>
         <div>

@@ -44,6 +44,11 @@ jobs:
           token: ${{ github.token }}
       - name: Verify test evidence and GitHub history matching
         run: node --test runner/test-evidence/evidence.test.mjs
+      - name: Verify the packaged Pytest runner
+        run: |
+          npm ci --prefix runner/package --omit=dev --ignore-scripts --no-audit --no-fund
+          node runner/prepare.mjs
+          node scripts/verify-pytest-runner.mjs runner/package/agent/cli.mjs
       - name: Reproduce investigation cost fixture
         run: node scripts/bench-investigation.mjs
       - name: Isolated recorded replay acceptance

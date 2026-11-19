@@ -5,6 +5,13 @@ import { spawn } from "node:child_process";
 import { summarizeCommandFailure } from "./failure-summary.mjs";
 import { relatedTests } from "./repository-index.mjs";
 import { replayVitest } from "./replay-runner.mjs";
+import {
+  isPytestFile,
+  preparePytest,
+  pytestArgs,
+  pytestEnvironment,
+  normalizePytestEvidence,
+} from "./pytest.mjs";
 
 import { sanitizeDiagnostic, normalizeVitestReport } from "./test-report.mjs";
 export { sanitizeDiagnostic, normalizeVitestReport };
@@ -80,6 +87,8 @@ export async function prepareTargetedTest(workspace, index, plan) {
   const filePath = relative(directory, file);
   if ([packagePath, filePath].some((path) => path.startsWith("..") || isAbsolute(path)))
     return { reason: "The selected test escapes its package workspace." };
+  if (isPytestFile(test.path)) return preparePytest(directory, file, test, plan);
+  if (plan.testCase !== undefined) return { reason: "A case selector requires a Pytest file." };
   let pkg;
   try {
     pkg = JSON.parse(await readFile(join(directory, "package.json"), "utf8"));
@@ -145,23 +154,33 @@ export async function runTargetedTest(workspace, index, plan, env) {
   let tail = "",
     timedOut = false;
   try {
+    const isPytest = runner === "pytest";
+    if (isPytest && !env.TRACEYARD_PYTEST_PYTHON)
+      return blocked("Install this package's Pytest dependencies before rerunning.", command);
+    let evidenceError;
     const exitCode = await new Promise((done, reject) => {
       const child = spawn(
-        process.platform === "win32" ? "npm.cmd" : "npm",
-        [
-          "run",
-          command.script,
-          "--",
-          ...(runner === "jest"
-            ? ["--ci", "--watch=false", "--watchAll=false", "--runTestsByPath", "--json"]
-            : ["--run", "--reporter=json", ...(plan.flakeCandidate ? ["--retry=0"] : [])]),
-          testArgument,
-          "--outputFile=" + output,
-        ],
+        isPytest ? env.TRACEYARD_PYTEST_PYTHON : process.platform === "win32" ? "npm.cmd" : "npm",
+        isPytest
+          ? pytestArgs(
+              testArgument.startsWith("./") ? testArgument : "./" + testArgument,
+              plan.testCase,
+              output,
+            )
+          : [
+              "run",
+              command.script,
+              "--",
+              ...(runner === "jest"
+                ? ["--ci", "--watch=false", "--watchAll=false", "--runTestsByPath", "--json"]
+                : ["--run", "--reporter=json", ...(plan.flakeCandidate ? ["--retry=0"] : [])]),
+              testArgument,
+              "--outputFile=" + output,
+            ],
         {
           cwd: directory,
-          env,
-          shell: process.platform === "win32",
+          env: isPytest ? pytestEnvironment(env) : env,
+          shell: !isPytest && process.platform === "win32",
           detached: process.platform !== "win32",
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -207,23 +226,32 @@ export async function runTargetedTest(workspace, index, plan, env) {
           output: retainedOutput,
         };
       const data = JSON.parse(text);
-      if (!Array.isArray(data.testResults) || !data.testResults.length)
-        return {
-          ...blocked("The test runner did not report a result for the selected file.", command),
-          output: retainedOutput,
-        };
-      if (data.testResults.some(({ name }) => relative(file, resolve(directory, String(name)))))
-        return {
-          ...blocked("The test script reported files outside the selected test.", command),
-          output: retainedOutput,
-        };
-      result = normalizeVitestReport(data, exitCode, root);
+      if (isPytest) {
+        try {
+          result = normalizePytestEvidence(data, exitCode, command);
+        } catch (error) {
+          evidenceError = error.message;
+          throw error;
+        }
+      } else {
+        if (!Array.isArray(data.testResults) || !data.testResults.length)
+          return {
+            ...blocked("The test runner did not report a result for the selected file.", command),
+            output: retainedOutput,
+          };
+        if (data.testResults.some(({ name }) => relative(file, resolve(directory, String(name)))))
+          return {
+            ...blocked("The test script reported files outside the selected test.", command),
+            output: retainedOutput,
+          };
+        result = normalizeVitestReport(data, exitCode, root);
+      }
     } catch {
       return {
         ...blocked(
           timedOut
             ? "The focused test exceeded its time budget."
-            : summarizeCommandFailure(tail, "test", exitCode ?? "interrupted"),
+            : (evidenceError ?? summarizeCommandFailure(tail, "test", exitCode ?? "interrupted")),
           command,
         ),
         output: retainedOutput,
@@ -245,12 +273,13 @@ export async function runTargetedTest(workspace, index, plan, env) {
 export async function runInvestigationPlan(workspace, index, plan, env) {
   const started = Date.now(),
     selection = selectTest(index, plan.question, plan.testPath);
-  if (!selection.test) return runTargetedTest(workspace, index, plan, env);
+  if (!selection.test || isPytestFile(selection.test.path))
+    return runTargetedTest(workspace, index, plan, env);
   const related = [
     ...new Set(
       (plan.changedFiles ?? []).flatMap((file) => relatedTests(index, file).map((t) => t.path)),
     ),
-  ].filter((path) => path !== selection.test.path);
+  ].filter((path) => path !== selection.test.path && !isPytestFile(path));
   const selected = [
     selection.test.path,
     ...related.slice(0, (plan.replayRecording ? 1 : (plan.maxTestFiles ?? 1)) - 1),

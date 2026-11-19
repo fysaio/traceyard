@@ -1,5 +1,5 @@
 FROM node:22-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 python3-venv && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/traceyard
 COPY runner/package/package.json runner/package/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund

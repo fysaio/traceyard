@@ -18,6 +18,10 @@ inputs:
     description: Read-only GitHub Actions token for earlier snapshots.
     required: false
     default: ""
+  traceyard-url:
+    description: HTTPS app origin for links that prefill Pytest reruns.
+    required: false
+    default: ""
   baseline:
     description: Branch whose push runs supply a baseline.
     required: false
@@ -36,6 +40,7 @@ runs:
         TRACEYARD_TESTED_SHA: ${{ inputs.tested-sha }}
         TRACEYARD_TEST_LANE: ${{ inputs.lane }}
         TRACEYARD_TEST_OUTCOME: ${{ inputs.test-outcome }}
+        TRACEYARD_TEST_APP_URL: ${{ inputs.traceyard-url }}
         TRACEYARD_TEST_TOKEN: ${{ inputs.token }}
         TRACEYARD_TEST_BASELINE: ${{ inputs.baseline || github.event.repository.default_branch }}
         TRACEYARD_TEST_OUTPUT: ${{ runner.temp }}/traceyard-test-evidence/${{ inputs.lane }}
