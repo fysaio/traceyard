@@ -25,7 +25,7 @@ import { Compare } from "./pages/compare";
 import { Studio } from "./pages/studio";
 import { RunLedger } from "./pages/run-ledger";
 import { useState, useEffect, useRef, type FormEvent, type ReactNode } from "react";
-import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, readAllEvents, newIdempotencyKey, type AuthSession } from "./lib/api";
 import type { WorkflowSummary } from "../shared/contracts/api";
@@ -133,6 +133,8 @@ export function App() {
   return <Workspace session={session.data} />;
 }
 function Welcome({ session }: { session: AuthSession }) {
+  const [searchParams] = useSearchParams();
+  const signIn = searchParams.get("signIn");
   return (
     <div className="entry">
       <Link to="/" className="brand">
@@ -147,6 +149,13 @@ function Welcome({ session }: { session: AuthSession }) {
           Debug existing code with focused tests and retained evidence. Use your coding agent or
           open the same investigation here.
         </p>
+        {(signIn === "retry" || signIn === "cancelled") && (
+          <p role="alert">
+            {signIn === "cancelled"
+              ? "Sign-in was cancelled. Continue with GitHub when you’re ready."
+              : "That sign-in link expired or could not be verified. Continue with GitHub to try again."}
+          </p>
+        )}
         <div className="entry-actions">
           {session.githubSignInAvailable ? (
             <a className="btn primary" href="/api/auth/github/start">
