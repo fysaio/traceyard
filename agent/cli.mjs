@@ -240,9 +240,15 @@ export async function runFlakiness(root, plan, env, checkoutToken) {
 export async function main(args = process.argv.slice(2)) {
   const [command = "help", directory = "."] = args;
   let root = resolve(directory);
+  if (command === "compare-browser" || command === "browser-fixtures") {
+    const { browserCompareCommand, browserFixturesCommand } = await import("./browser-journey.mjs");
+    const run = command === "compare-browser" ? browserCompareCommand : browserFixturesCommand;
+    await run(args.slice(1));
+    return;
+  }
   if (command === "help" || !["scan", "connect", "run"].includes(command)) {
     console.log(
-      "Traceyard: scan [directory] (offline), connect [directory] (upload source index), run [directory] (install/build/test with recording).",
+      "Traceyard: scan [directory], connect [directory], run [directory], compare-browser <journey.json> <baseline SHA> <candidate SHA>, browser-fixtures <journey.json> <recording.har> <recorded origin>.",
     );
     return;
   }
