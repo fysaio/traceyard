@@ -1,50 +1,24 @@
-# Coding-agent connection
+# Connect a coding agent
 
-Add `https://YOUR_TRACEYARD_HOST/mcp` as a remote MCP server in a client that supports Streamable HTTP and OAuth browser authorization. Sign in with your GitHub account and connect the client. This step grants no access to projects. No Traceyard server key or application provider key is pasted into the client.
+Open **Connections** in Traceyard and choose your client. For the hosted app, the remote MCP URL is `https://traceyard.pilotsaviour229.workers.dev/mcp`. Use Streamable HTTP with OAuth.
 
-The endpoint uses the same investigations and evidence as the browser APIs. It is enabled only after the application revision and migrations through `0022_investigation_retention.sql` are deployed. Targeted execution additionally requires the compatible reviewed runner; installing MCP does not attach to an already-deployed application process.
+1. Add Traceyard to your MCP client and complete GitHub sign-in in the browser.
+2. Ask the agent to inspect your repository. If it needs project access, open the link it returns and choose **Allow access**. Connect the repository in Traceyard if it is missing.
+3. Ask a concrete question, such as “Run the checkout retry test and show me why it failed.” Follow the returned browser link to see the same evidence.
 
-## Antigravity
-
-In Traceyard Connections, expand **Connect with Antigravity**, copy the setup request and paste it into an Antigravity chat. Review the configuration update, which asks the agent to preserve existing servers. Antigravity manages local MCP configuration and authorization; Traceyard cannot silently edit those settings from its web page.
-
-For manual configuration, add an entry named `traceyard` with `serverUrl` set to the deployed `/mcp` endpoint inside the existing `mcpServers` object. Antigravity's configuration is `~/.gemini/config/mcp_config.json` (under `%USERPROFILE%` on Windows). Then use **Customizations → Installed → MCP Servers → Authenticate**. Finish connecting in the browser. When you first ask the agent to work on a repository, use the link it returns to allow access to that project. Finish any authorization-code step inside Antigravity. An Unauthorized status before completing this flow does not establish a transport failure.
-
-See [Antigravity's MCP documentation](https://antigravity.google/docs/mcp?tab=ide). Its remote Streamable HTTP and dynamic client registration match the supported Traceyard flow. Successful integration tests do not prove that a particular installed Antigravity version has connected.
-
-## Browser consent
-
-The authorization document uses `Referrer-Policy: same-origin`: a native form under `no-referrer` otherwise submits `Origin: null`, which the cross-origin guard correctly rejects. Other responses, including the callback redirect, retain `no-referrer`. The consent document permits its validated, registered callback origin in CSP `form-action`, because Chromium applies that directive to the form's redirect too. Global form destinations stay restricted to self, and null/untrusted Origins remain rejected.
-
-An agent can connect before you have a repository. Call `inspect` with `section: capabilities` to check the connection. If it needs project access, open the returned browser link, sign in if prompted, and select **Allow access** for a project you own. If the repo is missing, connect it in Repositories and return to the access page. You can approve several projects for the same connection. With multiple approvals, pass `projectId` on the tool call. An investigation can also use `expectedRepository` to match an approved project.
+In Antigravity, copy the setup request from Traceyard’s **Connections** page, or add the MCP URL as `serverUrl` in your existing `mcpServers` configuration. Open **Customizations → Installed → MCP Servers** and select **Authenticate**.
 
 ## Tools
 
-| Tool          | Use                                                                                                                                                                                                                                     |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `investigate` | Read indexed source or existing failure evidence. `mode: execute` requests a focused existing Vitest test; ambiguous matches return candidate paths. Optional JSON capture enables `mode: replay` with an eligible recording reference. |
-| `inspect`     | Read a finding, status, evidence range, exact-revision source excerpt, verification, recording manifests or recent investigations.                                                                                                      |
-| `verify`      | Run a retained failed reproducer against a candidate commit, with bounded related regressions and changed-test disclosure.                                                                                                              |
-| `recover`     | Resume/restart an owned failed Traceyard workflow when the connection grants `runs:recover`. Observation of arbitrary code is not a continuation checkpoint.                                                                            |
+| Tool          | Use                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `investigate` | Read indexed source or run an existing Vitest test in the configured repository.       |
+| `inspect`     | Read findings, exact-revision source, evidence, or a verification result.              |
+| `verify`      | Rerun a saved failing test at a candidate commit and report changes to its test files. |
+| `recover`     | Resume or restart an owned Traceyard workflow with the recovery scope.                 |
 
-Start with a question such as “Use Traceyard to investigate the failing Today proposal test.” The coding agent should request relevant evidence, edit through its existing repository tools and verify the candidate. Tests execute in the configured repository environment, not in the MCP transport process.
+Connections are account-wide. Each project approval controls which repository the agent can access. Use **Manage agent access** to remove a project approval or disconnect the agent. For multiple approved projects, pass `projectId` when the client exposes it.
 
-Results use durable investigation IDs. The `browserUrl` opens the same record. `outputChars` bounds the brief; `omitted` signals details available through `inspect`. Evidence ranges include `nextOffset`. Polling status returns a small result and a suggested interval, rather than repeating full artifacts.
+POST requests return tool results. Authenticated GET opens a server-sent event stream with a heartbeat every 15 seconds. This accommodates clients that keep a listening connection open.
 
-Default authorization permits investigation reads and supported execution. Real workflow recovery is a separate requested scope. Connections use expiring access tokens and rotating refresh tokens. Use **Manage agent access** to remove a project approval or disconnect the agent entirely. Existing project-bound connections keep their original permissions.
-
-## Compatibility and evidence
-
-The implementation uses official MCP TypeScript SDK `1.32.2` and its web-standard stateless HTTP transport. Local integration tests exercise the official client SDK's authorization discovery, dynamic registration, PKCE exchange, protocol negotiation, tool discovery, invocation, reconnect and revocation. This does not establish compatibility with every coding-agent product or a live deployed OAuth provider.
-
-No general token-savings percentage is claimed. Structured evidence avoids unbounded log output; measured provider usage and client token accounting remain separate from character budgets.
-
-The hosted transport serves independent JSON responses over POST. Authenticated GET with `Accept: text/event-stream` opens a passive stream, sends an initial comment and a heartbeat every 15 seconds, and stays open until disconnect or authorization failure. It carries no tool responses, session IDs, or synthetic notifications. Its lifetime is independent of the short-lived POST SDK server. Backpressure bounds queued heartbeats; cancellation clears the timer. Authorization is rechecked on each heartbeat without consuming the tool request budget. Tool requests still enforce current authorization immediately. DELETE remains unsupported (405), since there is no retained transport session.
-
-Although the protocol permits declining optional GET with 405, the operator's Antigravity displayed that response as a fatal error. [A matching upstream client report](https://github.com/google-antigravity/antigravity-cli/issues/877) documents the same compatibility limitation. A closed 200 stream caused repeated EOF retries; switching to 405 passed the official TypeScript client but did not solve this installed client. Tests now require a real, persistent 200 stream, rather than only checking the TypeScript client's acceptance of 405. Browser/real-HTTP acceptance holds it open across five heartbeats (75 seconds), checks tool calls after idle, reconnects, and verifies revocation closes the stream. Those checks are transport evidence, not proof of a successful connection in the operator's installed Antigravity.
-
-## Operator notes
-
-The existing public origin and GitHub sign-in configuration are reused. MCP client authorization is separate from GitHub repository installation access. Route `/mcp`, `/oauth/*` and `/.well-known/*` to the Worker rather than the SPA asset fallback. Discovery metadata is public; tools require a scoped token. Repository source, logs and model responses are untrusted data, not tool instructions.
-
-See [deployment and acceptance](INVESTIGATION_RELEASE.md) for the complete release gate and [the measured fixture](benchmarks/investigation-fixture.json) for evidence-size accounting.
+[Repository setup](REPOSITORY_SETUP.md) · [Interaction replay](REPLAY.md) · [Changelog](../CHANGELOG.md)

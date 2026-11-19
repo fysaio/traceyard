@@ -27,5 +27,25 @@ it does not wait, prompt for interactive login, or start a retry loop. Add the
 secret and rerun the failed release job. A Cloudflare API failure stops the release
 at its failing stage; inspect the error before deliberately rerunning it.
 
-A successful deployment is followed by actual browser and authenticated MCP
-acceptance. Public health checks alone do not prove the complete user journey.
+## Local hosting
+
+Create a GitHub OAuth application with a callback at `http://localhost:5173/api/auth/github/callback`. Save its credentials in an ignored `.dev.vars` file before running `npm run dev`.
+
+```text
+PUBLIC_APP_ORIGIN=http://localhost:5173
+GITHUB_CLIENT_ID=<OAuth client ID>
+GITHUB_CLIENT_SECRET=<OAuth client secret>
+INTEGRATION_ENCRYPTION_KEY=<base64 encoding of 32 random bytes>
+```
+
+Use a separate HTTPS callback and encrypted secrets for a deployed instance. Set `OUTBOUND_ALLOWED_HOSTS` if you use outgoing callbacks. Keep the integration encryption key stable so stored credentials remain readable. For GitHub repository runs, configure the App in [repository setup](REPOSITORY_SETUP.md).
+
+## Deploy from a checkout
+
+```sh
+npm ci
+npx wrangler login
+npm run deploy:investigations -- --origin https://your-traceyard-host.example
+```
+
+Use the Cloudflare account and bindings for your deployment. The script checks health and the MCP authorization challenge after deploying. See [CHANGELOG.md](../CHANGELOG.md) for hosted verification records.
