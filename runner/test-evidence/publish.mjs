@@ -128,8 +128,18 @@ async function main() {
   const file = join(outputDirectory, "report.json");
   await writeFile(file, body + "\n");
   const summary = renderSummary(report);
-  if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, summary);
-  else console.log(summary);
+  if (env.GITHUB_STEP_SUMMARY) {
+    await appendFile(env.GITHUB_STEP_SUMMARY, summary);
+    console.log(
+      "Published " +
+        source.files +
+        " JUnit reports. History: " +
+        history.status +
+        ", " +
+        history.snapshots.length +
+        " earlier snapshots.",
+    );
+  } else console.log(summary);
   if (env.GITHUB_OUTPUT) await appendFile(env.GITHUB_OUTPUT, "report=" + file + "\n");
 }
 
