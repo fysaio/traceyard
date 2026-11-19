@@ -19,9 +19,6 @@ import {
 import { beginInvestigation } from "../services/investigation-execution";
 import { createVerification, getVerification } from "../services/verification-service";
 import { getRecording } from "../services/recording-service";
-import { retryRun } from "../services/run-service";
-import { sha256Hex } from "../lib/crypto";
-import { nowIso } from "../lib/time";
 import { githubRequest } from "../repositories/github";
 import { redact } from "../../shared/contracts/traces";
 import { ApiError, notFound, badRequest } from "../api/errors";
@@ -564,64 +561,6 @@ export function createAgentServer(c: Context<AppEnv>, principal: AgentPrincipal)
         args.projectId,
       )(),
   );
-  server.registerTool(
-    "recover",
-    {
-      description:
-        "Resume or restart a failed Traceyard-owned workflow. Resume reuses retained checkpoints; restart can repeat completed external actions. Arbitrary traces cannot be resumed.",
-      inputSchema: {
-        projectId: projectSelection,
-        executionId: z.string().min(1).max(100),
-        mode: z.enum(["resume", "restart"]).default("resume"),
-        outputChars: budget,
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: false,
-        openWorldHint: true,
-      },
-    },
-    async (args) =>
-      guard(
-        "runs:recover",
-        async (principal) => {
-          const run = await c.env.DB.prepare(
-            "SELECT id FROM runs WHERE id=? AND project_id=? AND owner_user_id=?",
-          )
-            .bind(args.executionId, principal.projectId, principal.userId)
-            .first();
-          if (!run) throw notFound("Recoverable execution not found.");
-          const hash = await sha256Hex("agent:" + principal.grantId),
-            at = nowIso();
-          await c.env.DB.prepare(
-            "INSERT INTO sandbox_sessions(id_hash,ip_hash,user_agent_hash,created_at,last_seen_at) VALUES(?,?,'mcp',?,?) ON CONFLICT DO NOTHING",
-          )
-            .bind(hash, hash, at, at)
-            .run();
-          const recovered = await retryRun(c.env, {
-            session: { idHash: hash, ipHash: hash, isNew: false },
-            userId: principal.userId,
-            runId: args.executionId,
-            requestId: c.get("requestContext").requestId,
-            config: c.get("requestContext").config,
-            mode: args.mode,
-          });
-          return result(
-            {
-              status: recovered.run.status,
-              executionId: recovered.run.id,
-              summary:
-                args.mode === "resume"
-                  ? "Recovery requested using retained checkpoints. External idempotency depends on the receiver."
-                  : "A restart was requested and may repeat completed effects.",
-            },
-            args.outputChars,
-          );
-        },
-        args.projectId,
-      )(),
-  );
   return server;
 }
 export async function handleMcp(c: Context<AppEnv>) {
@@ -684,14 +623,12 @@ export async function handleMcp(c: Context<AppEnv>) {
   const wire = body as
     { method?: string; params?: { name?: string; arguments?: { mode?: string } } } | undefined;
   const scope =
-    wire?.method === "tools/call" && wire.params?.name === "recover"
-      ? "runs:recover"
-      : wire?.method === "tools/call" &&
-          (wire.params?.name === "verify" ||
-            (wire.params?.name === "investigate" &&
-              ["execute", "replay"].includes(wire.params.arguments?.mode ?? "analyze")))
-        ? "investigations:run"
-        : "investigations:read";
+    wire?.method === "tools/call" &&
+    (wire.params?.name === "verify" ||
+      (wire.params?.name === "investigate" &&
+        ["execute", "replay"].includes(wire.params.arguments?.mode ?? "analyze")))
+      ? "investigations:run"
+      : "investigations:read";
   if (!principal.scopes.includes(scope)) {
     c.header(
       "WWW-Authenticate",

@@ -2,7 +2,9 @@ import { z } from "zod";
 import { randomId, randomToken, sha256Hex, sha256Base64Url, fingerprint } from "../lib/crypto";
 import { nowIso, isoFromNow } from "../lib/time";
 import { ApiError, badRequest, forbidden, tooManyRequests } from "../api/errors";
-export const AGENT_SCOPES = ["investigations:read", "investigations:run", "runs:recover"] as const;
+export const AGENT_SCOPES = ["investigations:read", "investigations:run"] as const;
+// Retired with workflow recovery. Older clients may still request it; drop it instead of failing.
+const RETIRED_SCOPES = new Set(["runs:recover"]);
 export interface AgentPrincipal {
   grantId: string;
   userId: string;
@@ -124,7 +126,9 @@ export async function validateAuthorization(
     );
   const scopes = [
     ...new Set(
-      (query.scope ?? "investigations:read investigations:run").split(/\s+/).filter(Boolean),
+      (query.scope ?? "investigations:read investigations:run")
+        .split(/\s+/)
+        .filter((scope) => scope && !RETIRED_SCOPES.has(scope)),
     ),
   ];
   if (

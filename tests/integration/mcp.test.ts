@@ -182,7 +182,7 @@ describe("authenticated remote MCP", () => {
       remote.c.onerror = (error) => errors.push(error);
       try {
         await remote.c.connect(remote.transport);
-        expect((await remote.c.listTools()).tools).toHaveLength(4);
+        expect((await remote.c.listTools()).tools).toHaveLength(3);
         const finding = await remote.c.callTool({
           name: "investigate",
           arguments: {
@@ -192,7 +192,7 @@ describe("authenticated remote MCP", () => {
           },
         });
         expect(finding.isError).not.toBe(true);
-        expect((await remote.c.listTools()).tools).toHaveLength(4);
+        expect((await remote.c.listTools()).tools).toHaveLength(3);
         expect(errors).toEqual([]);
       } finally {
         await remote.c.close();
@@ -331,7 +331,7 @@ describe("authenticated remote MCP", () => {
     await initial.close();
     const connected = new Client({ name: "oauth-client", version: "1" });
     await connected.connect(new StreamableHTTPClientTransport(new URL(ORIGIN + "/mcp"), options));
-    expect((await connected.listTools()).tools).toHaveLength(4);
+    expect((await connected.listTools()).tools).toHaveLength(3);
     await connected.close();
   });
   it("completes real SDK negotiation, tool discovery and a retained investigation across reconnect", async () => {
@@ -339,7 +339,7 @@ describe("authenticated remote MCP", () => {
       first = client(a.token.access_token);
     await first.c.connect(first.transport);
     const tools = await first.c.listTools();
-    expect(tools.tools.map((t) => t.name)).toEqual(["investigate", "inspect", "verify", "recover"]);
+    expect(tools.tools.map((t) => t.name)).toEqual(["investigate", "inspect", "verify"]);
     const response = await first.c.callTool({
       name: "investigate",
       arguments: { question: "Inspect available source", outputChars: 1000 },

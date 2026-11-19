@@ -112,7 +112,6 @@ test("MCP connects first and grants project access later in the browser", async 
       "investigate",
       "inspect",
       "verify",
-      "recover",
     ]);
     const first = await sdk.callTool({
       name: "investigate",
@@ -151,7 +150,7 @@ test("MCP connects first and grants project access later in the browser", async 
       expect(frame.done).toBe(false);
       expect(new TextDecoder().decode(frame.value)).toContain(": keep-alive");
     }
-    expect((await sdk.listTools()).tools).toHaveLength(4);
+    expect((await sdk.listTools()).tools).toHaveLength(3);
     expect(gets).toBe(1);
     expect(errors).toEqual([]);
     await sdk.close();
@@ -229,9 +228,7 @@ test("an expired browser sign-in returns to an actionable welcome screen", async
   );
   await page.goto("/api/auth/github/callback?state=expired&code=not-a-real-code");
   await expect(page).toHaveURL(/\/\?signIn=retry$/);
-  await expect(page.getByRole("alert")).toContainText(
-    "sign-in link expired or could not be verified",
-  );
+  await expect(page.getByRole("alert")).toContainText("sign-in link expired");
   await expect(page.getByRole("link", { name: "Continue with GitHub" })).toHaveAttribute(
     "href",
     "/api/auth/github/start",

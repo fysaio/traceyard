@@ -6,7 +6,8 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <meta name="theme-color" content="#fafafa" />
+    <meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)" />
     <meta
       name="description"
       content="Run a focused test, see what broke, and verify your fix against the same failure."
@@ -14,9 +15,17 @@
     <title>Traceyard — Test evidence for your fixes</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="preload" href="/fonts/instrument-400.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href="/fonts/instrument-600.ttf" as="font" type="font/ttf" crossorigin />
     <script>
       try {
-        document.documentElement.dataset.theme = localStorage.getItem("traceyard-theme") || "light";
+        var theme = localStorage.getItem("traceyard:theme") || "system";
+        document.documentElement.dataset.theme =
+          theme === "system"
+            ? matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light"
+            : theme;
       } catch {
         document.documentElement.dataset.theme = "light";
       }

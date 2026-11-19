@@ -4,20 +4,10 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { RepositoryPicker, type RepositoryChoices } from "../../src/components/repository-picker";
-import { Modal } from "../../src/components/product-ui";
+import { Modal } from "../../src/components/ui";
+import "../../src/styles/app.css";
 import { WorkspaceShell } from "../../src/pages/workspace-shell";
 import type { AuthSession } from "../../src/lib/api";
-import "../../src/styles/font.css";
-import "../../src/styles/base.css";
-import "../../src/styles/layout.css";
-import "../../src/styles/polish.css";
-import "../../src/styles/connected.css";
-import "../../src/styles/product-restoration.css";
-import "../../src/styles/project-experience.css";
-import "../../src/styles/repository-connection.css";
-import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
-import "@fortawesome/fontawesome-free/css/solid.min.css";
-import "@fortawesome/fontawesome-free/css/brands.min.css";
 
 const query = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = query.get("theme") ?? "dark";
@@ -52,24 +42,17 @@ const session: AuthSession = {
 
 function Fixture() {
   const [connectingId, setConnectingId] = useState<number>();
-  const [local, setLocal] = useState(false);
   const [open, setOpen] = useState(true);
   if (state === "workspace")
     return <WorkspaceShell session={session}>{() => <h1>Projects</h1>}</WorkspaceShell>;
   return (
     <>
-      <main className="product-main">
+      <main className="content">
         <h1>Repository connection acceptance</h1>
       </main>
       {open && (
-        <Modal
-          title={local ? "Local project" : "Connect a repo"}
-          close={() => setOpen(false)}
-          className="repository-dialog"
-        >
-          {local ? (
-            <p>Local setup selected.</p>
-          ) : (
+        <Modal title="Connect a repository" close={() => setOpen(false)}>
+          {
             <RepositoryPicker
               data={state === "error" || state === "loading" ? undefined : data}
               loading={state === "loading"}
@@ -78,9 +61,8 @@ function Fixture() {
               connectingId={connectingId}
               onConnect={(repo) => setConnectingId(repo.id)}
               onRefresh={() => setConnectingId(undefined)}
-              onLocal={() => setLocal(true)}
             />
-          )}
+          }
         </Modal>
       )}
     </>

@@ -5,20 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 
 import { App } from "./App";
 import { readPreference } from "./lib/workspace";
-import "./styles/font.css";
-import "./styles/base.css";
-import "./styles/layout.css";
-import "./styles/polish.css";
-import "./styles/connected.css";
-import "./styles/product-restoration.css";
-import "./styles/project-experience.css";
-import "./styles/repository-connection.css";
-import "./styles/investigations.css";
-import "./styles/product-completion.css";
-import "./styles/welcome.css";
-import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
-import "@fortawesome/fontawesome-free/css/solid.min.css";
-import "@fortawesome/fontawesome-free/css/brands.min.css";
+import "./styles/app.css";
 
 // Restore appearance before the first render, including system changes outside Settings.
 const scheme = window.matchMedia("(prefers-color-scheme: dark)");
