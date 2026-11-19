@@ -322,6 +322,35 @@ export async function runFlakiness(root, plan, env, checkoutToken) {
     flakeRuns,
   };
 }
+export function investigationJobSummary(origin, projectId, investigationId, report) {
+  const outcome = { SUCCEEDED: "Passed", FAILED: "Failed", BLOCKED: "Could not run" };
+  const revision = (sha) => (/^[a-f0-9]{40}$/.test(sha ?? "") ? `\`${sha}\`` : "—");
+  const counts = ({ passed, failed, skipped }) =>
+    `${passed} passed, ${failed} failed, ${skipped} skipped`;
+  const path = report.command.testPath;
+  const lines = ["", "### Traceyard test evidence", ""];
+  if (path && /^[A-Za-z0-9_./@-]+$/.test(path)) lines.push(`Test file: \`${path}\``, "");
+  lines.push(
+    "| Run | Tests from | Outcome | Test counts |",
+    "| --- | --- | --- | --- |",
+    `| Selected test | ${revision(report.commit)} | ${outcome[report.status]} | ${report.status === "BLOCKED" ? "—" : counts(report.counts)} |`,
+  );
+  if (report.originalTest) {
+    const original = report.originalTest;
+    const originalCase = { PASSED: "passed", FAILED: "failed", NOT_OBSERVED: "was not observed" };
+    lines.push(
+      `| Original test on candidate code | ${revision(original.baselineCommit)} | ${outcome[original.status]} | ${original.status === "BLOCKED" ? "—" : counts(original.counts)} |`,
+      "",
+      `The original failing test case **${originalCase[original.assertion]}** on the candidate code at ${revision(report.commit)}.`,
+    );
+  }
+  if (/^prj_[a-f0-9]{32}$/.test(projectId ?? "") && /^inv_[a-f0-9]{32}$/.test(investigationId)) {
+    const details = new URL(`/investigations/${investigationId}`, origin);
+    details.searchParams.set("project", projectId);
+    lines.push("", `[Open evidence in Traceyard](${details.href})`);
+  }
+  return lines.join("\n") + "\n";
+}
 export async function main(args = process.argv.slice(2)) {
   const [command = "help", directory = "."] = args;
   let root = resolve(directory);
@@ -421,21 +450,22 @@ export async function main(args = process.argv.slice(2)) {
       throw Error(info?.error?.message ?? `Traceyard rejected the report (${response.status}).`);
     }
   }
+  const summaryPath = isActions ? process.env.GITHUB_STEP_SUMMARY : undefined;
+  async function appendSummary(markdown) {
+    if (!summaryPath) return;
+    try {
+      await appendFile(summaryPath, markdown);
+    } catch {
+      console.warn("GitHub summary could not be updated.");
+    }
+  }
   let currentPhase = "discovery";
   const report = (phase, status, message, extra = {}) => {
     currentPhase = phase;
     console.log(`Traceyard: ${phase} — ${message}`);
-    return send("repository-runs", { id, sha, phase, status, message, ...extra }).then(async () => {
-      if (isActions && process.env.GITHUB_STEP_SUMMARY)
-        try {
-          await appendFile(
-            process.env.GITHUB_STEP_SUMMARY,
-            `- **${phase} · ${status}** — ${message}\n`,
-          );
-        } catch {
-          console.warn("GitHub summary could not be updated.");
-        }
-    });
+    return send("repository-runs", { id, sha, phase, status, message, ...extra }).then(() =>
+      appendSummary(`- **${phase} · ${status}** — ${message}\n`),
+    );
   };
   if (!isActions && !managedId) await send("repository/register", { name: basename(root) });
   let completed = false;
@@ -748,12 +778,15 @@ export async function main(args = process.argv.slice(2)) {
         await report("test", "RUNNING", "Running the original tests against the candidate code.");
         focused.originalTest = await runOriginalTest(workspaceRoot, plan, env, checkoutToken);
       }
-      await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {
-        ...focused,
-        requestId: plan.requestId,
-        runId: id,
-        commit: sha,
-      });
+      const focusedReport = { ...focused, requestId: plan.requestId, runId: id, commit: sha };
+      await send(
+        "investigations/" + encodeURIComponent(plan.investigationId) + "/report",
+        focusedReport,
+      );
+      if (summaryPath)
+        await appendSummary(
+          investigationJobSummary(origin, manifest.projectId, plan.investigationId, focusedReport),
+        );
       await report(
         "test",
         focused.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
@@ -861,12 +894,16 @@ export async function main(args = process.argv.slice(2)) {
     if (!completed && manifest.investigation) {
       const plan = manifest.investigation;
       try {
-        await send("investigations/" + encodeURIComponent(plan.investigationId) + "/report", {
+        const blockedReport = {
           requestId: plan.requestId,
           runId: id,
           commit: sha,
           status: "BLOCKED",
-          command: { directory: manifest.config.directory, script: "", testPath: null },
+          command: {
+            directory: manifest.config.directory,
+            script: "",
+            testPath: plan.testPath ?? null,
+          },
           counts: { passed: 0, failed: 0, skipped: 0 },
           failures: [],
           message: sanitizeDiagnostic(error.message, 2000),
@@ -874,7 +911,20 @@ export async function main(args = process.argv.slice(2)) {
           exitCode: 1,
           truncated: false,
           nodeVersion: process.version,
-        });
+        };
+        await send(
+          "investigations/" + encodeURIComponent(plan.investigationId) + "/report",
+          blockedReport,
+        );
+        if (summaryPath)
+          await appendSummary(
+            investigationJobSummary(
+              origin,
+              manifest.projectId,
+              plan.investigationId,
+              blockedReport,
+            ),
+          );
       } catch {
         console.warn(
           "Structured investigation evidence could not be delivered; inspect runner logs.",

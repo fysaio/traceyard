@@ -13,3 +13,9 @@ export function runOriginalTest(
   env: NodeJS.ProcessEnv,
   checkoutToken?: string,
 ): Promise<NonNullable<InvestigationReport["originalTest"]>>;
+export function investigationJobSummary(
+  origin: string,
+  projectId: string | undefined,
+  investigationId: string,
+  report: InvestigationReport,
+): string;

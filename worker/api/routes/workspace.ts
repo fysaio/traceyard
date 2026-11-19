@@ -336,7 +336,11 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
           JSON.parse(row.snapshot_json).investigation?.commit ?? who.sha!,
         );
       return c.json(
-        data(c, { ...JSON.parse(row.snapshot_json), capabilities: { repositoryIndex: true } }),
+        data(c, {
+          ...JSON.parse(row.snapshot_json),
+          projectId: who.projectId,
+          capabilities: { repositoryIndex: true },
+        }),
       );
     }
     const config = await c.env.DB.prepare(
