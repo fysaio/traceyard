@@ -214,7 +214,6 @@ export function oauthRoutes() {
         const actions = [
           scopes.includes("investigations:read") && "read investigation evidence",
           scopes.includes("investigations:run") && "run supported tests and verify repairs",
-          scopes.includes("runs:recover") && "recover workflows",
         ]
           .filter(Boolean)
           .join(", ");
