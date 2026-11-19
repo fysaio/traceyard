@@ -5,7 +5,7 @@ import { flakinessOutcome } from "../../shared/contracts/investigation-execution
 const sha = "a".repeat(40);
 const checkout = (repo: string, ref: string) =>
   [
-    `2026-11-19T04:00:00.000Z ##[group]Syncing repository: ${repo}`,
+    `2026-11-19T04:00:00.000Z Syncing repository: ${repo}`,
     `2026-11-19T04:00:01.000Z [command]/usr/bin/git fetch origin +${ref}`,
     "2026-11-19T04:00:02.000Z [command]/usr/bin/git log -1 --format=%H",
     `2026-11-19T04:00:03.000Z ${sha}`,
