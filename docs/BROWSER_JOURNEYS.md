@@ -35,7 +35,7 @@ node "$TRACEYARD/agent/cli.mjs" setup-browser dist
 
 Review and merge the generated workflow together with the journey. Later pull requests build both revisions independently and replay the journeys reviewed on the base branch. To add more coverage, record another JSON file in .traceyard/browser/ and merge it. The check supports up to 20 journeys per repository.
 
-The replay container runs without network access. Missing or unused API fixtures give an inconclusive result. The job summary reports each verdict. Download traceyard-browser-evidence from the run for the JSON results, side-by-side screenshots, and a pixel diff. Pixel changes are evidence for review. Text and URL assertions determine the verdict.
+The replay container runs without network access. Unexpected API requests give an inconclusive result. A successful replay also requires every recorded response to be used. The job summary reports each verdict. Download traceyard-browser-evidence from the run for the JSON results, side-by-side screenshots, and a pixel diff. Pixel changes are evidence for review. Text and URL assertions determine the verdict.
 
 | Verdict       | Meaning                                                               |
 | ------------- | --------------------------------------------------------------------- |

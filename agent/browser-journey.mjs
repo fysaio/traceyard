@@ -282,7 +282,7 @@ async function runJourney(browser, commit, site, journey, evidence) {
     run: {
       commit,
       ...(site.buildSha256 ? { buildSha256: site.buildSha256 } : {}),
-      ...(unexpected.size || missing.length
+      ...(unexpected.size || (outcome.status !== "FAILED" && missing.length)
         ? {
             status: "INCONCLUSIVE",
             step: stepNumber,

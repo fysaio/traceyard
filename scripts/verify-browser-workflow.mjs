@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { chromium, expect } from "@playwright/test";
+import { compareBrowserJourney } from "../agent/browser-journey.mjs";
 import { startBrowserRecorder } from "../agent/browser-record.mjs";
 import { readBuildSite } from "../agent/browser-site.mjs";
 
@@ -13,10 +14,79 @@ const run = promisify(execFile);
 const [base, head, baseDir, headDir, evidenceDir] = process.argv.slice(2);
 if (!evidenceDir) throw Error("Supply two commits, their build paths and an evidence directory.");
 
+const repeatRequestPage = `<!doctype html>
+  <link rel="icon" href="data:,">
+  <button data-testid="run">Run parallel requests</button><output data-testid="result"></output>
+  <script>
+    document.querySelector("button").onclick = async () => {
+      const read = async () => {
+        const response = await fetch("/api/recording-order?item=single", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ count: 1, item: "single" }),
+        });
+        return response.status + ":" + (await response.json()).order;
+      };
+      document.querySelector("output").textContent = (await Promise.all([read(), new Promise((ready) => setTimeout(ready, 60)).then(read)])).join(", ");
+    };
+  </script>`;
+let requests = 0;
+
+async function verifyRequestOrder(browser, origin, temp) {
+  const record = await startBrowserRecorder(browser, new URL(origin + "/recording-order"), {
+    paths: new Set(["/api/recording-order"]),
+    site: "dist",
+    inputs: false,
+  });
+  try {
+    await record.page.getByTestId("run").click();
+    await expect(record.page.getByTestId("result")).toHaveText("201:1, 202:2");
+    await record.page.getByRole("button", { name: "Assert text" }).click();
+    await record.page.getByTestId("result").click();
+    await record.page.getByRole("button", { name: "Save journey" }).click();
+    const raw = await record.completed;
+    const { exchanges } = JSON.parse(raw);
+    assert.deepEqual(
+      exchanges.map(({ status, response }) => [status, response.order]),
+      [
+        [201, 1],
+        [202, 2],
+      ],
+    );
+    assert.deepEqual(exchanges[0].body, { count: 1, item: "single" });
+    assert.equal(exchanges[0].url, "/api/recording-order?item=single");
+    const files = join(temp, "parallel-build");
+    await mkdir(files);
+    await writeFile(join(files, "index.html"), repeatRequestPage);
+    const result = await compareBrowserJourney(browser, temp, raw, base, head, {
+      baselineBuild: files,
+      candidateBuild: files,
+    });
+    assert.equal(result.verdict, "PASSED", JSON.stringify(result));
+    assert.equal(requests, 2);
+    console.log(
+      "Parallel JSON requests replayed in issue order without reaching the fixture server.",
+    );
+  } finally {
+    await record.close();
+  }
+}
+
 const candidateSite = await readBuildSite(headDir);
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, "http://localhost");
-  if (url.pathname === "/api/auth/session") {
+  if (url.pathname === "/recording-order") {
+    response.writeHead(200, { "Content-Type": "text/html" });
+    response.end(repeatRequestPage);
+  } else if (url.pathname === "/api/recording-order") {
+    const order = ++requests;
+    request.resume();
+    const respond = () => {
+      response.writeHead(200 + order, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ order }));
+    };
+    if (order === 1) setTimeout(respond, 300);
+    else respond();
+  } else if (url.pathname === "/api/auth/session") {
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(
       JSON.stringify({ data: { user: null, sessions: [], githubSignInAvailable: true } }),
@@ -45,15 +115,13 @@ try {
   const browser = await chromium.launch();
   let journey;
   try {
-    const record = await startBrowserRecorder(
-      browser,
-      new URL("http://127.0.0.1:" + address.port + "/?signIn=retry"),
-      {
-        paths: new Set(["/api/auth/session"]),
-        site: "dist/client",
-        inputs: false,
-      },
-    );
+    const origin = "http://127.0.0.1:" + address.port;
+    await verifyRequestOrder(browser, origin, temp);
+    const record = await startBrowserRecorder(browser, new URL(origin + "/?signIn=retry"), {
+      paths: new Set(["/api/auth/session"]),
+      site: "dist/client",
+      inputs: false,
+    });
     const alert = record.page.getByRole("alert");
     await expect(alert).toHaveText(
       "That sign-in link expired or could not be verified. Continue with GitHub to try again.",
