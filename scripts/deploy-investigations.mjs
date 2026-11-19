@@ -90,8 +90,16 @@ await execute(
   runner + "\n",
 );
 await cf("deploy", "--config", "dist/worker/wrangler.json", "--var", "BUILD_REVISION:" + revision);
-const health = await fetch(origin.origin + "/api/health").then((r) => r.json());
-if (health.data?.status !== "ok" || health.data?.revision !== revision)
+// A new Worker version can take a few seconds to reach every edge location.
+let health = null;
+for (let attempt = 0; attempt < 18; attempt++) {
+  health = await fetch(origin.origin + "/api/health", { cache: "no-store" })
+    .then((r) => r.json())
+    .catch(() => null);
+  if (health?.data?.status === "ok" && health.data.revision === revision) break;
+  await new Promise((done) => setTimeout(done, 5000));
+}
+if (health?.data?.status !== "ok" || health?.data?.revision !== revision)
   throw Error("The public health endpoint does not establish the deployed source revision.");
 const metadata = await fetch(origin.origin + "/.well-known/oauth-protected-resource/mcp").then(
   (r) => r.json(),
