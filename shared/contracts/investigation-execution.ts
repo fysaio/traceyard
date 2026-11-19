@@ -10,6 +10,10 @@ export const investigationPlanSchema = z
     changedFiles: z.array(repositoryPathSchema).max(100).optional(),
     maxTestFiles: z.number().int().min(1).max(5).optional(),
     captureInteractions: z.boolean().optional(),
+    flakeCandidate: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
     replayRecording: z
       .object({ id: z.string().regex(/^rcd_[a-f0-9]{32}$/), manifest: recordingManifestSchema })
       .strict()
@@ -60,6 +64,21 @@ export const investigationReportSchema = z
     exitCode: z.number().int().nullable(),
     truncated: z.boolean(),
     nodeVersion: z.string().max(40),
+    output: z.string().max(4000).optional(),
+    flakeRuns: z
+      .array(
+        z
+          .object({
+            commit: z.string().regex(/^[a-f0-9]{40}$/),
+            attempt: z.number().int().min(1).max(3),
+            status: z.enum(["SUCCEEDED", "FAILED", "BLOCKED"]),
+            durationMs: z.number().int().min(0).max(120000),
+            message: z.string().max(1400),
+          })
+          .strict(),
+      )
+      .length(6)
+      .optional(),
     checks: z
       .array(
         z
@@ -87,6 +106,7 @@ export const investigationReportSchema = z
   })
   .strict()
   .superRefine((r, c) => {
+    if (r.flakeRuns) return;
     if (r.status === "SUCCEEDED" && r.replay?.diverged)
       c.addIssue({ code: "custom", message: "A divergent replay cannot establish success." });
     if (r.status === "SUCCEEDED" && (r.exitCode !== 0 || r.counts.failed || !r.counts.passed))
@@ -99,3 +119,23 @@ export const investigationReportSchema = z
   });
 export type InvestigationPlan = z.infer<typeof investigationPlanSchema>;
 export type InvestigationReport = z.infer<typeof investigationReportSchema>;
+
+export function flakinessOutcome(runs: NonNullable<InvestigationReport["flakeRuns"]>) {
+  const groups = [runs.slice(0, 3), runs.slice(3)];
+  const counts = groups.map((group) => ({
+    passed: group.filter((r) => r.status === "SUCCEEDED").length,
+    failed: group.filter((r) => r.status === "FAILED").length,
+    blocked: group.filter((r) => r.status === "BLOCKED").length,
+  }));
+  const mixed = counts.some((c) => c.passed && c.failed);
+  const incomplete = counts.some((c) => c.blocked);
+  return {
+    counts,
+    label: mixed || incomplete ? "Inconclusive" : "Flakiness check complete",
+    summary: mixed
+      ? "Inconclusive. Outcomes flipped at the same commit. Review the individual attempts."
+      : incomplete
+        ? "Inconclusive. Some attempts could not complete. Open their output before retrying."
+        : `${counts.map((count) => `${count.failed ? "failed" : "passed"} 3/3`).join(", then ")}; no flakiness observed in 3 runs per commit.`,
+  };
+}
