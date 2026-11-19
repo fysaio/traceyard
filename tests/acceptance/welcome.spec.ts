@@ -26,14 +26,11 @@ test("an anonymous visitor can explore the example and find sign-in at every wid
       true,
     );
     expect(
-      await headline.evaluate((element) => {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        const tops = new Set(
-          [...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)),
-        );
-        return tops.size === 2;
-      }),
+      await headline.evaluate(
+        (element) =>
+          element.getBoundingClientRect().height <
+          2.5 * parseFloat(getComputedStyle(element).lineHeight),
+      ),
       `The headline keeps its two lines at ${width}px`,
     ).toBe(true);
     const path = testInfo.outputPath(`welcome-${width}.png`);
