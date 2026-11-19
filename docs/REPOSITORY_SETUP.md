@@ -15,7 +15,7 @@ Source discovery finds supported entry points and direct static calls. These are
 
 ### Verify a repair when tests change
 
-If the candidate passes after changing a test or fixture, Traceyard can run the original test against the candidate code in a separate Git checkout on the GitHub runner. The verification shows both results. A repair is confirmed only when the original failing assertion runs and passes. The check restores recognized test and fixture paths and needs an unchanged test configuration and dependency setup. It uses a clean npm install with install scripts disabled. Managed execution and recorded interaction replay still show the changed paths for review.
+If the candidate passes after changing a test or fixture, Traceyard can run the original test against the candidate code in a separate Git checkout on the GitHub runner. The verification and the GitHub Actions job summary show both results. The job summary links to the retained evidence in Traceyard. A repair is confirmed only when the original failing assertion runs and passes. The check restores recognized test and fixture paths and needs an unchanged test configuration and dependency setup. It uses a clean npm install with install scripts disabled. Managed execution and recorded interaction replay still show the changed paths for review.
 
 ## Source flow without application credentials
 
