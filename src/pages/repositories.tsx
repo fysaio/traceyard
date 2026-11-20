@@ -64,6 +64,7 @@ interface RepositoryCard {
   repository: string | null;
   discoveryStatus: string | null;
   lastCheck: string | null;
+  lastCheckAt: string | null;
 }
 
 async function request<T>(path: string): Promise<T> {
@@ -143,7 +144,18 @@ export function RepositoriesPage() {
                   <Icon name="repository" />
                   <div className="row-main">
                     <strong className="truncate">{p.repository}</strong>
-                    {p.lastCheck && <span className="muted">Last check</span>}
+                    {p.lastCheck ? (
+                      <span className="muted">
+                        {["RUNNING", "QUEUED", "DISCOVERING", "PREPARING"].includes(p.lastCheck)
+                          ? "Current check"
+                          : "Latest check"}
+                        {p.lastCheckAt ? ` · ${formatTime(p.lastCheckAt)}` : ""}
+                      </span>
+                    ) : p.discoveryStatus && p.discoveryStatus !== "SUCCEEDED" ? (
+                      <span className="muted">Repository setup</span>
+                    ) : (
+                      <span className="muted">No checks have run</span>
+                    )}
                   </div>
                   {p.lastCheck ? (
                     <CheckStatus value={p.lastCheck} />
@@ -157,7 +169,9 @@ export function RepositoriesPage() {
               ))}
             </div>
           ) : (
-            <p className="muted">No repository matches “{search}”.</p>
+            <p className="muted">
+              No repositories match “{search}”. Try a shorter name or clear the search.
+            </p>
           )}
         </div>
       )}
@@ -389,6 +403,11 @@ const STAGES: Record<string, string> = {
   complete: "Finish",
 };
 
+const stageLabel = (name: string, message?: string) =>
+  name === "build" && /selected test directly/i.test(message ?? "")
+    ? "Prepare selected test"
+    : STAGES[name];
+
 interface CheckData {
   job: RepositoryJob;
   repository: { full_name: string; repository_id: number | null } | null;
@@ -423,7 +442,9 @@ export function CheckPage() {
   const job = q.data.job,
     events = JSON.parse(job.events_json) as { phase: string; status: string; message: string }[];
   const status = checkDisplayStatus(job, q.dataUpdatedAt),
-    active = ["RUNNING", "QUEUED"].includes(job.status);
+    active = ["RUNNING", "QUEUED"].includes(job.status),
+    discoveredNoEntries = events.some((event) => /0 supported entry points/i.test(event.message)),
+    failed = status === "FAILED";
   const stages = [
     ...(job.source === "github-pending" ? ["dispatch"] : []),
     ...(job.source === "managed" ? ["checkout"] : []),
@@ -507,6 +528,27 @@ export function CheckPage() {
           )}
         </div>
         <ErrorMessage error={cancel.error} />
+        {discoveredNoEntries && (
+          <div className="notice" role="status">
+            <strong>No supported entry points were discovered</strong>
+            <p>
+              Traceyard still ran the selected test directly. That execution is useful for this
+              check, but it does not mean the repository has a reusable discovered test path yet.
+            </p>
+          </div>
+        )}
+        {failed && (
+          <div className="notice danger" role="alert">
+            <strong>This check needs investigation</strong>
+            <p>
+              Review the retained check details in Traceyard first. Provider logs are available as
+              a technical fallback.
+            </p>
+            <Link className="text-link" to={`/investigations?project=${encodeURIComponent(projectId)}`}>
+              Start an investigation
+            </Link>
+          </div>
+        )}
         <ol className="stages">
           {stages.map(({ name, event }) => (
             <li
@@ -529,7 +571,7 @@ export function CheckPage() {
                 />
               </span>
               <div className="stage-body">
-                <strong>{STAGES[name]}</strong>
+                <strong>{stageLabel(name, event?.message)}</strong>
                 <span className="muted">{event?.message ?? "Not reached"}</span>
               </div>
             </li>

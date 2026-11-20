@@ -222,12 +222,12 @@ export function oauthRoutes() {
             (project) => `<form class="project-access" method="post" action="/oauth/connections">
         <input type="hidden" name="connection" value="${escape(connection.id)}">
         <input type="hidden" name="project" value="${escape(project.id)}">
-        <p>${escape(project.repository ?? project.name)}</p>
+        <p><strong>${escape(project.repository ?? "Project: " + project.name)}</strong><br><span class="muted">This agent can use only the capabilities listed above.</span></p>
         <button name="decision" value="${allowed.has(project.id) ? "remove" : "allow"}">${allowed.has(project.id) ? "Remove access" : "Allow access"}</button>
       </form>`,
           )
           .join("");
-        return `<section class="connection"><h2>${escape(connection.name)}</h2><p>For each project you allow, this agent can ${escape(actions)}.</p>
+        return `<section class="connection"><h2>${escape(connection.name)}</h2><p>For each repository you allow, this agent can ${escape(actions)}. Access stays limited to the repositories you choose.</p>
         ${rows || "<p>No projects yet.</p>"}
         <form method="post" action="/oauth/connections"><input type="hidden" name="connection" value="${escape(connection.id)}"><button class="secondary" name="decision" value="disconnect">Disconnect agent</button></form></section>`;
       })
@@ -235,7 +235,7 @@ export function oauthRoutes() {
     return c.html(
       page(
         "Manage coding agents",
-        `${body || "<p>No matching connection.</p>"}<p><a href="/projects">Connect a repository</a> · <a href="/oauth/connections">All agents</a></p>`,
+        `${body || "<p>No matching connection.</p>"}<p><a href="/repositories">Connect a repository</a> · <a href="/oauth/connections">All agents</a></p>`,
       ),
     );
   });
