@@ -27,9 +27,10 @@ Focused runs also support Jest and [Pytest](docs/CI_TEST_EVIDENCE.md#rerun-a-pyt
 traceyard repro src/cart.test.ts --at <failing-sha>   # or --from <GitHub Actions job link>
 traceyard check                                       # after each attempt at a fix
 traceyard verify                                      # failed before, passes now, test untouched
+traceyard guard                                       # exit 0 only if HEAD is proven fixed
 ```
 
-No account or server. See the [CLI guide](docs/CLI.md).
+No account or server. Coding agents get the same tools with `traceyard mcp`. See the [CLI guide](docs/CLI.md).
 
 ## More
 

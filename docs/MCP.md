@@ -1,5 +1,7 @@
 # Connect a coding agent
 
+**Local, no account:** run `traceyard mcp` to give your agent `reproduce`, `check`, `verify`, `guard`, `explain` and `inspect` on your own machine. Setup for Claude Code, Cursor, Copilot and Codex is in the [CLI guide](CLI.md#coding-agents-mcp). The rest of this page covers the hosted server.
+
 Open **Connections** in Traceyard and choose your client. For the hosted app, the remote MCP URL is `https://traceyard.pilotsaviour229.workers.dev/mcp`. Use Streamable HTTP with OAuth.
 
 1. Add Traceyard to your MCP client and complete GitHub sign-in in the browser.

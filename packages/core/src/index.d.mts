@@ -32,3 +32,4 @@ export type LocalTestReport = Omit<InvestigationReport, "requestId" | "runId" | 
   snapshotId: string;
 };
 export function runLocalTest(options: LocalTestOptions): Promise<LocalTestReport>;
+export * from "./agent-result.mjs";

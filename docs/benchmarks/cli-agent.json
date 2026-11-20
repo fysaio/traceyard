@@ -1,0 +1,90 @@
+{
+  "tool": {
+    "name": "traceyard",
+    "version": "0.1.0"
+  },
+  "measuredAt": "2026-11-20T09:43:07.235Z",
+  "environment": {
+    "node": "v22.21.1",
+    "platform": "linux-x64"
+  },
+  "budget": {
+    "tokensPerCall": 1500,
+    "outputCharsDefault": 4000
+  },
+  "calls": [
+    {
+      "call": "reproduce (cold)",
+      "tool": "reproduce",
+      "status": "REPRODUCED",
+      "chars": 1360,
+      "tokens": 340,
+      "durationMs": 772
+    },
+    {
+      "call": "reproduce (cached)",
+      "tool": "reproduce",
+      "status": "REPRODUCED",
+      "chars": 1359,
+      "tokens": 340,
+      "durationMs": 51
+    },
+    {
+      "call": "explain",
+      "tool": "explain",
+      "status": "AVAILABLE",
+      "chars": 1020,
+      "tokens": 255,
+      "durationMs": 49
+    },
+    {
+      "call": "inspect (recent)",
+      "tool": "inspect",
+      "status": "AVAILABLE",
+      "chars": 454,
+      "tokens": 114,
+      "durationMs": 27
+    },
+    {
+      "call": "inspect (log slice)",
+      "tool": "inspect",
+      "status": "AVAILABLE",
+      "chars": 509,
+      "tokens": 128,
+      "durationMs": 43
+    },
+    {
+      "call": "check",
+      "tool": "check",
+      "status": "PASSED",
+      "chars": 568,
+      "tokens": 142,
+      "durationMs": 604
+    },
+    {
+      "call": "verify",
+      "tool": "verify",
+      "status": "FIXED",
+      "chars": 1863,
+      "tokens": 466,
+      "durationMs": 884
+    },
+    {
+      "call": "guard",
+      "tool": "guard",
+      "status": "FIXED",
+      "chars": 535,
+      "tokens": 134,
+      "durationMs": 89
+    }
+  ],
+  "totals": {
+    "tokens": 1919,
+    "maxTokensPerCall": 466
+  },
+  "notes": [
+    "Tokens are estimated as characters / 4. Provider tokenizers differ.",
+    "Full logs are never returned up front; inspect pages through them by evidence ID.",
+    "Durations include Vitest start-up on this machine and exclude dependency installs."
+  ]
+}

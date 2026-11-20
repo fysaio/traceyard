@@ -5,6 +5,7 @@ import { z } from "zod";
 // schemaVersion 1; removing or renaming a field bumps it.
 
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
+const evidenceId = z.string().regex(/^ev_[a-z0-9]+_[a-z0-9_]+$/);
 const counts = z
   .object({
     passed: z.number().int().min(0),
@@ -19,7 +20,9 @@ export const cliVerdicts = [
   "PASSED",
   "FAILING",
   "FIXED",
+  "AVAILABLE",
   "STILL_FAILING",
+  "UNVERIFIED",
   "NEEDS_REVIEW",
   "INCONCLUSIVE",
   "BLOCKED",
@@ -30,8 +33,10 @@ export const cliExitCodes = {
   REPRODUCED: 0,
   PASSED: 0,
   FIXED: 0,
+  AVAILABLE: 0,
   FAILING: 1,
   STILL_FAILING: 1,
+  UNVERIFIED: 1,
   NOT_REPRODUCED: 2,
   NEEDS_REVIEW: 2,
   INCONCLUSIVE: 2,
@@ -54,7 +59,8 @@ export const cliRunSchema = z
     truncated: z.boolean(),
     durationMs: z.number().int().min(0),
     cached: z.boolean(),
-    dependencies: z.enum(["none", "existing", "linked", "installed"]),
+    dependencies: z.enum(["none", "existing", "linked", "cached", "installed"]),
+    evidenceId: evidenceId.nullable(),
     message: z.string().max(600),
     output: z.string().max(4000).optional(),
   })
@@ -63,7 +69,9 @@ export const cliRunSchema = z
 export const cliResultSchema = z
   .object({
     schemaVersion: z.literal(1),
-    command: z.enum(["repro", "check", "verify", "receipt"]).nullable(),
+    command: z
+      .enum(["repro", "check", "verify", "guard", "explain", "inspect", "receipt"])
+      .nullable(),
     verdict: z.enum(cliVerdicts),
     exitCode: z.number().int(),
     summary: z.string(),
@@ -83,6 +91,61 @@ export const cliResultSchema = z
         intact: z.boolean().optional(),
         body: z.record(z.string(), z.unknown()).optional(),
         markdown: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    // inspect without an ID: recent runs and receipts.
+    items: z
+      .array(
+        z
+          .object({
+            kind: z.enum(["run", "receipt"]),
+            id: z.string(),
+            test: z.string().nullable(),
+            commit: sha.nullable(),
+            status: z.string(),
+            recordedAt: z.string().nullable(),
+          })
+          .strict(),
+      )
+      .max(13)
+      .optional(),
+    // inspect <evidence>: one bounded slice of a run's full log.
+    evidence: z
+      .object({
+        id: evidenceId,
+        offset: z.number().int().min(0),
+        nextOffset: z.number().int().min(0).nullable(),
+        total: z.number().int().min(0),
+        text: z.string().max(4000),
+      })
+      .strict()
+      .optional(),
+    explanation: z
+      .object({
+        evidenceId,
+        failure: z
+          .object({
+            index: z.number().int().min(1),
+            of: z.number().int().min(1),
+            file: z.string(),
+            name: z.string(),
+            message: z.string().max(2000),
+          })
+          .strict(),
+        location: z
+          .object({ path: z.string(), line: z.number().int(), column: z.number().int().nullable() })
+          .strict()
+          .nullable(),
+        source: z
+          .object({
+            path: z.string(),
+            commit: sha.nullable(),
+            startLine: z.number().int().min(1),
+            text: z.string().max(1600),
+          })
+          .strict()
+          .nullable(),
       })
       .strict()
       .optional(),

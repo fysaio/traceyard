@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `traceyard mcp`, a local MCP server for Claude Code, Cursor, Codex and Copilot. Its tools are `reproduce`, `check`, `verify`, `guard`, `explain` and `inspect`, and they return the same bounded envelope as the hosted server. [Setup](docs/CLI.md#coding-agents-mcp)
+- Added `traceyard guard`, a merge gate that passes only when HEAD has an intact FIXED receipt. Also added `traceyard explain`, which shows the failing line with its source, and `traceyard inspect`, which reads a full log in slices by evidence ID.
+- Agent output is cheaper. Every response stays under 1,500 tokens, and terminal codes, progress bars and repeated lines are removed. Logs are returned only when asked for. Dependency installs are cached by lockfile, so the next commit with the same lockfile doesn't reinstall. [Benchmark](docs/benchmarks/cli-agent.json)
+- Fixed plain-text output crashing when a run had failures.
+
 - Added the `traceyard` command-line tool: `repro` reruns a failing test at the exact commit (or the commit a GitHub Actions job tested), `check` runs it against your edits, `verify` confirms it failed before and passes now without test changes, and `receipt` prints the result for a pull request. It returns stable JSON and documented exit codes, and needs no account. [CLI guide](docs/CLI.md)
 - Run focused Vitest and Jest tests from the selected npm package, including nested workspaces and named scripts such as `test:unit`.
 - Cache npm downloads for GitHub checks using the application and runner lockfiles. Each check still installs dependencies and runs the selected tests.
