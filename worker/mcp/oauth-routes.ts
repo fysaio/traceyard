@@ -204,6 +204,7 @@ export function oauthRoutes() {
     )
       .bind(auth.user.id)
       .all<{ grant_id: string; project_id: string }>();
+    const repositoryProjects = projects.filter((project) => project.repository);
     const body = connections.results
       .filter((connection) => !requested || requested === connection.id)
       .map((connection) => {
@@ -217,7 +218,7 @@ export function oauthRoutes() {
         ]
           .filter(Boolean)
           .join(", ");
-        const rows = projects
+        const rows = repositoryProjects
           .map(
             (project) => `<form class="project-access" method="post" action="/oauth/connections">
         <input type="hidden" name="connection" value="${escape(connection.id)}">
