@@ -8,7 +8,7 @@ docker compose up -d
 open http://localhost:8787
 ```
 
-`docker compose up` uses the published image `ghcr.io/fysaio/traceyard`. From a clone of this repository, `docker compose up --build` builds the image from source instead. Set `TRACEYARD_VERSION` to pin a release, e.g. `TRACEYARD_VERSION=1.0.0`.
+`docker compose up` uses the published image `ghcr.io/fysaio/traceyard`. From a clone of this repository, `docker compose up --build` builds the image from source instead. Set `TRACEYARD_VERSION` to pin an existing release, for example `TRACEYARD_VERSION=0.1.0`; choose the tag from the [GitHub Releases](https://github.com/fysaio/traceyard/releases) or Packages page.
 
 ## What runs
 
@@ -37,10 +37,10 @@ GITHUB_CLIENT_SECRET=...
 GITHUB_APP_ID=...
 GITHUB_APP_SLUG=...
 GITHUB_APP_WEBHOOK_SECRET=...
-GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github-app-key
+GITHUB_APP_PRIVATE_KEY=<PKCS#1 or PKCS#8 PEM value>
 ```
 
-Every value also works as `NAME_FILE` pointing at a file, which suits Docker secrets. The App private key may be the PKCS#1 key GitHub gives you, because it is converted to PKCS#8 at start-up. Never commit `.env` or key files.
+The checked-in Compose file supports the adjacent `.env` mechanism shown above. It does not define or mount Docker `secrets:` entries, so do not assume a `NAME_FILE` value in `.env` is available inside the container unless you provide and test a Compose override that passes the variable and mounts the file. The App private key may be the PKCS#1 key GitHub gives you, because it is converted to PKCS#8 at start-up. Never commit `.env` or key files.
 
 | Variable              | Default                 | Meaning                                    |
 | --------------------- | ----------------------- | ------------------------------------------ |
@@ -53,7 +53,7 @@ Every value also works as `NAME_FILE` pointing at a file, which suits Docker sec
 
 Repository checks run in the repository's own GitHub Actions, using the workflow Traceyard proposes during setup. The workflow sends results to `PUBLIC_APP_ORIGIN`, so self-hosted results stay on your server. The workflow pins the Traceyard runner to a full commit SHA, so a change to this repository can't change what runs in your CI until you approve the updated workflow.
 
-Managed checks, which run on Traceyard's own containers, are only available on the hosted service. The runner image `ghcr.io/fysaio/traceyard-runner` is published for that deployment and for your own isolated runs. It contains Node 22, git, Python 3 and the runner agent, and runs as the unprivileged `node` user.
+Managed checks, which run on TraceYard's own Cloudflare Containers, are only available on the hosted service. The runner image `ghcr.io/fysaio/traceyard-runner` is the managed-runner base image; it is not a documented standalone check command. It contains the Node.js 22 runtime, git, Python 3, and the runner agent, and runs as the unprivileged `node` user.
 
 ## Limits
 

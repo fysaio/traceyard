@@ -1,6 +1,6 @@
-# Traceyard CLI
+# TraceYard CLI
 
-Prove a failing test is fixed, on your own machine. No account, no server, no network unless you ask for it.
+Prove a failing test is fixed on your own machine. No TraceYard account or server is required. Test execution is local; dependency installation, optional Git fetching, and the initial package bootstrap can use the network when requested.
 
 ```bash
 traceyard repro src/cart.test.ts --at 3f2c9e1   # fails at the commit CI tested
@@ -13,7 +13,7 @@ traceyard receipt                               # Markdown you can paste into th
 
 Coding agents get the same commands as MCP tools with `traceyard mcp`. See [Coding agents](#coding-agents-mcp).
 
-Until the npm package ships (#49), run it from a Traceyard checkout with `node packages/cli/bin/traceyard.mjs`. Node 22.12 or later.
+Released use is `npx traceyard@0.1.0` (or `npx traceyard` when you intentionally want the current latest). From a checkout, after `npm ci` and with Node.js 22.12.0 or newer, use `node packages/cli/bin/traceyard.mjs` for development.
 
 ## Commands
 
@@ -91,7 +91,11 @@ Receipts have trust level `local`: they record what ran on this machine. Signed 
 
 ## JSON output
 
-Every command prints one object. The schema is `cliResultSchema` in [`shared/contracts/cli.ts`](../shared/contracts/cli.ts), and contract tests check every command against it. Fields are only added within `schemaVersion: 1`.
+With `--json`, every supported command prints exactly one JSON object on stdout; without it, commands print human-readable output. Progress is sent to stderr or suppressed as appropriate in JSON mode. The schema is `cliResultSchema` in [`shared/contracts/cli.ts`](../shared/contracts/cli.ts), and contract tests check every command against it. Fields are only added within `schemaVersion: 1`.
+
+```bash
+traceyard verify --json
+```
 
 ```json
 {
@@ -168,7 +172,7 @@ Installed dependencies are cached per user, outside the repository: `~/.cache/tr
 
 ## Coding agents (MCP)
 
-`traceyard mcp` serves six tools over stdio to any MCP client. They run on your machine with no account. They return the same envelope as the hosted server: `status` holds the verdict, and the `outputChars` budget (default 4,000) bounds every response.
+`traceyard mcp` serves six local tools over stdio to any MCP client. They run on your machine with no account. Hosted MCP is a different server with three tools (`investigate`, `inspect`, and `verify`) and requires OAuth plus project authorization; see [Connect a coding agent](MCP.md). The local tools return a bounded result envelope; they are not interchangeable with the hosted tool schemas.
 
 | Tool        | Same as             | Use                                                                                     |
 | ----------- | ------------------- | --------------------------------------------------------------------------------------- |
@@ -211,7 +215,7 @@ command = "npx"
 args = ["-y", "traceyard", "mcp"]
 ```
 
-Before the npm release, replace `npx -y traceyard` with `node /path/to/traceyard/packages/cli/bin/traceyard.mjs`.
+For checkout development, replace `npx -y traceyard` with `node /path/to/traceyard/packages/cli/bin/traceyard.mjs` after running `npm ci` with Node.js 22.12.0 or newer.
 
 ### Token budget
 

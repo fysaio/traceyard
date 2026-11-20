@@ -1,10 +1,10 @@
-# Browser replay
+# Browser journey replay (static build comparison)
 
 Record a user journey once, then use it to compare your app's previous and proposed builds on a pull request. Traceyard reuses the reviewed actions, assertions, and API responses. The report shows the exact commits, what passed or failed, and what changed on screen.
 
 ## Record a journey
 
-Install Traceyard from a checkout of this repository with Node 22, then install Chromium once.
+Install TraceYard from a checkout of this repository with Node.js 22.12.0 or newer, then install Chromium once.
 
 ```sh
 TRACEYARD=/path/to/traceyard
@@ -23,14 +23,14 @@ node "$TRACEYARD/agent/cli.mjs" record-browser \
 
 Chromium opens with a recorder in the bottom right. Use the app as usual. Select **Assert text**, then click the text the app should show. Use **Assert URL** to check navigation. Select **Save journey** when you're done. For a repair, record the expected behavior on a working build.
 
-The recorder saves clicks and assertions. To record ordinary text inputs containing test data, add --inputs. Passwords and other sensitive input types are excluded. Add --capture once per approved API pathname. Only those JSON requests and responses are saved, with request bodies, response statuses and query strings used for matching. Use disposable test data and review the saved file before committing it. Session headers and cookies stay out of the file. The recorder stops when it cannot capture a required interaction.
+The recorder saves clicks and assertions. To record ordinary text inputs containing test data, add `--inputs`. Passwords and other sensitive input types are excluded. `--capture` is an allowlist: add one flag for every same-origin JSON `fetch`/XHR pathname used anywhere in the journey, including endpoints reached after clicks. Query strings do not need separate flags because matching uses the pathname, but recorded query strings are matched. Only approved JSON requests and responses are saved. Use disposable test data and review the saved file before committing it. Session headers and cookies stay out of the file. The recorder stops when it cannot capture a required interaction.
 
 ## Add the pull request check
 
-For an npm app with a lockfile and an npm run build script, pass the directory that contains the built index.html. Use the Traceyard checkout at a published commit so CI can fetch the same runner.
+For an npm app with a lockfile and an npm run build script, pass the directory that contains the built index.html. Use a published, reviewed, fetchable 40-character TraceYard commit so CI can fetch the same runner; do not use an unpublished local `HEAD`.
 
 ```sh
-node "$TRACEYARD/agent/cli.mjs" setup-browser dist
+node "$TRACEYARD/agent/cli.mjs" setup-browser dist --runner-revision <published-40-character-TraceYard-SHA>
 ```
 
 Review and merge the generated workflow together with the journey. Later pull requests build both revisions independently and replay the journeys reviewed on the base branch. To add more coverage, record another JSON file in .traceyard/browser/ and merge it. The check supports up to 20 journeys per repository.
@@ -47,7 +47,7 @@ The replay container runs without network access. Unexpected API requests give a
 
 ## Run locally against existing builds
 
-Run from the app repository with your base and candidate builds already produced. The example compares two directories and writes screenshots and a diff to browser-evidence.
+Run from the app repository with your base and candidate builds already produced. Chromium must be installed as shown above. The example compares two directories and writes the machine-readable verdict to `browser-result.json`, with screenshots and a diff in `browser-evidence`.
 
 ```sh
 node "$TRACEYARD/agent/cli.mjs" compare-browser \
@@ -57,5 +57,7 @@ node "$TRACEYARD/agent/cli.mjs" compare-browser \
 ```
 
 Browser interception is available locally for trusted builds. Use the generated GitHub workflow to replay untrusted build artifacts with network egress disabled. The runner supports static browser builds such as Vite or static exports, same-origin JSON APIs, and click, text, and URL assertions in Chromium. Keep production data, browser extensions, WebSockets, service workers, and live third-party endpoints out of recorded journeys.
+
+The local comparator exits `0` for a non-regression result, `1` when a candidate assertion fails, and `2` when the result is `INCONCLUSIVE`. A nonzero comparison verdict is not necessarily a tool error; inspect `browser-result.json` and the evidence directory.
 
 If you already capture HTTP Archives, the browser-fixtures command can import a reviewed set of same-origin GET JSON responses into a journey. For repositories that commit static browser assets, compare-browser can read the assets from Git when both build directory options are omitted.
