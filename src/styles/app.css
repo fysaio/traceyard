@@ -1475,6 +1475,19 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 
+.commit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+code.commit-id {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+}
+
 .failure {
   display: flex;
   flex-direction: column;
