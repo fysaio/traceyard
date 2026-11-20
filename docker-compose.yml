@@ -1,0 +1,27 @@
+# Self-host Traceyard with SQLite: `docker compose up`, then open http://localhost:8787.
+# Put GitHub sign-in and App credentials in a .env file next to this one.
+# See docs/SELF_HOSTING.md.
+services:
+  traceyard:
+    image: ghcr.io/fysaio/traceyard:${TRACEYARD_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: selfhost/Dockerfile
+    ports:
+      - "${TRACEYARD_PORT:-8787}:8787"
+    environment:
+      PUBLIC_APP_ORIGIN: ${PUBLIC_APP_ORIGIN:-http://localhost:8787}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      # Or mount the downloaded key and point at it:
+      # GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app-key
+    volumes:
+      - traceyard-data:/data
+    restart: unless-stopped
+
+volumes:
+  traceyard-data:
