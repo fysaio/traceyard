@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 // @ts-expect-error The runner executes plain JavaScript directly in Node.
-import { summarizeCommandFailure } from "../../agent/failure-summary.mjs";
+import { summarizeCommandFailure } from "../../packages/core/src/failure-summary.mjs";
 
 it("reports recognized causes across workspace test failures without uploading log payloads", () => {
   const message = summarizeCommandFailure(

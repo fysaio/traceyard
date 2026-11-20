@@ -3,13 +3,16 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { analyzeRepositoryFiles, indexRepository } from "../../agent/repository-index.mjs";
+import {
+  analyzeRepositoryFiles,
+  indexRepository,
+} from "../../packages/core/src/repository-index.mjs";
 import {
   normalizeVitestReport,
   runTargetedTest,
   runInvestigationPlan,
   selectTest,
-} from "../../agent/test-evidence.mjs";
+} from "../../packages/core/src/test-evidence.mjs";
 import { investigationReportSchema } from "../../shared/contracts/investigation-execution";
 describe("focused investigation evidence", () => {
   it("keeps assertion evidence bounded and distinguishes initialization failures from success", () => {

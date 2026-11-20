@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { discoverFile } from "../../agent/discovery.mjs";
+import { discoverFile } from "../../packages/core/src/discovery.mjs";
 import { convertOtlp } from "../../worker/repositories/otlp";
 describe("repository discovery and runtime evidence", () => {
   it("finds real route declarations and direct calls, without matching comments or data getters", () => {

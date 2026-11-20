@@ -1,4 +1,4 @@
-import type { SourceFlow } from "../shared/repository/source-flow";
+import type { SourceFlow } from "../../../shared/repository/source-flow";
 export interface DiscoveredOperation {
   id: string;
   name: string;
