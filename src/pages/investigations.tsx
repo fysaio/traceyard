@@ -708,7 +708,7 @@ function InvestigationDetail() {
                         <span className="field-label">{name}</span>
                         {run && <State value={run.status} />}
                       </div>
-                      <code>{(run?.commit ?? fallback)?.slice(0, 7)}</code>
+                      <code className="commit-id">{run?.commit ?? fallback}</code>
                       {run?.failure && <pre className="code">{run.failure.message}</pre>}
                       {run && (
                         <a
