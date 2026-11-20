@@ -24,6 +24,10 @@ Focused runs also support Jest and [Pytest](docs/CI_TEST_EVIDENCE.md#rerun-a-pyt
 ## Run it locally
 
 ```bash
+npx traceyard repro src/cart.test.ts --at <failing-sha>  # Node 22.12+, nothing to install
+```
+
+```bash
 traceyard repro src/cart.test.ts --at <failing-sha>   # or --from <GitHub Actions job link>
 traceyard check                                       # after each attempt at a fix
 traceyard verify                                      # failed before, passes now, test untouched
@@ -34,4 +38,4 @@ No account or server. Coding agents get the same tools with `traceyard mcp`. See
 
 ## More
 
-[CLI](docs/CLI.md) · [CI test evidence](docs/CI_TEST_EVIDENCE.md) · [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [MIT license](LICENSE)
+[CLI](docs/CLI.md) · [CI test evidence](docs/CI_TEST_EVIDENCE.md) · [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/SELF_HOSTING.md) · [Releases](docs/RELEASING.md) · [MIT license](LICENSE)

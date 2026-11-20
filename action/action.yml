@@ -1,0 +1,44 @@
+name: Traceyard runner
+description: Run a Traceyard check request in this repository's CI. Used by the workflow that Traceyard dispatches.
+author: fysaio
+branding:
+  icon: check-circle
+  color: green
+inputs:
+  run-request:
+    description: The run request that Traceyard dispatched (the workflow's `run_request` input).
+    required: true
+  origin:
+    description: Your Traceyard server, e.g. https://traceyard.example.com.
+    required: true
+  github-token:
+    description: Token used to fetch this run's GitHub metadata.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: "22"
+    - name: Install runner dependencies
+      shell: bash
+      run: npm ci --prefix "$GITHUB_ACTION_PATH/../runner/package" --omit=dev --ignore-scripts --no-audit --no-fund --prefer-offline
+    - name: Prepare trusted runner
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../runner/prepare.mjs"
+    - name: Discover, build and test
+      shell: bash
+      env:
+        CI: "true"
+        NPM_CONFIG_PREFER_OFFLINE: "true"
+        NPM_CONFIG_AUDIT: "false"
+        NPM_CONFIG_FUND: "false"
+        NPM_CONFIG_FETCH_TIMEOUT: "30000"
+        NPM_CONFIG_FETCH_RETRIES: "1"
+        WRANGLER_SEND_METRICS: "false"
+        WRANGLER_SEND_ERROR_REPORTS: "false"
+        TRACEYARD_ORIGIN: ${{ inputs.origin }}
+        TRACEYARD_RUN_REQUEST: ${{ inputs.run-request }}
+        TRACEYARD_GITHUB_FETCH_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/../runner/package/agent/cli.mjs" run .

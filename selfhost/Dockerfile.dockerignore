@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.wrangler/
+.git/
+.dev.vars*
+selfhost/.dev.vars
+selfhost/wrangler.json
+coverage/
+test-results/
+playwright-report/
+blob-report/
+runner/package/agent/
+runner/package/packages/
+.traceyard/

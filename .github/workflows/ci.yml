@@ -97,6 +97,45 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  self-hosted:
+    name: Self-hosted image and npm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      WRANGLER_SEND_ERROR_REPORTS: "false"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Pack the npm package and run it from a clean install
+        run: |
+          node scripts/pack-cli.mjs
+          (cd dist/npm/traceyard && npm pack --pack-destination "$RUNNER_TEMP")
+          mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke" && npm init -y >/dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/traceyard-*.tgz
+          test "$(npx traceyard --version)" = "$(node -p "require('$GITHUB_WORKSPACE/packages/cli/package.json').version")"
+          node "$GITHUB_WORKSPACE/scripts/smoke-mcp.mjs" "$RUNNER_TEMP/smoke/node_modules/.bin/traceyard"
+      - name: Build the self-hosted image
+        run: docker build --file selfhost/Dockerfile --build-arg REVISION=${{ github.sha }} --tag ghcr.io/fysaio/traceyard:ci .
+      - name: docker compose up with SQLite
+        env:
+          TRACEYARD_VERSION: ci
+        run: |
+          docker compose up --detach --no-build
+          node scripts/verify-selfhost.mjs http://localhost:8787 ${{ github.sha }}
+          docker compose restart
+          node scripts/verify-selfhost.mjs http://localhost:8787 ${{ github.sha }} --existing
+      - name: Server log
+        if: always()
+        run: docker compose logs --no-color | tail -200
+
   investigation-browser:
     name: Investigation browser journeys
     runs-on: ubuntu-latest

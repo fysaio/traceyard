@@ -1,0 +1,234 @@
+name: Publish release
+# Publishes a tagged semver release (vX.Y.Z):
+#   - npm `traceyard`, with provenance, and GitHub Packages `@fysaio/traceyard`
+#   - ghcr.io/fysaio/traceyard and ghcr.io/fysaio/traceyard-runner for
+#     linux/amd64 and linux/arm64, with SBOM and provenance attestations,
+#     signed keylessly with cosign
+#   - a GitHub release, and the moving major tag (v1) for the action
+# Run it by hand with "dry run" to build everything without publishing.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and check everything without publishing
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: traceyard-publish-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  PUBLISH: ${{ github.event_name == 'push' || !inputs.dry_run }}
+  WRANGLER_SEND_METRICS: "false"
+  WRANGLER_SEND_ERROR_REPORTS: "false"
+  DO_NOT_TRACK: "1"
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      major: ${{ steps.version.outputs.major }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check the tag matches the package versions
+        id: version
+        run: |
+          version=$(node -p "require('./packages/cli/package.json').version")
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match packages/cli/package.json version $version. Bump the version, then tag."
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && ! grep -q "^## $version" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' section."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major=${version%%.*}" >> "$GITHUB_OUTPUT"
+      - name: Check the tagged commit passed CI on main
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags --depth=50 origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::Release tags must point at a commit on main."; exit 1; }
+
+  npm:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: CLI and MCP tests
+        run: npx vitest run --project unit tests/unit/cli.test.ts tests/unit/cli-mcp.test.ts
+      - name: Build the packages
+        run: |
+          node scripts/pack-cli.mjs
+          node scripts/pack-cli.mjs --name @fysaio/traceyard
+      - name: Smoke test the packed CLI from a clean install
+        run: |
+          cd dist/npm/traceyard && npm pack --pack-destination "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke" && npm init -y >/dev/null
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/traceyard-*.tgz
+          test "$(npx traceyard --version)" = "${{ needs.prepare.outputs.version }}"
+          node "$GITHUB_WORKSPACE/scripts/smoke-mcp.mjs" "$RUNNER_TEMP/smoke/node_modules/.bin/traceyard"
+      - name: Publish to npm with provenance
+        if: env.PUBLISH == 'true'
+        working-directory: dist/npm/traceyard
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::Add the NPM_TOKEN repository Actions secret (an npm automation or granular publish token)."
+            exit 1
+          fi
+          echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > .npmrc
+          npm publish --provenance --access public
+      - name: Publish to GitHub Packages
+        if: env.PUBLISH == 'true'
+        working-directory: dist/npm/fysaio-traceyard
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" > .npmrc
+          npm publish
+
+  images:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: traceyard
+            dockerfile: selfhost/Dockerfile
+            title: Traceyard
+            description: Self-hosted Traceyard with SQLite storage.
+          - image: traceyard-runner
+            dockerfile: runner/Dockerfile
+            title: Traceyard runner
+            description: Isolated runner that executes Traceyard checks.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.prepare.outputs.version }}
+            type=semver,pattern={{major}},value=v${{ needs.prepare.outputs.version }},enable=${{ needs.prepare.outputs.major != '0' }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=${{ matrix.title }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.licenses=MIT
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+            REVISION=${{ github.sha }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
+        if: env.PUBLISH == 'true'
+      - name: Sign the image with cosign (keyless)
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Verify the signature
+        if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+        run: >-
+          cosign verify "$IMAGE@$DIGEST"
+          --certificate-identity "https://github.com/${{ github.workflow_ref }}"
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+  release:
+    needs: [prepare, npm, images]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: true
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          awk -v v="## $VERSION" '$0 ~ "^## " { on = index($0, v) == 1; next } on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          cat >> "$RUNNER_TEMP/notes.md" <<NOTES
+
+          ## Install
+
+          - npm: \`npx traceyard@$VERSION\` ([npm](https://www.npmjs.com/package/traceyard/v/$VERSION))
+          - App: \`docker pull ghcr.io/${{ github.repository_owner }}/traceyard:$VERSION\`
+          - Runner: \`docker pull ghcr.io/${{ github.repository_owner }}/traceyard-runner:$VERSION\`
+
+          Images are signed with cosign. Verify with:
+
+          \`\`\`
+          cosign verify ghcr.io/${{ github.repository_owner }}/traceyard:$VERSION \\
+            --certificate-identity-regexp '^https://github.com/${{ github.repository }}/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+          NOTES
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+      - name: Move the major tag for the action
+        if: needs.prepare.outputs.major != '0'
+        env:
+          MAJOR: v${{ needs.prepare.outputs.major }}
+        run: |
+          git tag -f "$MAJOR" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$MAJOR"
