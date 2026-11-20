@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -15,7 +16,9 @@ export async function git(cwd, args, { timeoutMs = 15000 } = {}) {
 /** The top of the git repository that contains `cwd`. */
 export async function repositoryRoot(cwd) {
   try {
-    return await git(cwd, ["rev-parse", "--show-toplevel"]);
+    // Real paths, so Windows short names (RUNNER~1) and symlinked temp dirs
+    // compare equal to the long path git reports.
+    return await realpath(await git(cwd, ["rev-parse", "--show-toplevel"]));
   } catch {
     return null;
   }

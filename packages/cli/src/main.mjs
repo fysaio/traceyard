@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { validPytestCase } from "../../core/src/pytest.mjs";
@@ -200,7 +200,9 @@ export async function main(argv, io = defaultIo(), { env = process.env, fetcher 
     const timeoutSeconds = values.timeout === undefined ? 180 : Number(values.timeout);
     if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 3600)
       throw new UsageError("--timeout takes a whole number of seconds between 1 and 3600.");
-    const cwd = resolve(values.repo ?? process.cwd());
+    const cwd = await realpath(resolve(values.repo ?? process.cwd())).catch(() =>
+      resolve(values.repo ?? process.cwd()),
+    );
     const root = await repositoryRoot(cwd);
     if (!root) throw new UsageError("Run traceyard inside a git repository, or pass --repo <dir>.");
     const stateDir = await stateDirectory(root);
