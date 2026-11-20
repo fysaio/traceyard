@@ -13,39 +13,11 @@
       "migrations_dir": "../migrations",
     },
   ],
-  "queues": {
-    "producers": [
-      {
-        "queue": "traceyard-integration-test-executions",
-        "binding": "EXECUTION_QUEUE",
-      },
-    ],
-    "consumers": [
-      {
-        "queue": "traceyard-integration-test-executions",
-        "max_batch_size": 10,
-        "max_batch_timeout": 1,
-        "max_retries": 4,
-      },
-    ],
-  },
   "workflows": [
     {
       "name": "traceyard-repository-discovery-integration-test",
       "binding": "REPOSITORY_DISCOVERY",
       "class_name": "RepositoryDiscoveryWorkflow",
-    },
-    {
-      "name": "traceyard-run-execution-integration-test",
-      "binding": "RUN_WORKFLOW",
-      "class_name": "RunExecutionWorkflow",
-      "concurrency": {
-        "limit": 8,
-      },
-      "default_retention": {
-        "success_retention": "1 day",
-        "error_retention": "3 days",
-      },
     },
   ],
   "secrets": {

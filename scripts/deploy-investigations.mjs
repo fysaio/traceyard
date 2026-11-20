@@ -89,7 +89,17 @@ await execute(
   [wrangler, "secret", "put", "TRACEYARD_RUNNER_REF", "--config", "wrangler.jsonc"],
   runner + "\n",
 );
+// The legacy run engine (#52) left a queue consumer and a Workflow on the account.
+// Retire them best-effort: they may already be gone or the token may lack access,
+// and neither case should block a release.
+const retire = (label, ...a) =>
+  execute(process.execPath, [wrangler, ...a, "--config", "wrangler.jsonc"], "").catch(() =>
+    console.warn("Skipped legacy cleanup: " + label + " (already removed or not permitted)."),
+  );
+await retire("queue consumer", "queues", "consumer", "remove", "traceyard-executions", "traceyard");
+await retire("run workflow", "workflows", "delete", "traceyard-run-execution");
 await cf("deploy", "--config", "dist/worker/wrangler.json", "--var", "BUILD_REVISION:" + revision);
+await retire("execution queue", "queues", "delete", "traceyard-executions");
 // A new Worker version can take a few seconds to reach every edge location.
 let health = null;
 for (let attempt = 0; attempt < 18; attempt++) {

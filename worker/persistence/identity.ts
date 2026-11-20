@@ -228,42 +228,6 @@ export async function revokeAuthSession(db: D1Database, sessionHash: string): Pr
     .run();
 }
 
-export async function claimGuestRuns(
-  db: D1Database,
-  userId: string,
-  projectId: string,
-  guestSessionHash: string,
-  actorIdHash: string,
-  requestId: string,
-): Promise<number> {
-  const now = nowIso();
-  const [claimed] = await db.batch([
-    db
-      .prepare(
-        `UPDATE runs
-            SET owner_user_id = ?, project_id = ?
-          WHERE owner_user_id IS NULL
-            AND owner_session_hash = ?
-            AND project_id = 'prj_sandbox'
-            AND expires_at > ?
-          RETURNING id`,
-      )
-      .bind(userId, projectId, guestSessionHash, now),
-    db
-      .prepare(
-        `INSERT INTO audit_events (
-           project_id, actor_type, actor_id_hash, action, target_type, target_id,
-           metadata_json, request_id, created_at
-         )
-         SELECT ?, 'user', ?, 'guest_runs.claimed', 'sandbox_session', NULL,
-                json_object('claimedRuns', changes()), ?, ?
-          WHERE changes() > 0`,
-      )
-      .bind(projectId, actorIdHash, requestId, now),
-  ]);
-  return claimed?.results.length ?? 0;
-}
-
 async function findGitHubIdentity(db: D1Database, subject: string): Promise<IdentityRow | null> {
   return db
     .prepare(

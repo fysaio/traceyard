@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TraceyardClient } from "../../sdk/client";
 import { spanSchema, redact } from "../../shared/contracts/traces";
-import { modelRouteSchema } from "../../shared/contracts/gateway";
-import { graphSchema, evaluateGraphNode } from "../../shared/workflow/graph";
-import { experimentVerdict } from "../../shared/contracts/experiments";
 describe("instrumentation contracts", () => {
   it("keeps nested context and reports telemetry errors without changing work outcomes", async () => {
     const records: Record<string, unknown>[] = [];
@@ -64,64 +61,5 @@ describe("instrumentation contracts", () => {
         startedAt: new Date().toISOString(),
       }).success,
     ).toBe(false);
-  });
-  it("rejects provider model path traversal and maps only bounded arrays", () => {
-    expect(
-      modelRouteSchema.safeParse({
-        name: "bad",
-        models: [{ provider: "workers", model: "../../tokens" }],
-      }).success,
-    ).toBe(false);
-    const node = {
-      id: "map",
-      name: "Map",
-      type: "map" as const,
-      x: 0,
-      y: 0,
-      config: { path: "name", limit: 1 },
-    };
-    expect(evaluateGraphNode(node, null, [[{ name: "Ada" }]])).toEqual(["Ada"]);
-    expect(() => evaluateGraphNode(node, null, [[{ name: "Ada" }, { name: "Grace" }]])).toThrow(
-      "iteration limit",
-    );
-    expect(graphSchema.safeParse({ nodes: [], edges: [] }).success).toBe(false);
-  });
-  it("does not mark an uncompleted or mismatched experiment as passed", () => {
-    const config = {
-      workflowId: "flow",
-      version: 1,
-      input: {},
-      scenario: "success" as const,
-      repetitions: 1,
-      expectedStatus: "SUCCEEDED" as const,
-      outputPath: "value",
-      expectedValue: 2,
-      maxDurationMs: 100,
-    };
-    const run = {
-      id: "run",
-      ordinal: 1,
-      status: "RUNNING",
-      output_json: null,
-      duration_ms: null,
-      workflow_version: 1,
-    };
-    expect(experimentVerdict(config, run).status).toBe("PENDING");
-    expect(
-      experimentVerdict(config, {
-        ...run,
-        status: "SUCCEEDED",
-        output_json: '{"value":3}',
-        duration_ms: 80,
-      }).status,
-    ).toBe("FAILED");
-    expect(
-      experimentVerdict(config, {
-        ...run,
-        status: "SUCCEEDED",
-        output_json: '{"value":2}',
-        duration_ms: 200,
-      }).status,
-    ).toBe("FAILED");
   });
 });
