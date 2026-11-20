@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0
+
 - Added `traceyard mcp`, a local MCP server for Claude Code, Cursor, Codex and Copilot. Its tools are `reproduce`, `check`, `verify`, `guard`, `explain` and `inspect`, and they return the same bounded envelope as the hosted server. [Setup](docs/CLI.md#coding-agents-mcp)
 - Added `traceyard guard`, a merge gate that passes only when HEAD has an intact FIXED receipt. Also added `traceyard explain`, which shows the failing line with its source, and `traceyard inspect`, which reads a full log in slices by evidence ID.
 - Agent output is cheaper. Every response stays under 1,500 tokens, and terminal codes, progress bars and repeated lines are removed. Logs are returned only when asked for. Dependency installs are cached by lockfile, so the next commit with the same lockfile doesn't reinstall. [Benchmark](docs/benchmarks/cli-agent.json)
