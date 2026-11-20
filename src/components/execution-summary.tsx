@@ -1,6 +1,6 @@
 import type { Investigation } from "../../shared/contracts/investigations";
 import { flakinessOutcome } from "../../shared/contracts/investigation-execution";
-import { Badge, Icon } from "./ui";
+import { Badge, CopyButton, Icon } from "./ui";
 
 const runLabel = (status: string) =>
   status === "SUCCEEDED" ? "Passed" : status === "FAILED" ? "Failed" : "Blocked";
@@ -24,7 +24,7 @@ export function ExecutionSummary({
           <div key={index} className="stack-sm">
             <p className="field-label">
               {index === 0 ? "Failing commit" : "Candidate commit"}{" "}
-              <code>{runs[0]?.commit.slice(0, 12)}</code>
+              <code className="commit-id">{runs[0]?.commit}</code>
             </p>
             <div className="list">
               {runs.map((run) => (
@@ -70,12 +70,19 @@ export function ExecutionSummary({
             </code>
           </dd>
         </div>
-        <div>
+        <div className="wide">
           <dt>Commit</dt>
-          <dd>
-            <code title={execution.commit ?? undefined}>
-              {execution.commit ? execution.commit.slice(0, 7) : "Not confirmed"}
-            </code>
+          <dd className="commit-row">
+            {execution.commit ? (
+              <>
+                <code className="commit-id" aria-label="Executed commit">
+                  {execution.commit}
+                </code>
+                <CopyButton value={execution.commit} label="Copy" />
+              </>
+            ) : (
+              <code>Not confirmed</code>
+            )}
           </dd>
         </div>
         <div>

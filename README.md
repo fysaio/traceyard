@@ -36,14 +36,6 @@ traceyard guard                                       # exit 0 only if HEAD is p
 
 No account or server. Coding agents get the same tools with `traceyard mcp`. See the [CLI guide](docs/CLI.md).
 
-## Self-host
-
-```bash
-docker compose up    # http://localhost:8787, data in a SQLite volume
-```
-
-No Cloudflare account needed. See [self-hosting](docs/SELF_HOSTING.md).
-
 ## More
 
 [CLI](docs/CLI.md) · [CI test evidence](docs/CI_TEST_EVIDENCE.md) · [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/SELF_HOSTING.md) · [Releases](docs/RELEASING.md) · [MIT license](LICENSE)
