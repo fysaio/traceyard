@@ -31,94 +31,11 @@ import {
 } from "./authorization";
 
 import { agentKeepAliveStream } from "./keep-alive";
+import { agentResult } from "../../packages/core/src/agent-result.mjs";
 
 const budget = z.number().int().min(1000).max(12000).default(4000);
-function result(value: Record<string, unknown>, limit = 4000) {
-  const packet: Record<string, unknown> = { schemaVersion: 1, ...value, omitted: false };
-  const size = () => JSON.stringify(packet).length * 2 + 200;
-  if (packet.verification && typeof packet.verification === "object") {
-    const v = packet.verification as Record<string, unknown>;
-    packet.verification = {
-      id: v.id,
-      baselineId: v.baselineId,
-      candidateId: v.candidateId,
-      verdict: v.verdict,
-      label: v.label,
-      evidence: [v.baselineRun, v.candidateRun].map((run) => {
-        if (!run || typeof run !== "object") return null;
-        const { commit, evidenceId, status } = run as Record<string, unknown>;
-        return { commit, evidenceId, status };
-      }),
-      changedTestsCount: Array.isArray(v.changedTests) ? v.changedTests.length : 0,
-      changedTests: Array.isArray(v.changedTests) ? v.changedTests.slice(0, 5) : [],
-      metrics: v.metrics,
-    };
-    if (Array.isArray(v.changedTests) && v.changedTests.length > 5) packet.omitted = true;
-    const compact = packet.verification as Record<string, unknown>;
-    while (size() > limit && Array.isArray(compact.changedTests) && compact.changedTests.length) {
-      compact.changedTests.pop();
-      packet.omitted = true;
-    }
-    if (size() > limit) {
-      delete compact.metrics;
-      packet.omitted = true;
-    }
-    if (size() > limit) {
-      const evidence = compact.evidence as ({
-        commit: unknown;
-        evidenceId: unknown;
-        status: unknown;
-      } | null)[];
-      compact.evidence = evidence.map((item) => item?.evidenceId ?? null);
-      packet.omitted = true;
-    }
-  }
-  for (const key of [
-    "items",
-    "evidence",
-    "attempts",
-    "recordings",
-    "verifications",
-    "limitations",
-  ]) {
-    const array = packet[key];
-    if (Array.isArray(array))
-      while (array.length > 1 && size() > limit) {
-        array.pop();
-        packet.omitted = true;
-      }
-  }
-  for (const key of [
-    "recordings",
-    "verifications",
-    "snapshot",
-    "limitations",
-    "attempts",
-    "evidence",
-    "items",
-    "nextAction",
-    "browserUrl",
-  ]) {
-    if (size() <= limit) break;
-    if (key in packet) {
-      delete packet[key];
-      packet.omitted = true;
-    }
-  }
-  while (size() > limit && typeof packet.summary === "string" && packet.summary.length > 20) {
-    packet.summary = packet.summary.slice(
-      0,
-      Math.max(20, Math.floor(packet.summary.length * 0.75)),
-    );
-    packet.omitted = true;
-  }
-  if (packet.omitted && typeof packet.offset === "number" && typeof packet.summary === "string")
-    packet.nextOffset = packet.offset + packet.summary.length;
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(packet) }],
-    structuredContent: packet,
-  };
-}
+// Shared with the local `traceyard mcp` server so both bound output the same way.
+const result = agentResult;
 function brief(inv: Awaited<ReturnType<typeof getInvestigation>>, origin: string) {
   return {
     investigationId: inv.id,

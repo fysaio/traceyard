@@ -1,6 +1,18 @@
 import { spawn, execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { runLocalTest } from "../../core/src/index.mjs";
@@ -9,6 +21,7 @@ import { isPytestFile } from "../../core/src/pytest.mjs";
 import { summarizeCommandFailure } from "../../core/src/failure-summary.mjs";
 import { ensureCommit } from "../../core/src/worktree.mjs";
 import { BlockedError } from "./errors.mjs";
+import { cleanOutput } from "./compact.mjs";
 import { VERSION } from "./version.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -93,7 +106,7 @@ function runInstall(command, cwd, timeoutMs) {
  *   the clone's node_modules instead of reinstalling.
  * - Otherwise install with lifecycle scripts off, when allowed.
  */
-async function prepareJavaScript({ directory, repo, testPath, install, progress }) {
+async function prepareJavaScript({ directory, repo, testPath, install, progress, cacheDir }) {
   const pkgDir = await packageDirectory(directory, testPath);
   if (!pkgDir) return "none";
   const manager = await detectPackageManager(directory, pkgDir);
@@ -120,12 +133,119 @@ async function prepareJavaScript({ directory, repo, testPath, install, progress 
     throw new BlockedError(
       `Dependencies are not installed in ${relative(repo, manager.installRoot) || "the repository root"}. Install them, or pass --install.`,
     );
+  if (directory !== repo && cacheDir && roots.length === 1) {
+    const cached = await cachedDependencies({
+      manager,
+      manifest: manifests[0],
+      cacheDir,
+      progress,
+    });
+    if (cached) {
+      await symlink(
+        cached.nodeModules,
+        join(manager.installRoot, "node_modules"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      return cached.reused ? "cached" : "installed";
+    }
+  }
   let command = installCommand(manager);
   if (manager.name === "npm" && !(await exists(join(manager.installRoot, "package-lock.json"))))
     command = { ...command, args: ["install", "--ignore-scripts", "--no-audit", "--no-fund"] };
   progress?.(`Installing dependencies with ${manager.name}...`);
   await runInstall(command, manager.installRoot, 10 * 60 * 1000);
   return "installed";
+}
+
+/** Per-user cache directory: TRACEYARD_CACHE_DIR, else the platform's cache location. */
+export function cacheDirectory(env = process.env) {
+  if (env.TRACEYARD_CACHE_DIR) return resolve(env.TRACEYARD_CACHE_DIR);
+  if (process.platform === "win32")
+    return join(env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "traceyard", "Cache");
+  if (process.platform === "darwin") return join(homedir(), "Library", "Caches", "traceyard");
+  return join(env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "traceyard");
+}
+
+const KEEP_DEPENDENCY_SETS = 5;
+const COMPLETE = ".traceyard-complete";
+
+/**
+ * Install dependencies once per lockfile and reuse them for every exact-commit
+ * run with the same lockfile. Keyed by package manager, lockfile, package.json,
+ * Node major version and platform. Only for single-package projects whose
+ * dependencies come from a registry: workspaces and file:/link: dependencies
+ * need the full checkout, so they install in place.
+ */
+async function cachedDependencies({ manager, manifest, cacheDir, progress }) {
+  if (!manifest || manifest.workspaces) return null;
+  const local = ["dependencies", "devDependencies", "optionalDependencies"].some((field) =>
+    Object.values(manifest[field] ?? {}).some((spec) =>
+      /^(?:file:|link:|workspace:|portal:|\.{0,2}\/)/.test(String(spec)),
+    ),
+  );
+  if (local || (await exists(join(manager.installRoot, ".yarnrc.yml")))) return null;
+  let lockfile = null;
+  for (const name of lockfileNames)
+    if (await exists(join(manager.installRoot, name))) {
+      lockfile = name;
+      break;
+    }
+  if (!lockfile) return null;
+  const hash = createHash("sha256");
+  hash.update(manager.name + "\0" + process.version.split(".")[0] + "\0" + process.platform);
+  hash.update("\0" + process.arch);
+  for (const name of [lockfile, "package.json", ".npmrc"])
+    hash.update(
+      "\0" +
+        name +
+        "\0" +
+        ((await readFile(join(manager.installRoot, name)).catch(() => "")) || ""),
+    );
+  const key = hash.digest("hex").slice(0, 20);
+  const root = join(cacheDir, "deps", key);
+  const nodeModules = join(root, "node_modules");
+  if (await exists(join(nodeModules, COMPLETE))) {
+    const now = new Date();
+    await utimes(root, now, now).catch(() => {});
+    return { nodeModules, reused: true };
+  }
+  await rm(root, { recursive: true, force: true });
+  await mkdir(root, { recursive: true });
+  for (const name of [lockfile, "package.json", ".npmrc"])
+    if (await exists(join(manager.installRoot, name)))
+      await copyFile(join(manager.installRoot, name), join(root, name));
+  let command = installCommand(manager);
+  if (
+    manager.name === "npm" &&
+    lockfile !== "package-lock.json" &&
+    lockfile !== "npm-shrinkwrap.json"
+  )
+    command = { ...command, args: ["install", "--ignore-scripts", "--no-audit", "--no-fund"] };
+  progress?.(`Installing dependencies with ${manager.name} (cached for next time)...`);
+  try {
+    await runInstall(command, root, 10 * 60 * 1000);
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+  if (!(await exists(nodeModules))) {
+    await rm(root, { recursive: true, force: true });
+    return null;
+  }
+  await writeFile(join(nodeModules, COMPLETE), new Date().toISOString() + "\n");
+  await pruneDependencyCache(join(cacheDir, "deps"), key);
+  return { nodeModules, reused: false };
+}
+
+/** Keep the most recently used dependency sets; delete the rest. */
+async function pruneDependencyCache(depsDir, keep) {
+  const entries = await readdir(depsDir).catch(() => []);
+  const dated = [];
+  for (const name of entries)
+    dated.push({ name, time: (await stat(join(depsDir, name)).catch(() => null))?.mtimeMs ?? 0 });
+  dated.sort((a, b) => b.time - a.time);
+  for (const { name } of dated.slice(KEEP_DEPENDENCY_SETS))
+    if (name !== keep) await rm(join(depsDir, name), { recursive: true, force: true });
 }
 
 async function canRunPytest(python) {
@@ -155,13 +275,50 @@ async function findPython(repo, env) {
   );
 }
 
-const cacheKey = (sha, testPath, testCase) =>
-  sha +
-  "-" +
+/** Evidence ID for a run at a commit. The same commit and test always map to the same ID. */
+const commitEvidenceId = (sha, testPath, testCase) =>
+  "ev_" +
+  sha.slice(0, 12) +
+  "_" +
   createHash("sha256")
-    .update(JSON.stringify({ testPath, testCase: testCase ?? null, version: VERSION }))
+    .update(JSON.stringify({ sha, testPath, testCase: testCase ?? null, version: VERSION }))
     .digest("hex")
-    .slice(0, 16);
+    .slice(0, 12);
+
+/** Working-tree runs can't be cached (the files change), so each gets its own ID. */
+const workingTreeEvidenceId = () =>
+  "ev_wt_" + Date.now().toString(36) + "_" + randomBytes(3).toString("hex");
+
+export const EVIDENCE_ID = /^ev_[a-z0-9]+_[a-z0-9_]+$/;
+const KEEP_WORKING_TREE_RUNS = 20;
+
+/** Load a recorded run by its evidence ID. */
+export async function readEvidence(stateDir, evidenceId) {
+  if (!EVIDENCE_ID.test(evidenceId ?? "")) return null;
+  return readJson(join(stateDir, "runs", evidenceId + ".json"));
+}
+
+/** Recorded runs, newest first. */
+export async function listEvidence(stateDir, limit = 8) {
+  const dir = join(stateDir, "runs");
+  const names = (await readdir(dir).catch(() => [])).filter((n) => /^ev_.*\.json$/.test(n));
+  const runs = [];
+  for (const name of names) {
+    const run = await readJson(join(dir, name));
+    if (run?.evidenceId) runs.push(run);
+  }
+  runs.sort((a, b) => String(b.recordedAt).localeCompare(String(a.recordedAt)));
+  return runs.slice(0, limit);
+}
+
+async function pruneWorkingTreeRuns(dir) {
+  const names = (await readdir(dir).catch(() => []))
+    .filter((n) => n.startsWith("ev_wt_"))
+    .sort()
+    .reverse();
+  for (const name of names.slice(KEEP_WORKING_TREE_RUNS))
+    await rm(join(dir, name), { force: true });
+}
 
 function blockedRun(commit, message, started) {
   return {
@@ -177,6 +334,7 @@ function blockedRun(commit, message, started) {
     output: "",
     dependencies: "none",
     cached: false,
+    evidenceId: null,
   };
 }
 
@@ -187,6 +345,7 @@ function blockedRun(commit, message, started) {
  */
 export async function runTest({
   repo,
+  cacheDir = cacheDirectory(),
   commit,
   testPath,
   testCase,
@@ -206,9 +365,7 @@ export async function runTest({
     } catch (error) {
       throw new BlockedError(error.message);
     }
-    const cached = await readJson(
-      join(stateDir, "runs", cacheKey(sha, testPath, testCase) + ".json"),
-    );
+    const cached = await readEvidence(stateDir, commitEvidenceId(sha, testPath, testCase));
     if (cached && !fresh) return { ...cached, cached: true };
   }
   const python = isPytestFile(testPath);
@@ -247,6 +404,7 @@ export async function runTest({
                 testPath,
                 install: true,
                 progress,
+                cacheDir,
               });
             }
           : undefined,
@@ -270,16 +428,30 @@ export async function runTest({
     runner: report.command?.script
       ? { script: report.command.script, directory: report.command.directory }
       : null,
-    output: report.output ?? "",
+    output: cleanOutput(report.output ?? "", repo),
     dependencies,
     cached: false,
+    evidenceId: null,
   };
-  if (sha && result.status !== "BLOCKED") {
-    await mkdir(join(stateDir, "runs"), { recursive: true });
+  if (result.status !== "BLOCKED") {
+    // Every run that executed is kept as evidence, so agents can read the full
+    // log later in bounded slices instead of receiving it up front.
+    result.evidenceId = sha ? commitEvidenceId(sha, testPath, testCase) : workingTreeEvidenceId();
+    const dir = join(stateDir, "runs");
+    await mkdir(dir, { recursive: true });
     await writeFile(
-      join(stateDir, "runs", cacheKey(sha, testPath, testCase) + ".json"),
-      JSON.stringify({ ...result, recordedAt: new Date().toISOString() }, null, 2),
+      join(dir, result.evidenceId + ".json"),
+      JSON.stringify(
+        {
+          ...result,
+          test: { path: testPath, case: testCase ?? null },
+          recordedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
     );
+    if (!sha) await pruneWorkingTreeRuns(dir);
   }
   return result;
 }

@@ -6,15 +6,24 @@ import { BlockedError, UsageError } from "./errors.mjs";
 import {
   changedFiles,
   githubRepository,
+  headCommit,
+  showFile,
   hasUncommittedChanges,
   repositoryRoot,
   resolveCommit,
 } from "./git.mjs";
 import { githubAuth, resolveActionsLink } from "./github.mjs";
-import { readReceipt, receiptMarkdown, writeReceipt } from "./receipt.mjs";
-import { runTest } from "./run.mjs";
-import { compactFailure } from "./compact.mjs";
-import { checkVerdict, EXIT, exitCodeFor, reproVerdict, verifyVerdict } from "./verdicts.mjs";
+import { listReceipts, readReceipt, receiptMarkdown, writeReceipt } from "./receipt.mjs";
+import { cacheDirectory, listEvidence, readEvidence, runTest } from "./run.mjs";
+import { cleanOutput, compactFailure } from "./compact.mjs";
+import {
+  checkVerdict,
+  EXIT,
+  exitCodeFor,
+  guardVerdict,
+  reproVerdict,
+  verifyVerdict,
+} from "./verdicts.mjs";
 import { VERSION } from "./version.mjs";
 
 const HELP = `traceyard ${VERSION}: prove a failing test is fixed, on your machine.
@@ -23,7 +32,11 @@ Usage:
   traceyard repro [test] [--at <sha> | --from <actions-url>]   Rerun the failing test at the exact commit
   traceyard check [test]                                       Run the test against your working tree
   traceyard verify [test] [--before <sha>] [--after <sha>]     Failed before, passes now, test untouched
+  traceyard guard [receipt]                                    Exit 0 only if HEAD has an intact FIXED receipt
+  traceyard explain [evidence] [--failure <n>]                 The failure, where it happened, and the source there
+  traceyard inspect [evidence] [--offset <n>] [--limit <n>]    Recent runs, or one run's full log in slices
   traceyard receipt [id]                                       Show the latest (or a given) receipt
+  traceyard mcp                                                Serve these tools to coding agents over MCP (stdio)
 
 Options:
   --case <name>      Pytest case to run, e.g. TestCart::test_total
@@ -37,7 +50,7 @@ Options:
   -h, --help         Show this help
   -v, --version      Show the version
 
-Exit codes: 0 reproduced/passed/fixed, 1 failing, 2 needs review, 3 blocked, 64 usage error.`;
+Exit codes: 0 reproduced/passed/fixed, 1 failing/unverified, 2 needs review, 3 blocked, 64 usage error.`;
 
 const options = {
   at: { type: "string" },
@@ -45,6 +58,9 @@ const options = {
   before: { type: "string" },
   after: { type: "string" },
   case: { type: "string" },
+  failure: { type: "string" },
+  offset: { type: "string" },
+  limit: { type: "string" },
   json: { type: "boolean", default: false },
   log: { type: "boolean", default: false },
   fetch: { type: "boolean", default: false },
@@ -56,20 +72,29 @@ const options = {
   version: { type: "boolean", short: "v", default: false },
 };
 
+const defaults = { json: false, log: false, fetch: false, install: false, fresh: false };
+
+/** Flags that only make sense for some commands. Everything else applies everywhere. */
 const allowed = {
-  repro: ["at", "from"],
-  check: [],
-  verify: ["before", "after"],
+  repro: ["at", "from", "case"],
+  check: ["case"],
+  verify: ["before", "after", "case"],
+  guard: [],
+  explain: ["failure"],
+  inspect: ["offset", "limit"],
   receipt: [],
 };
+const commandFlags = ["at", "from", "before", "after", "case", "failure", "offset", "limit"];
 
 const MAX_FAILURES = 5;
 const MAX_MESSAGE = 600;
 const MAX_OUTPUT = 4000;
+const SLICE_DEFAULT = 3000;
+const SLICE_MAX = 4000;
 
 /** Agent-facing run shape: bounded so a whole result stays well under 1,500 tokens. */
-function publicRun(role, run, { log }) {
-  const compacted = run.failures.map((f) => ({ ...f, message: compactFailure(f.message) }));
+function publicRun(role, run, { log }, root) {
+  const compacted = run.failures.map((f) => ({ ...f, message: compactFailure(f.message, root) }));
   const failures = compacted
     .slice(0, MAX_FAILURES)
     .map(({ file, name, message }) => ({ file, name, message: message.slice(0, MAX_MESSAGE) }));
@@ -87,8 +112,9 @@ function publicRun(role, run, { log }) {
     durationMs: run.durationMs,
     cached: run.cached,
     dependencies: run.dependencies,
-    message: run.message.slice(0, MAX_MESSAGE),
-    ...(log ? { output: run.output.slice(-MAX_OUTPUT) } : {}),
+    evidenceId: run.evidenceId ?? null,
+    message: cleanOutput(run.message, root).slice(0, MAX_MESSAGE),
+    ...(log ? { output: cleanOutput(run.output, root).slice(-MAX_OUTPUT) } : {}),
   };
 }
 
@@ -144,24 +170,33 @@ function text(result) {
     );
     for (const failure of run.failures.slice(0, 3)) {
       lines.push(`    - ${failure.name}`);
-      const lines = failure.message.split("\n").filter((l) => l.trim());
+      const messageLines = failure.message.split("\n").filter((l) => l.trim());
       // Prefer the assertion line (Pytest prints it after "E "), else the first line.
-      const first = lines.find((l) => /^E\s/.test(l.trim())) ?? lines[0];
+      const first = messageLines.find((l) => /^E\s/.test(l.trim())) ?? messageLines[0];
       if (first) lines.push(`      ${first.trim().slice(0, 200)}`);
     }
     if (run.output) lines.push("", run.output.trimEnd(), "");
   }
+  if (result.explanation) {
+    const { failure, location, source } = result.explanation;
+    lines.push(`  Failure ${failure.index} of ${failure.of}: ${failure.name}`);
+    if (location) lines.push(`  At ${location.path}:${location.line}`);
+    lines.push("", failure.message.trimEnd());
+    if (source) lines.push("", source.text);
+    lines.push("");
+  }
+  if (result.items)
+    for (const item of result.items)
+      lines.push(
+        `  ${item.kind.padEnd(8)} ${item.id}  ${String(item.status).toLowerCase()}  ${item.test ?? ""}${item.commit ? " @ " + item.commit.slice(0, 12) : ""}`,
+      );
+  if (result.evidence) lines.push("", result.evidence.text.trimEnd(), "");
   if (result.changedTests?.length)
     lines.push(`  Test files changed: ${result.changedTests.join(", ")}`);
   if (result.receipt) lines.push(`  Receipt: ${result.receipt.markdownPath}`);
   for (const warning of result.warnings) lines.push(`  Note: ${warning}`);
   lines.push(`Next: ${result.next}`);
   return lines.join("\n");
-}
-
-function emit(result, json, io) {
-  io.stdout(json ? JSON.stringify(result) : text(result));
-  return result.exitCode;
 }
 
 /**
@@ -173,7 +208,7 @@ export async function main(argv, io = defaultIo(), { env = process.env, fetcher 
   try {
     parsed = parseArgs({ args: argv, options, allowPositionals: true, strict: true });
   } catch (error) {
-    return usage(error.message, argv.includes("--json"), io);
+    return emit(usageResult(error.message, null), argv.includes("--json"), io);
   }
   const { values, positionals } = parsed;
   if (values.version) {
@@ -185,14 +220,47 @@ export async function main(argv, io = defaultIo(), { env = process.env, fetcher 
     io.stdout(HELP);
     return command || values.help ? EXIT.OK : EXIT.USAGE;
   }
-  const json = values.json;
+  if (command === "mcp") {
+    if (rest.length) return emit(usageResult("traceyard mcp takes no arguments.", null), false, io);
+    const { serveMcp } = await import("./mcp.mjs");
+    await serveMcp({ repo: values.repo, env, fetcher });
+    return EXIT.OK;
+  }
+  if (rest.length > 1)
+    return emit(
+      usageResult("Pass one test file at a time.", knownCommand(command)),
+      values.json,
+      io,
+    );
+  const progress = values.json ? undefined : (message) => io.stderr(message);
+  const result = await execute(command, values, rest[0], { env, fetcher, progress });
+  if (result.exitCode === EXIT.INTERNAL) {
+    io.stderr(`traceyard: unexpected error: ${result.summary}`);
+    return EXIT.INTERNAL;
+  }
+  return emit(result, values.json, io);
+}
+
+const knownCommand = (command) => (command in allowed ? command : null);
+
+/**
+ * Run one command and return its result object. Shared by the command line and
+ * the MCP server, so both always agree. Never throws: usage problems become
+ * ERROR, unexpected failures become exit code 70.
+ */
+export async function execute(
+  command,
+  input = {},
+  testInput,
+  { env = process.env, fetcher, progress } = {},
+) {
+  const values = { ...defaults, ...input };
   try {
     if (!(command in allowed))
       throw new UsageError(`Unknown command "${command}". Run traceyard --help.`);
-    for (const flag of ["at", "from", "before", "after"])
+    for (const flag of commandFlags)
       if (values[flag] !== undefined && !allowed[command].includes(flag))
         throw new UsageError(`--${flag} doesn't apply to traceyard ${command}.`);
-    if (rest.length > 1) throw new UsageError("Pass one test file at a time.");
     if (values.case !== undefined && !validPytestCase(values.case))
       throw new UsageError(
         "--case takes a Pytest case like TestCart::test_total, without the file path.",
@@ -200,71 +268,75 @@ export async function main(argv, io = defaultIo(), { env = process.env, fetcher 
     const timeoutSeconds = values.timeout === undefined ? 180 : Number(values.timeout);
     if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 3600)
       throw new UsageError("--timeout takes a whole number of seconds between 1 and 3600.");
+    for (const flag of ["offset", "limit", "failure"])
+      if (values[flag] !== undefined && !/^\d+$/.test(String(values[flag])))
+        throw new UsageError(`--${flag} takes a whole number.`);
     const cwd = await realpath(resolve(values.repo ?? process.cwd())).catch(() =>
       resolve(values.repo ?? process.cwd()),
     );
     const root = await repositoryRoot(cwd);
     if (!root) throw new UsageError("Run traceyard inside a git repository, or pass --repo <dir>.");
     const stateDir = await stateDirectory(root);
-    const progress = json ? undefined : (message) => io.stderr(message);
     const context = {
       root,
       cwd,
       stateDir,
       values,
-      testInput: rest[0],
+      testInput,
       progress,
       timeoutMs: timeoutSeconds * 1000,
       env,
       fetcher,
     };
-    const result = await { repro, check, verify, receipt }[command](context);
-    return emit(
-      { schemaVersion: 1, command, ...result, exitCode: exitCodeFor(result.verdict) },
-      json,
-      io,
-    );
+    const result = await handlers[command](context);
+    return { schemaVersion: 1, command, ...result, exitCode: exitCodeFor(result.verdict) };
   } catch (error) {
-    if (error instanceof UsageError)
-      return usage(error.message, json, io, command in allowed ? command : null);
+    if (error instanceof UsageError) return usageResult(error.message, knownCommand(command));
     if (error instanceof BlockedError)
-      return emit(
-        {
-          schemaVersion: 1,
-          command,
-          verdict: "BLOCKED",
-          exitCode: EXIT.BLOCKED,
-          summary: error.message,
-          next: "Fix what blocked the run, then rerun the same command.",
-          test: null,
-          runs: [],
-          warnings: [],
-        },
-        json,
-        io,
-      );
-    io.stderr(`traceyard: unexpected error: ${error?.stack ?? error}`);
-    return EXIT.INTERNAL;
-  }
-}
-
-function usage(message, json, io, command = null) {
-  if (json)
-    io.stdout(
-      JSON.stringify({
+      return {
         schemaVersion: 1,
         command,
-        verdict: "ERROR",
-        exitCode: EXIT.USAGE,
-        summary: message,
-        next: "Run traceyard --help for usage.",
+        verdict: "BLOCKED",
+        exitCode: EXIT.BLOCKED,
+        summary: error.message,
+        next: "Fix what blocked the run, then rerun the same command.",
         test: null,
         runs: [],
         warnings: [],
-      }),
-    );
-  else io.stderr(`traceyard: ${message}`);
-  return EXIT.USAGE;
+      };
+    return {
+      schemaVersion: 1,
+      command: knownCommand(command),
+      verdict: "ERROR",
+      exitCode: EXIT.INTERNAL,
+      summary: String(error?.stack ?? error),
+      next: "This is a bug in Traceyard. Please report it with the command you ran.",
+      test: null,
+      runs: [],
+      warnings: [],
+    };
+  }
+}
+
+function usageResult(message, command) {
+  return {
+    schemaVersion: 1,
+    command,
+    verdict: "ERROR",
+    exitCode: EXIT.USAGE,
+    summary: message,
+    next: "Run traceyard --help for usage.",
+    test: null,
+    runs: [],
+    warnings: [],
+  };
+}
+
+function emit(result, json, io) {
+  if (json) io.stdout(JSON.stringify(result));
+  else if (result.verdict === "ERROR") io.stderr(`traceyard: ${result.summary}`);
+  else io.stdout(text(result));
+  return result.exitCode;
 }
 
 function defaultIo() {
@@ -282,6 +354,7 @@ const runOptions = (ctx) => ({
   timeoutMs: ctx.timeoutMs,
   progress: ctx.progress,
   env: ctx.env,
+  cacheDir: cacheDirectory(ctx.env),
 });
 
 async function repro(ctx) {
@@ -334,7 +407,7 @@ async function repro(ctx) {
   return {
     ...verdict,
     test: { path: testPath, case: values.case ?? null },
-    runs: [publicRun("repro", run, values)],
+    runs: [publicRun("repro", run, values, root)],
     ...(source ? { source } : {}),
     warnings,
   };
@@ -363,7 +436,7 @@ async function check(ctx) {
   return {
     ...checkVerdict(run, test.path),
     test: { path: test.path, case: test.case },
-    runs: [publicRun("check", run, ctx.values)],
+    runs: [publicRun("check", run, ctx.values, ctx.root)],
     warnings: [],
   };
 }
@@ -404,8 +477,8 @@ async function verify(ctx) {
     testPath: test.path,
     changedFiles: files,
   });
-  const runs = [publicRun("baseline", baseline, values)];
-  if (candidate) runs.push(publicRun("candidate", candidate, values));
+  const runs = [publicRun("baseline", baseline, values, root)];
+  if (candidate) runs.push(publicRun("candidate", candidate, values, root));
   let receiptInfo;
   if (candidate && verdict.verdict !== "BLOCKED") {
     const written = await writeReceipt(ctx.stateDir, {
@@ -459,9 +532,249 @@ async function receipt(ctx) {
         .split("\\")
         .join("/"),
       intact: found.intact,
-      body: ctx.values.json ? r : undefined,
-      markdown: ctx.values.json ? undefined : receiptMarkdown(r),
+      // Agents get the Markdown to paste into a pull request; --json gets the full body.
+      body: ctx.values.json && !ctx.values.agent ? r : undefined,
+      markdown: ctx.values.json && !ctx.values.agent ? undefined : receiptMarkdown(r),
     },
     warnings,
   };
 }
+
+/**
+ * A merge gate: passes only when HEAD is the fix commit of an intact FIXED
+ * receipt. Use it in a pre-push hook or as the last step an agent runs.
+ */
+async function guard(ctx) {
+  const found = await readReceipt(ctx.stateDir, ctx.testInput);
+  if (ctx.testInput && !found)
+    throw new UsageError(`No receipt ${ctx.testInput} in .traceyard/receipts.`);
+  const head = await headCommit(ctx.root);
+  const warnings = [];
+  if (await hasUncommittedChanges(ctx.root))
+    warnings.push("You have uncommitted changes. The guard checks the last commit (HEAD) only.");
+  const verdict = guardVerdict({
+    receipt: found?.receipt ?? null,
+    intact: found?.intact ?? false,
+    head,
+  });
+  return {
+    ...verdict,
+    test: found?.receipt.test ?? null,
+    runs: [],
+    ...(found
+      ? {
+          receipt: {
+            id: found.receipt.id,
+            path: relative(ctx.root, found.jsonPath).split("\\").join("/"),
+            markdownPath: relative(ctx.root, found.jsonPath.replace(/\.json$/, ".md"))
+              .split("\\")
+              .join("/"),
+            intact: found.intact,
+          },
+        }
+      : {}),
+    warnings,
+  };
+}
+
+async function latestEvidenceId(ctx) {
+  const last = await readJson(join(ctx.stateDir, "last-evidence.json"));
+  if (last?.evidenceId) return last.evidenceId;
+  return (await listEvidence(ctx.stateDir, 1))[0]?.evidenceId ?? null;
+}
+
+async function evidenceFor(ctx) {
+  const id = ctx.testInput ?? (await latestEvidenceId(ctx));
+  if (!id) throw new UsageError("No runs yet. Run `traceyard repro` or `traceyard check` first.");
+  const run = await readEvidence(ctx.stateDir, id);
+  if (!run)
+    throw new UsageError(
+      `No run ${id} in .traceyard/runs. Run \`traceyard inspect\` to list runs.`,
+    );
+  return run;
+}
+
+// A path:line[:column] reference to a JavaScript, TypeScript or Python file.
+const LOCATION = /(?:^|[\s(])((?:[\w@.+-]+\/)*[\w@.+-]+\.(?:[cm]?[jt]sx?|py)):(\d+)(?::(\d+))?/m;
+
+/** Where the failure points: the first file:line in the message that exists in the repository. */
+async function failureLocation(ctx, run, message) {
+  for (const line of message.split("\n")) {
+    const match = line.match(LOCATION);
+    if (!match || /node_modules|site-packages/.test(match[1])) continue;
+    const source = await showFile(ctx.root, run.commit, match[1]);
+    if (source === null) continue;
+    return {
+      path: match[1],
+      line: Number(match[2]),
+      column: match[3] ? Number(match[3]) : null,
+      source,
+    };
+  }
+  return null;
+}
+
+/** The first failure in a run, where it happened, and the source lines around it. */
+async function explain(ctx) {
+  const run = await evidenceFor(ctx);
+  const index = Math.max(1, Number(ctx.values.failure ?? 1));
+  const failure = run.failures[index - 1];
+  const base = {
+    test: run.test ?? null,
+    runs: [publicRun(run.commit ? "repro" : "check", { ...run, cached: true }, {}, ctx.root)],
+    warnings: [],
+  };
+  if (!failure)
+    return {
+      verdict: "AVAILABLE",
+      summary: run.failures.length
+        ? `Run ${run.evidenceId} has ${run.failures.length} failure(s); there is no failure ${index}.`
+        : `Run ${run.evidenceId} has no failures: ${run.status.toLowerCase()}.`,
+      next: run.failures.length
+        ? `Pass a failure number from 1 to ${run.failures.length}.`
+        : "Nothing to explain. Run `traceyard inspect` for its log.",
+      ...base,
+    };
+  const message = compactFailure(failure.message, ctx.root);
+  const location = await failureLocation(ctx, run, message);
+  let excerpt = null;
+  if (location) {
+    const lines = location.source.split("\n");
+    const start = Math.max(1, location.line - 6);
+    const end = Math.min(lines.length, location.line + 6);
+    excerpt = {
+      path: location.path,
+      commit: run.commit,
+      startLine: start,
+      text: lines
+        .slice(start - 1, end)
+        .map(
+          (l, i) =>
+            `${String(start + i).padStart(5)}${start + i === location.line ? " >" : "  "} ${l}`,
+        )
+        .join("\n")
+        .slice(0, 1600),
+    };
+  }
+  return {
+    verdict: "AVAILABLE",
+    summary: `${failure.name} failed${location ? ` at ${location.path}:${location.line}` : ""}.`,
+    next: run.commit
+      ? "Fix the code, not the test, then run `traceyard check`."
+      : "Change the code and run `traceyard check` again.",
+    ...base,
+    explanation: {
+      evidenceId: run.evidenceId,
+      failure: {
+        index,
+        of: run.failures.length,
+        file: failure.file,
+        name: failure.name,
+        message: message.slice(0, 2000),
+      },
+      location: location
+        ? { path: location.path, line: location.line, column: location.column }
+        : null,
+      source: excerpt,
+    },
+  };
+}
+
+/** Without an ID: recent runs and receipts. With one: that run's log, in bounded slices. */
+async function inspect(ctx) {
+  if (!ctx.testInput) {
+    const runs = await listEvidence(ctx.stateDir, 8);
+    const receipts = await listReceipts(ctx.stateDir, 5);
+    return {
+      verdict: "AVAILABLE",
+      summary: `${runs.length} recent run(s) and ${receipts.length} receipt(s) in .traceyard.`,
+      next: runs.length
+        ? "Pass an evidence ID to read its log, or use `traceyard explain <id>`."
+        : "Run `traceyard repro <test>` first.",
+      test: null,
+      runs: [],
+      items: [
+        ...runs.map((r) => ({
+          kind: "run",
+          id: r.evidenceId,
+          test: r.test?.path ?? null,
+          commit: r.commit,
+          status: r.status,
+          recordedAt: r.recordedAt ?? null,
+        })),
+        ...receipts.map((r) => ({
+          kind: "receipt",
+          id: r.id,
+          test: r.test?.path ?? null,
+          commit: r.candidate?.commit ?? null,
+          status: r.verdict,
+          recordedAt: r.createdAt ?? null,
+        })),
+      ],
+      warnings: [],
+    };
+  }
+  if (ctx.testInput.startsWith("rcpt_")) return receipt(ctx);
+  const run = await evidenceFor(ctx);
+  const output = cleanOutput(run.output ?? "", ctx.root);
+  const offset = Math.min(Number(ctx.values.offset ?? 0), output.length);
+  const limit = Math.min(SLICE_MAX, Math.max(200, Number(ctx.values.limit ?? SLICE_DEFAULT)));
+  const slice = output.slice(offset, offset + limit);
+  const nextOffset = offset + slice.length < output.length ? offset + slice.length : null;
+  return {
+    verdict: "AVAILABLE",
+    summary: output.length
+      ? `Characters ${offset}-${offset + slice.length} of ${output.length} from run ${run.evidenceId}.`
+      : `Run ${run.evidenceId} recorded no output.`,
+    next:
+      nextOffset === null
+        ? "That is the end of the log."
+        : `Pass --offset ${nextOffset} for the next slice.`,
+    test: run.test ?? null,
+    runs: [],
+    evidence: {
+      id: run.evidenceId,
+      offset,
+      nextOffset,
+      total: output.length,
+      text: slice,
+    },
+    warnings: [],
+  };
+}
+
+async function readJson(path) {
+  try {
+    return JSON.parse(await readFile(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** Remember the run an agent most likely wants to explain next: the last failing one. */
+async function rememberEvidence(stateDir, runs) {
+  const run =
+    runs.findLast((r) => r.evidenceId && r.status === "FAILED") ??
+    runs.findLast((r) => r.evidenceId);
+  if (run)
+    await writeFile(
+      join(stateDir, "last-evidence.json"),
+      JSON.stringify({ evidenceId: run.evidenceId }, null, 2),
+    );
+}
+
+const remembering = (handler) => async (ctx) => {
+  const result = await handler(ctx);
+  await rememberEvidence(ctx.stateDir, result.runs ?? []);
+  return result;
+};
+
+const handlers = {
+  repro: remembering(repro),
+  check: remembering(check),
+  verify: remembering(verify),
+  guard,
+  explain,
+  inspect,
+  receipt,
+};

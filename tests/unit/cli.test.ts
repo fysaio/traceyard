@@ -5,8 +5,8 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { main } from "../../packages/cli/src/main.mjs";
-import { verifyVerdict, isTestInput } from "../../packages/cli/src/verdicts.mjs";
-import { compactFailure } from "../../packages/cli/src/compact.mjs";
+import { guardVerdict, verifyVerdict, isTestInput } from "../../packages/cli/src/verdicts.mjs";
+import { cleanOutput, compactFailure, estimateTokens } from "../../packages/cli/src/compact.mjs";
 import { failingTestsFromLog, parseActionsUrl } from "../../packages/core/src/ci-link.mjs";
 import { cliResultSchema, type CliResult } from "../../shared/contracts/cli";
 
@@ -213,6 +213,89 @@ describe("traceyard CLI on a local repository", () => {
     expect(help.stdout).toMatch(/traceyard repro/);
   });
 
+  it("guards HEAD with the newest receipt", async () => {
+    // The newest receipt is the NEEDS_REVIEW one from the edited test.
+    expect(await cli(repo, ["guard"])).toMatchObject({ verdict: "NEEDS_REVIEW", exitCode: 2 });
+    const verified = await cli(repo, ["verify", "sum.test.js", "--before", broken]);
+    expect(verified).toMatchObject({ verdict: "FIXED" });
+    const guarded = await cli(repo, ["guard"]);
+    expect(guarded).toMatchObject({
+      verdict: "FIXED",
+      exitCode: 0,
+      receipt: { id: verified.receipt!.id, intact: true },
+    });
+    // A commit after the receipt isn't proven.
+    git(repo, "commit", "-q", "--allow-empty", "-m", "later");
+    expect(await cli(repo, ["guard"])).toMatchObject({ verdict: "UNVERIFIED", exitCode: 1 });
+    git(repo, "reset", "-q", "--hard", fixed);
+    expect(await cli(repo, ["guard", "rcpt_00000000000000000_abcdef"])).toMatchObject({
+      exitCode: 64,
+    });
+  }, 60_000);
+
+  it("explains the last failure with the source line it points to", async () => {
+    const repro = await cli(repo, ["repro", "sum.test.js", "--at", broken]);
+    const evidenceId = repro.runs[0]!.evidenceId!;
+    expect(evidenceId).toMatch(/^ev_[a-f0-9]{12}_[a-f0-9]{12}$/);
+    const explained = await cli(repo, ["explain"]);
+    expect(explained).toMatchObject({ verdict: "AVAILABLE", exitCode: 0 });
+    expect(explained.explanation).toMatchObject({
+      evidenceId,
+      failure: { index: 1, name: expect.stringContaining("adds numbers") },
+      location: { path: "sum.test.js", line: 1 },
+      source: { path: "sum.test.js", commit: broken },
+    });
+    expect(explained.explanation!.source!.text).toContain("expect(sum(1,2)).toBe(3)");
+    expect(explained.explanation!.failure.message).not.toContain("\u001b[");
+    expect(explained.explanation!.failure.message).not.toContain("traceyard-worktree-");
+    expect(await cli(repo, ["explain", evidenceId, "--failure", "9"])).toMatchObject({
+      verdict: "AVAILABLE",
+      summary: expect.stringContaining("there is no failure 9"),
+    });
+    expect(await cli(repo, ["explain", "ev_nope_000000000000"])).toMatchObject({ exitCode: 64 });
+  }, 60_000);
+
+  it("lists runs and reads a full log in bounded slices", async () => {
+    const listed = await cli(repo, ["inspect"]);
+    expect(listed.items!.some((i) => i.kind === "run" && i.commit === broken)).toBe(true);
+    expect(listed.items!.some((i) => i.kind === "receipt")).toBe(true);
+    const id = listed.items!.find((i) => i.kind === "run" && i.commit === broken)!.id;
+    const first = await cli(repo, ["inspect", id, "--limit", "200"]);
+    expect(first.evidence).toMatchObject({ id, offset: 0 });
+    expect(first.evidence!.text.length).toBeLessThanOrEqual(200);
+    expect(first.evidence!.text).not.toContain("\u001b[");
+    if (first.evidence!.nextOffset !== null) {
+      const second = await cli(repo, [
+        "inspect",
+        id,
+        "--offset",
+        String(first.evidence!.nextOffset),
+        "--limit",
+        "200",
+      ]);
+      expect(second.evidence!.offset).toBe(first.evidence!.nextOffset);
+    }
+    expect(await cli(repo, ["inspect", id, "--offset", "-1"])).toMatchObject({ exitCode: 64 });
+  }, 60_000);
+
+  it("prints readable text without --json", async () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = { stdout: (l: string) => out.push(l), stderr: (l: string) => err.push(l) };
+    const env = { ...process.env, VITEST: "" };
+    expect(await main(["repro", "sum.test.js", "--at", broken, "--repo", repo], io, { env })).toBe(
+      0,
+    );
+    expect(out.join("\n")).toMatch(/REPRODUCED[\s\S]*- .*adds numbers[\s\S]*Next: /);
+    out.length = 0;
+    expect(await main(["explain", "--repo", repo], io, { env })).toBe(0);
+    expect(out.join("\n")).toMatch(/At sum\.test\.js:1[\s\S]*> import/);
+    out.length = 0;
+    expect(await main(["inspect", "--repo", repo], io, { env })).toBe(0);
+    expect(out.join("\n")).toMatch(/run {6}ev_/);
+    expect(out.join("\n")).not.toContain("\u001b[");
+  }, 60_000);
+
   it("never leaves worktrees or edits behind", async () => {
     expect(git(repo, "worktree", "list").split("\n")).toHaveLength(1);
     expect(git(repo, "status", "--porcelain")).toBe("");
@@ -351,5 +434,58 @@ describe("CI job logs", () => {
         ].join("\n"),
       ),
     ).toBe("AssertionError: expected -1 to be 3\n    at src/sum.test.js:3:44");
+  });
+});
+
+describe("agent output", () => {
+  it("strips terminal colours, progress bars and repeated lines", () => {
+    expect(
+      cleanOutput(
+        [
+          "\u001b[32m✓\u001b[39m sum.test.js",
+          "Installing 10%\rInstalling 50%\rInstalling 100%",
+          "\u001b]8;;https://x.test\u0007link\u001b]8;;\u0007",
+          "retry",
+          "retry",
+          "retry",
+          "",
+          "",
+          "/home/me/shop/src/cart.ts:3:1",
+        ].join("\n"),
+        "/home/me/shop",
+      ),
+    ).toBe(
+      [
+        "✓ sum.test.js",
+        "Installing 100%",
+        "link",
+        "retry",
+        "  (previous line repeated 2 more times)",
+        "",
+        "src/cart.ts:3:1",
+      ].join("\n"),
+    );
+    expect(estimateTokens("x".repeat(6000))).toBe(1500);
+  });
+
+  it("only passes the guard for an intact FIXED receipt on HEAD", () => {
+    const a = "a".repeat(40),
+      b = "b".repeat(40);
+    const receipt = {
+      id: "rcpt_20261120000000000_abcdef",
+      verdict: "FIXED",
+      summary: "ok",
+      test: { path: "t.test.ts", case: null },
+      baseline: { commit: a },
+      candidate: { commit: b },
+    };
+    expect(guardVerdict({ receipt, intact: true, head: b }).verdict).toBe("FIXED");
+    expect(guardVerdict({ receipt, intact: false, head: b }).verdict).toBe("NEEDS_REVIEW");
+    expect(guardVerdict({ receipt, intact: true, head: a }).verdict).toBe("UNVERIFIED");
+    expect(
+      guardVerdict({ receipt: { ...receipt, verdict: "STILL_FAILING" }, intact: true, head: b })
+        .verdict,
+    ).toBe("UNVERIFIED");
+    expect(guardVerdict({ receipt: null, intact: false, head: b }).verdict).toBe("UNVERIFIED");
   });
 });

@@ -28,3 +28,15 @@ export function verifyVerdict(input: {
   testPath: string;
   changedFiles: string[];
 }): Verdict & { changedTests: string[] };
+export function guardVerdict(input: {
+  receipt: {
+    id: string;
+    verdict: string;
+    summary: string;
+    test: { path: string; case: string | null };
+    baseline: { commit: string | null };
+    candidate: { commit: string | null };
+  } | null;
+  intact: boolean;
+  head: string | null;
+}): Verdict;
