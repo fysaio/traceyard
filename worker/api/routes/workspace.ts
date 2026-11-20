@@ -33,7 +33,8 @@ export function workspaceRoutes(fetcher: typeof fetch = fetch) {
     (SELECT COUNT(DISTINCT trace_id) FROM trace_spans WHERE project_id=p.id) AS runs,
     (SELECT COUNT(DISTINCT trace_id) FROM trace_spans WHERE project_id=p.id AND parent_span_id IS NULL AND status='FAILED') AS failed,
     (SELECT MAX(started_at) FROM trace_spans WHERE project_id=p.id) AS lastRunAt,
-    (SELECT status FROM repository_jobs WHERE project_id=p.id ORDER BY updated_at DESC LIMIT 1) AS lastCheck
+    (SELECT status FROM repository_jobs WHERE project_id=p.id ORDER BY updated_at DESC LIMIT 1) AS lastCheck,
+    (SELECT updated_at FROM repository_jobs WHERE project_id=p.id ORDER BY updated_at DESC LIMIT 1) AS lastCheckAt
     FROM projects p LEFT JOIN project_repositories r ON r.project_id=p.id WHERE p.owner_user_id=? ORDER BY p.created_at DESC`,
     )
       .bind(auth.user.id)

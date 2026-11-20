@@ -52,6 +52,23 @@ export function Welcome({ session }: { session: AuthSession }) {
             )}
           </div>
           <p className="muted">Free and open source. Works in the browser or over MCP.</p>
+          <div className="welcome-flow" aria-label="How Traceyard works">
+            <div>
+              <span className="flow-step">01</span>
+              <strong>Connect</strong>
+              <p>Choose a repository and, when useful, connect your coding agent with scoped access.</p>
+            </div>
+            <div>
+              <span className="flow-step">02</span>
+              <strong>Reproduce</strong>
+              <p>Run the failing test at the commit where the failure actually occurred.</p>
+            </div>
+            <div>
+              <span className="flow-step">03</span>
+              <strong>Verify</strong>
+              <p>Run the same test against the fix and keep the evidence with the verdict.</p>
+            </div>
+          </div>
         </div>
 
         <section className="welcome-demo card" aria-labelledby="example-title">

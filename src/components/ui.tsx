@@ -202,7 +202,10 @@ export function Modal({
     const trigger = document.activeElement as HTMLElement | null;
     const dialog = ref.current;
     dialog?.showModal();
-    dialog?.querySelector<HTMLInputElement>("input,textarea")?.focus();
+    const firstField = dialog?.querySelector<HTMLElement>(
+      "input:not([disabled]),textarea:not([disabled]),select:not([disabled]),button:not([disabled])",
+    );
+    (firstField ?? dialog?.querySelector<HTMLElement>(".dialog-head button"))?.focus();
     return () => {
       dialog?.close();
       trigger?.focus();
