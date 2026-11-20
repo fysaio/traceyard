@@ -58,3 +58,24 @@ export async function githubRepository(repo) {
   const match = url.match(/github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i);
   return match?.[1] ?? null;
 }
+
+/** Full SHA of HEAD, or null in a repository with no commits. */
+export async function headCommit(repo) {
+  return resolveCommit(repo, "HEAD");
+}
+
+/**
+ * A file's contents at a commit (or in the working tree when commit is null).
+ * Null when the file doesn't exist there or isn't inside the repository.
+ */
+export async function showFile(repo, commit, path) {
+  if (!path || path.startsWith("/") || path.split("/").includes("..")) return null;
+  try {
+    if (commit) return await git(repo, ["show", `${commit}:${path}`], { timeoutMs: 15000 });
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    return await readFile(join(repo, path), "utf8");
+  } catch {
+    return null;
+  }
+}
