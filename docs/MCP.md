@@ -1,30 +1,40 @@
 # Connect a coding agent
 
-**Local, no account:** run `traceyard mcp` to give your agent `reproduce`, `check`, `verify`, `guard`, `explain` and `inspect` on your own machine. Setup for Claude Code, Cursor, Copilot and Codex is in the [CLI guide](CLI.md#coding-agents-mcp). The rest of this page covers the hosted server.
+## Local MCP
 
-Open **Connections** in Traceyard and choose your client. For the hosted app, the remote MCP URL is `https://traceyard.pilotsaviour229.workers.dev/mcp`. Use Streamable HTTP with OAuth.
+Run `npx traceyard mcp` to give an agent six local tools—`reproduce`, `check`, `verify`, `guard`, `explain`, and `inspect`—on the same machine as the repository. The local server uses stdio, does not require a TraceYard account, and does not upload local edits. Setup examples for Claude Code, Cursor, Copilot, and Codex are in the [CLI guide](CLI.md#coding-agents-mcp).
 
-1. Add Traceyard to your MCP client and complete GitHub sign-in in the browser.
-2. Ask the agent to inspect your repository. If it needs project access, open the link it returns and choose **Allow access**. Connect the repository in Traceyard if it is missing.
-3. Ask for a particular check, such as “Run `tests/checkout-retry.test.ts` at the failing commit and show me the assertion and output.” Follow the returned browser link to see the same evidence.
+## Hosted MCP
 
-To reproduce a known failure, give the agent the test file and the exact failing commit. Ask it to inspect the retained assertion and output. Once your candidate is pushed, use `verify` with the same investigation ID and the full candidate SHA. Poll `inspect` with `section: "verification"` and the verification ID. The result includes references to both sets of evidence. Use `inspect` with `section: "evidence"`, the corresponding investigation ID, and an evidence ID to read the retained report. The verification applies to the recorded test and conditions.
+The hosted server is available at `https://traceyard.pilotsaviour229.workers.dev/mcp` using Streamable HTTP with OAuth. In the hosted TraceYard UI, open **Agents** at `/agents` and choose the client setup instructions. **Agents** is the current workspace page; “connection” may describe OAuth state, but it is not the current navigation label.
 
-In Antigravity, copy the setup request from Traceyard’s **Connections** page, or add the MCP URL as `serverUrl` in your existing `mcpServers` configuration. Open **Customizations → Installed → MCP Servers** and select **Authenticate**.
+Hosted MCP exposes a different tool set from local MCP:
 
-## Tools
+| Server                | Tools                                                         | Access and inputs                                                                            |
+| --------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Local `traceyard mcp` | `reproduce`, `check`, `verify`, `guard`, `explain`, `inspect` | Local repository path; no account or project authorization.                                  |
+| Hosted `/mcp`         | `investigate`, `inspect`, `verify`                            | OAuth, an approved repository/project, pushed commits, and hosted investigation identifiers. |
 
-| Tool          | Use                                                                                               |
-| ------------- | ------------------------------------------------------------------------------------------------- |
-| `investigate` | Read indexed source or run an existing Vitest, Jest, or Pytest test in the configured repository. |
-| `inspect`     | Read findings, exact-revision source, evidence, or a verification result.                         |
-| `verify`      | Rerun a saved failing test at a candidate commit and report changes to its test files.            |
-| `recover`     | Resume or restart an owned Traceyard workflow with the recovery scope.                            |
+### Authorization and project selection
 
-For an exact Pytest run use `mode: execute`, `testPath`, the failing `commit`, and a `testCase` such as `TestCheckout::test_total[wallet]`. The selector excludes the file path. [Python package setup](CI_TEST_EVIDENCE.md#rerun-a-pytest-failure).
+1. Add the hosted server to your MCP client and complete GitHub sign-in in the browser.
+2. Call `inspect` with `section: "capabilities"` first. If the response is `PROJECT_ACCESS_REQUIRED`, open the supplied browser URL and approve access to the intended repository/project. If the response is `PROJECT_SELECTION_REQUIRED`, pass the returned `projectId` or select the requested project in the client.
+3. Use `investigate`, `inspect`, and `verify` only after authorization. Hosted execution checks pushed commits; local uncommitted edits are not uploaded.
 
-Connections are account-wide. Each project approval controls which repository the agent can access. Use **Manage agent access** to remove a project approval or disconnect the agent. For multiple approved projects, pass `projectId` when the client exposes it.
+A concrete hosted flow is:
 
-POST requests return tool results. Authenticated GET opens a server-sent event stream with a heartbeat every 15 seconds. This accommodates clients that keep a listening connection open.
+```text
+investigate({ mode: "execute", testPath: "tests/checkout-retry.test.ts", commit: "<40-character-failing-sha>", projectId: "<approved-project-id>" })
+inspect({ section: "evidence", investigationId: "<investigation-id>", evidenceId: "<evidence-id>" })
+verify({ investigationId: "<investigation-id>", commit: "<40-character-candidate-sha>" })
+```
+
+For an exact Pytest run, include `mode: "execute"`, `testPath`, the failing full SHA, and a `testCase` such as `TestCheckout::test_total[wallet]`. The selector excludes the file path. [Python package setup](CI_TEST_EVIDENCE.md#rerun-a-pytest-failure).
+
+After `verify`, poll hosted `inspect` with `section: "verification"` and the verification ID. The result references both evidence sets. Hosted `investigate`/`verify` apply to the recorded test and conditions, not to application-wide correctness.
+
+In Antigravity, copy the setup request from the **Agents** page, or add the MCP URL as `serverUrl` in the existing `mcpServers` configuration. Open **Customizations → Installed → MCP Servers** and select **Authenticate**.
+
+Hosted project approvals are account-wide for the agent, while each approval controls which repository it can access. Use the Agents access controls to remove an approval or disconnect the agent. POST requests return tool results; authenticated GET requests open a server-sent event stream with a heartbeat every 15 seconds.
 
 [Repository setup](REPOSITORY_SETUP.md) · [Interaction replay](REPLAY.md) · [Changelog](../CHANGELOG.md)

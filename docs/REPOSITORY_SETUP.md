@@ -3,7 +3,7 @@
 ## Developer flow
 
 1. Sign in with GitHub and grant the Traceyard GitHub App access to selected repositories.
-2. Choose **Connect repo**. Traceyard creates or reopens the repository's project and starts source discovery.
+2. Choose **Connect repository**. TraceYard creates or reopens the repository resource and starts source discovery.
 3. In **Investigations**, choose **Review workflow change**, inspect the one-file preview, and choose **Create setup PR**. Hosted tests become available once you or a maintainer merge that PR into the default branch on GitHub. If you're blocked, use a maintainer-approved test fork or run the test locally at both commits and retain the output.
 4. In **Investigations**, select the existing Vitest test file and the full SHA checked out by the failing run. Traceyard can fill the SHA from a GitHub Actions link when it can identify one checkout for the repository in the job log. If the run has multiple failing jobs, provide the specific job link. For a custom checkout, enter the tested SHA yourself.
 
@@ -71,7 +71,7 @@ Never commit key files or environment secrets. GitHub workflows use a pinned, re
 
 ### Free Cloudflare deployment (default)
 
-The default deployment contains the web app, API, D1, Queues and discovery Workflows. It does not provision Containers or change your billing plan. Project code runs on the repository owner's GitHub-hosted Actions runner. GitHub's included allowance and repository Actions policy apply; private-repository execution is not unlimited. GitHub OIDC authenticates the runner without a customer-entered Traceyard key. The setup PR is prepared and approved inside Traceyard. The local CLI remains optional.
+The default deployment contains the web app, API, D1, discovery Workflows, cron, and deployment variables. It does not provision Containers or change your billing plan. Historical Queue resources are legacy and may be cleaned up by deployment; no active Queue binding is required. Project code runs on the repository owner's GitHub-hosted Actions runner. GitHub's included allowance and repository Actions policy apply; private-repository execution is not unlimited. GitHub OIDC authenticates the runner without a customer-entered TraceYard key. The setup PR is prepared inside TraceYard and merged on GitHub. The local CLI remains optional.
 
 After reviewing the account/resource IDs and authenticating Wrangler:
 
@@ -81,7 +81,7 @@ npm run db:migrate:remote
 npm run deploy
 ```
 
-The default config bounds hosted discovery to 16 eligible JavaScript/TypeScript files of at most 16 KB each. Discovery processes one file per persisted step and labels incomplete coverage. Large repository tree parsing can still exceed free CPU limits; local discovery is the fallback. Failed rescans keep the previous successful index. Workflow error retention is at most 3 days, while application history is stored independently in D1.
+The default config bounds hosted discovery to 16 eligible JavaScript/TypeScript files of at most 16 KB each. Discovery processes one file per persisted step and labels incomplete coverage. Large repository tree parsing can still exceed free CPU limits; local discovery is the fallback. Failed rescans keep the previous successful index. TraceYard-managed D1/check records follow the documented 30-day retention; GitHub workflow logs and artifacts follow the connected repository or organization GitHub Actions retention policy.
 
 Configure the existing GitHub credentials once, from the operator's own Traceyard checkout containing `.dev.vars`:
 
@@ -105,9 +105,9 @@ Both deploy scripts build their selected mode first, then deploy the explicit ge
 
 ## Current runtime support and limits
 
-- Node.js 22, npm lockfile installs, existing `build`/`test` scripts. A selected npm workspace may use the repository's shared lockfile if it contains that workspace. Other package managers/runtimes are not automatically executed.
+- Node.js 22.12.0 or newer, npm lockfile installs, existing `build`/`test` scripts. A selected npm workspace may use the repository's shared lockfile if it contains that workspace. Other package managers/runtimes are not automatically executed.
 - The free GitHub discovery preview reads at most 16 eligible JavaScript/TypeScript files, each at most 16 KB; managed deployments allow up to 60 files of 64 KB. It exposes up to 100 operations and labels coverage limits. A downloaded agent scan can inspect up to 10,000 eligible files, with the same file/operation bounds.
-- Managed queue deadline: 10 minutes. Managed execution deadline: 10 minutes; each application command/request-test process is bounded to 180 seconds. VM entrypoint lifetime is at most 15 minutes if the controller fails.
+- Managed execution deadline: 10 minutes; each application command/request-test process is bounded to 180 seconds. Managed execution uses a Cloudflare Container orchestrated by a Durable Object; it is not part of the ordinary free deployment.
 - At most 6 accepted checks per project per hour; default global concurrency is 2 (`MANAGED_CHECK_CONCURRENCY_LIMIT`, bounded 1–8). These are capacity limits, not a monthly spending guarantee. Pushes beyond the project allowance still update source discovery.
 - Each check uses a fresh workspace. GitHub settings/request fixtures are frozen at dispatch; code comes from the default-branch commit selected by GitHub when dispatch starts. Managed checks freeze both commit and settings. The GitHub runner caches npm package downloads and still runs `npm ci` in each checkout. External services, private registry authentication and application secrets are not inferred or provisioned.
 - Supported Node HTTP activity is recorded automatically during tests. Mocked/in-process tests can pass without recording a trace. Continuous monitoring of an already deployed application requires that application's runtime integration; repository access alone does not instrument production.
@@ -142,13 +142,13 @@ TRACEYARD_ORIGIN=https://YOUR_TRACEYARD_HOST
 TRACEYARD_KEY=<project-scoped API key>
 ```
 
-With Node.js 22.12+ and Git, run this from that repository (no separate Traceyard checkout required):
+With Node.js 22.12.0 or newer and Git, run this from that repository (no separate TraceYard checkout required):
 
 ```bash
 npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#6bfde2973ff92f322b6d575e60a3212e2474bbcc -- traceyard run .
 ```
 
-The command installs an immutable reviewed runner revision into npm's cache. In Traceyard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing Traceyard checkout instead:
+The command installs an immutable reviewed runner revision into npm's cache. In TraceYard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing TraceYard checkout instead:
 
 ```bash
 node /path/to/traceyard/agent/cli.mjs scan .
@@ -156,17 +156,17 @@ node /path/to/traceyard/agent/cli.mjs connect .
 node /path/to/traceyard/agent/cli.mjs run .
 ```
 
-`scan` only prints source discoveries locally. `connect` uploads discovery without running application commands. `run` installs locked dependencies and executes configured checks on your machine. Local scripts receive your local environment except Traceyard's API key; configure test services deliberately. A published, browser-authenticated CLI installer is not yet shipped.
+`scan` only prints source discoveries locally. `connect` uploads discovery without running application commands. `run` installs locked dependencies and executes configured checks on your machine. Local scripts receive your local environment except TraceYard's API key; configure test services deliberately. This runner flow is separate from the public npm CLI, which is available as `npx traceyard@0.1.0`.
 
 ## The Traceyard action
 
 The runner steps are also packaged as a composite action, [`action/action.yml`](../action/action.yml):
 
 ```yaml
-- uses: fysaio/traceyard/action@v1
+  - uses: fysaio/traceyard/action@e388d18620cbd2435ef5f4998353091fd3b635d4
   with:
     run-request: ${{ inputs.run_request }}
     origin: https://YOUR_TRACEYARD_HOST
 ```
 
-It installs the runner's locked dependencies with lifecycle scripts off, prepares the trusted runner and runs the check. Releases move the `v1` tag to the newest 1.x version. See [releasing](RELEASING.md). The workflow that Traceyard proposes during setup is the one it dispatches and checks, and it still pins the runner by full commit SHA.
+It installs the runner's locked dependencies with lifecycle scripts off, prepares the trusted runner and runs the check. Use a published, reviewed, fetchable 40-character SHA; never use an unpublished local `HEAD`. The moving `fysaio/traceyard/action@v1` tag becomes available only after a 1.x release and then moves with 1.x releases. See [releasing](RELEASING.md). The workflow that TraceYard proposes during setup is the one it dispatches and checks, and it still pins the runner by full commit SHA.
