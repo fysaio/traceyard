@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 it("uses test-only service settings without operator credentials, runner pins or dotenv variables", () => {
   const settings = env as unknown as Record<string, unknown>;
   expect(settings.APP_VERSION).toBe("0.1.0");
-  expect(settings.SANDBOX_DAILY_RUN_LIMIT).toBe("100");
+  expect(settings.SOURCE_SCAN_FILE_LIMIT).toBe("16");
   expect(settings.PUBLIC_APP_ORIGIN).toBe("https://traceyard.test");
   expect(settings.GITHUB_CLIENT_ID).toBe("traceyard-test-client");
   for (const name of [
@@ -17,5 +17,5 @@ it("uses test-only service settings without operator credentials, runner pins or
     expect(name in env, `${name} must not be loaded from the operator environment`).toBe(false);
   }
   expect(env.DB).toBeDefined();
-  expect(env.RUN_WORKFLOW).toBeDefined();
+  expect(env.REPOSITORY_DISCOVERY).toBeDefined();
 });

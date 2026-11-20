@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One-time operator setup. Credentials stay on this computer and travel to Cloudflare via stdin.
 import { loadEnvFile } from "node:process";
-import { createPrivateKey, randomBytes } from "node:crypto";
+import { createPrivateKey } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -61,8 +61,7 @@ const env = {
 };
 if (args.includes("--account")) env.CLOUDFLARE_ACCOUNT_ID = option("--account");
 // Do not pass GitHub credentials through inherited environment variables.
-for (const name of [...required, "INTEGRATION_ENCRYPTION_KEY", "PUBLIC_APP_ORIGIN"])
-  delete env[name];
+for (const name of [...required, "PUBLIC_APP_ORIGIN"]) delete env[name];
 function wrangler(command, input) {
   return new Promise((done, reject) => {
     const child = spawn(
@@ -93,14 +92,6 @@ function wrangler(command, input) {
     );
     child.stdin.end(input);
   });
-}
-const existing = JSON.parse(await wrangler(["secret", "list", "--format", "json"]));
-if (!existing.some((item) => item.name === "INTEGRATION_ENCRYPTION_KEY")) {
-  const encryptionKey =
-    process.env.INTEGRATION_ENCRYPTION_KEY || randomBytes(32).toString("base64");
-  if (Buffer.from(encryptionKey, "base64").length !== 32)
-    throw Error("INTEGRATION_ENCRYPTION_KEY must be a 32-byte base64 key.");
-  values.INTEGRATION_ENCRYPTION_KEY = encryptionKey;
 }
 await wrangler(["secret", "bulk"], JSON.stringify(values));
 console.log("Traceyard configuration uploaded. Credential values were not printed.");

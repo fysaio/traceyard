@@ -35,10 +35,9 @@ Create a GitHub OAuth application with a callback at `http://localhost:5173/api/
 PUBLIC_APP_ORIGIN=http://localhost:5173
 GITHUB_CLIENT_ID=<OAuth client ID>
 GITHUB_CLIENT_SECRET=<OAuth client secret>
-INTEGRATION_ENCRYPTION_KEY=<base64 encoding of 32 random bytes>
 ```
 
-Use a separate HTTPS callback and encrypted secrets for a deployed instance. Set `OUTBOUND_ALLOWED_HOSTS` if you use outgoing callbacks. Keep the integration encryption key stable so stored credentials remain readable. For GitHub repository runs, configure the App in [repository setup](REPOSITORY_SETUP.md).
+Use a separate HTTPS callback and encrypted secrets for a deployed instance. For GitHub repository runs, configure the App in [repository setup](REPOSITORY_SETUP.md).
 
 ## Deploy from a checkout
 

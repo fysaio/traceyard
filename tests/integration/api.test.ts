@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
-import { apiFetch, createSession, launchBody, postJson, readFailure, readSuccess } from "./helpers";
+import { apiFetch, createSession, readFailure, readSuccess } from "./helpers";
 
 describe("health and catalog", () => {
   it("reports database health without creating a sandbox session", async () => {
@@ -23,33 +23,20 @@ describe("health and catalog", () => {
     expect(body.status).toBe("ok");
     expect(body.checks.database.status).toBe("ok");
   });
-
-  it("returns 404 for an unknown workflow", async () => {
-    const session = await createSession();
-    const response = await apiFetch("/api/workflows/nope", {}, session);
-    expect(response.status).toBe(404);
-    expect((await readFailure(response)).code).toBe("NOT_FOUND");
-  });
 });
 
-describe("launch request validation", () => {
-  it("rejects an unknown workflow", async () => {
-    const session = await createSession();
-    const response = await postJson("/api/runs", launchBody({ workflowId: "nope" }), session);
-    expect(response.status).toBe(404);
-  });
-
+describe("write protection", () => {
   it("rejects cross-origin writes", async () => {
     const session = await createSession();
     const response = await apiFetch(
-      "/api/runs",
+      "/api/projects",
       {
         method: "POST",
         headers: {
           "content-type": "application/json",
           origin: "https://evil.example",
         },
-        body: JSON.stringify(launchBody()),
+        body: JSON.stringify({ name: "Cross-origin" }),
       },
       session,
     );

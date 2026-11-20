@@ -35,13 +35,3 @@ export async function keyPrincipal(c: Context<AppEnv>, scope: string) {
     .run();
   return { userId: key.owner_user_id, projectId: key.project_id, keyId: key.id };
 }
-export async function keySession(c: Context<AppEnv>, key: { keyId: string }) {
-  const hash = await sha256Hex("api-key-session:" + key.keyId),
-    now = nowIso();
-  await c.env.DB.prepare(
-    "INSERT INTO sandbox_sessions (id_hash,ip_hash,user_agent_hash,created_at,last_seen_at) VALUES (?,?,?,?,?) ON CONFLICT(id_hash) DO UPDATE SET last_seen_at=excluded.last_seen_at",
-  )
-    .bind(hash, c.get("session").ipHash, "api-key", now, now)
-    .run();
-  return { ...c.get("session"), idHash: hash, isNew: false };
-}

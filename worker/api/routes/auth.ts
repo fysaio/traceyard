@@ -14,30 +14,15 @@ import {
 import { randomToken, sha256Base64Url, sha256Hex } from "../../lib/crypto";
 import { isoFromNow, nowIso } from "../../lib/time";
 import {
-  claimGuestRuns,
   createUserSession,
   getOrCreateGitHubIdentity,
   listUserSessions,
   revokeAuthSession,
   revokeUserSession,
 } from "../../persistence/identity";
-import { getDefaultProjectId, getOwnedProject } from "../../persistence/projects";
 import { logError } from "../../observability/logger";
-import {
-  ApiError,
-  badRequest,
-  forbidden,
-  serviceUnavailable,
-  unauthorized,
-  parseWith,
-  notFound,
-} from "../errors";
-import {
-  getRequestContext,
-  readJsonBody,
-  type AppEnv,
-  type AuthenticatedPrincipal,
-} from "../middleware";
+import { ApiError, badRequest, forbidden, serviceUnavailable, unauthorized } from "../errors";
+import { getRequestContext, type AppEnv, type AuthenticatedPrincipal } from "../middleware";
 
 const PROFILE_SCHEMA = z
   .object({
@@ -301,55 +286,6 @@ export function createAuthRoutes(fetcher: typeof fetch = fetch): Hono<AppEnv> {
     if (auth !== null) await revokeAuthSession(c.env.DB, auth.sessionHash);
     c.header("Set-Cookie", clearCookie(AUTH_COOKIE_NAME, secure), { append: true });
     return c.json({ data: { ok: true }, meta: { requestId: getRequestContext(c).requestId } });
-  });
-
-  routes.get("/auth/guest-work", async (c) => {
-    requireAuth(c.get("auth"));
-    const row = await c.env.DB.prepare(
-      "SELECT COUNT(*) AS count FROM runs WHERE owner_user_id IS NULL AND owner_session_hash=? AND project_id='prj_sandbox' AND expires_at>?",
-    )
-      .bind(c.get("session").idHash, nowIso())
-      .first<{ count: number }>();
-    return c.json({
-      data: { executions: row?.count ?? 0 },
-      meta: { requestId: getRequestContext(c).requestId },
-    });
-  });
-  routes.post("/auth/claim", async (c) => {
-    const auth = requireAuth(c.get("auth"));
-    const guestSession = c.get("session");
-    if (guestSession.isNew) {
-      throw forbidden(
-        "GUEST_SESSION_REQUIRED",
-        "Open Traceyard in the browser that owns the guest work before claiming it.",
-      );
-    }
-
-    const body = c.req.header("content-type")?.includes("application/json")
-      ? parseWith(
-          z.object({ projectId: z.string().min(1).max(80) }).strict(),
-          await readJsonBody(c),
-          "Choose a project for your sandbox work.",
-        )
-      : null;
-    if (body && !(await getOwnedProject(c.env.DB, auth.user.id, body.projectId)))
-      throw notFound("Project not found.");
-    const projectId = body?.projectId ?? (await getDefaultProjectId(c.env.DB, auth.user.id));
-    if (projectId === null) {
-      throw new Error("The authenticated account has no personal workspace.");
-    }
-    const claimed = await claimGuestRuns(
-      c.env.DB,
-      auth.user.id,
-      projectId,
-      guestSession.idHash,
-      await sha256Hex(auth.user.id),
-      getRequestContext(c).requestId,
-    );
-    return c.json({
-      data: { claimedRuns: claimed },
-      meta: { requestId: getRequestContext(c).requestId },
-    });
   });
 
   routes.post("/auth/sessions/:id/revoke", async (c) => {
