@@ -21,6 +21,16 @@ Focused runs also support Jest and [Pytest](docs/CI_TEST_EVIDENCE.md#rerun-a-pyt
 
 [Record a browser journey](docs/BROWSER_JOURNEYS.md) to compare a user flow on two browser builds and review the result on a pull request.
 
+## Run it locally
+
+```bash
+traceyard repro src/cart.test.ts --at <failing-sha>   # or --from <GitHub Actions job link>
+traceyard check                                       # after each attempt at a fix
+traceyard verify                                      # failed before, passes now, test untouched
+```
+
+No account or server. See the [CLI guide](docs/CLI.md).
+
 ## More
 
-[CI test evidence](docs/CI_TEST_EVIDENCE.md) · [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [MIT license](LICENSE)
+[CLI](docs/CLI.md) · [CI test evidence](docs/CI_TEST_EVIDENCE.md) · [Connect a coding agent](docs/MCP.md) · [Repository setup](docs/REPOSITORY_SETUP.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Self-hosting](docs/PRODUCTION_RELEASE.md) · [MIT license](LICENSE)
