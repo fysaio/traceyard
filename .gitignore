@@ -16,3 +16,8 @@ docs/benchmarks/raw/
 # Trusted runner bootstrap output
 runner/package/agent/
 runner/package/packages/
+
+# Written by selfhost/start.mjs at start-up
+selfhost/wrangler.json
+selfhost/data/
+data/

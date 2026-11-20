@@ -13,7 +13,17 @@ traceyard receipt                               # Markdown you can paste into th
 
 Coding agents get the same commands as MCP tools with `traceyard mcp`. See [Coding agents](#coding-agents-mcp).
 
-Until the npm package ships (#49), run it from a Traceyard checkout with `node packages/cli/bin/traceyard.mjs`. Node 22.12 or later.
+## Install
+
+Node 22.12 or later.
+
+```bash
+npx traceyard repro src/cart.test.ts     # no install
+npm install -g traceyard                 # or keep it on your PATH
+npm install -D traceyard                 # or pin it per project
+```
+
+The same package is mirrored to GitHub Packages as `@fysaio/traceyard`. npm releases carry [provenance](https://docs.npmjs.com/generating-provenance-statements), so `npm audit signatures` can confirm the package was built by this repository's release workflow. From a Traceyard checkout you can also run `node packages/cli/bin/traceyard.mjs`.
 
 ## Commands
 
@@ -211,7 +221,7 @@ command = "npx"
 args = ["-y", "traceyard", "mcp"]
 ```
 
-Before the npm release, replace `npx -y traceyard` with `node /path/to/traceyard/packages/cli/bin/traceyard.mjs`.
+To pin a version, use `npx -y traceyard@<version> mcp`. To run from a checkout, use `node /path/to/traceyard/packages/cli/bin/traceyard.mjs mcp`.
 
 ### Token budget
 

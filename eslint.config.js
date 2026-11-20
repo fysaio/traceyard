@@ -45,6 +45,7 @@ export default tseslint.config(
       "agent/**/*.mjs",
       "packages/**/*.mjs",
       "agent/**/*.cjs",
+      "selfhost/**/*.mjs",
       "*.config.js",
     ],
     languageOptions: {
@@ -59,6 +60,9 @@ export default tseslint.config(
         URL: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        Response: "readonly",
       },
     },
   },
