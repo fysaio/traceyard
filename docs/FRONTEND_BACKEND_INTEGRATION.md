@@ -1,6 +1,6 @@
 # Frontend / backend contracts
 
-The browser and [MCP server](MCP.md) share project investigations and their test evidence.
+The browser and [MCP server](MCP.md) share repository investigations and their test evidence. In this document, **project** names the owner-scoped backend resource; the current user-facing UI calls the connected resource a **repository**.
 
 The connected application journey and request-runner contracts are detailed in [project experience](PROJECT_EXPERIENCE.md). New owner-scoped APIs expose `/api/workspace/projects`, project `catalog`, `operations/:key`, `runner-config`, operation `cases`/`test`, `application-runs/:trace`, check detail/cancellation and managed check launch. `/api/v1/repository/configuration` supplies a project-scoped runner manifest/snapshot through a scoped local key, active managed credential or verified legacy GitHub OIDC identity. Migration 0011 adds these configurations, case snapshots and retained results.
 
@@ -21,6 +21,6 @@ External spans have nonzero W3C-shaped trace/span IDs. Ingestion checks parents 
 
 Migrations 0008–0010 add repository installation, discovery and independent test-setup/dispatch state. The `REPOSITORY_DISCOVERY` Workflow binding runs bounded source scans. See [repository setup](REPOSITORY_SETUP.md) for installation permissions, runner identity checks, support boundaries and deployment instructions.
 
-Production migration through 0014 and the GitHub-check deployment were completed by the operator. A subsequent Somni GitHub check completed successfully, without recorded application traces. This does not verify every execution feature in production. Local tests are separate from authenticated live acceptance.
+Production behavior is environment-specific and must be verified against the deployed revision and release record. Local tests are separate from authenticated live acceptance; this contract document does not treat an undated historical deployment assertion as current evidence.
 
 The standard deployment uses GitHub checks with in-app setup approval, backed by migration 0014. `/repository/analyze` requests an actual GitHub check, while `/repository/scan` refreshes source only. Optional managed Containers are a separate deployment mode and are not required. Signed default-branch pushes refresh connected source.
