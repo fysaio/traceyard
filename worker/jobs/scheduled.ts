@@ -23,7 +23,6 @@ export async function runScheduledJobs(env: Env): Promise<void> {
     env.DB.prepare("DELETE FROM repository_test_results WHERE created_at<?").bind(monthAgo),
     env.DB.prepare("DELETE FROM github_webhook_deliveries WHERE received_at<?").bind(monthAgo),
     env.DB.prepare("DELETE FROM repository_jobs WHERE updated_at<?").bind(monthAgo),
-    env.DB.prepare("DELETE FROM audit_events WHERE created_at<?").bind(isoFromNow(-90 * DAY_MS)),
     env.DB.prepare("DELETE FROM user_sessions WHERE expires_at<? OR revoked_at<?").bind(
       now,
       isoFromNow(-90 * DAY_MS),

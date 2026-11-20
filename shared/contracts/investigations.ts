@@ -11,7 +11,6 @@ export const investigationTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("source"), operationKey: reference.optional() }).strict(),
   z.object({ kind: z.literal("check"), ref: reference }).strict(),
   z.object({ kind: z.literal("trace"), ref: reference }).strict(),
-  z.object({ kind: z.literal("execution"), ref: reference }).strict(),
 ]);
 export const investigationRequestSchema = z
   .object({
@@ -60,7 +59,7 @@ export interface SourceSnapshot {
 }
 export interface InvestigationEvidence {
   id: string;
-  kind: "source" | "check" | "trace" | "execution" | "diagnostic";
+  kind: "source" | "check" | "trace" | "diagnostic";
   basis: "observed" | "source";
   title: string;
   content: unknown;

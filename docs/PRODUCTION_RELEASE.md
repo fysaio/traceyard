@@ -10,11 +10,22 @@ database health, OAuth discovery and MCP authorization challenge afterward.
 The CI release does not repeat the already successful full test suite. Local
 operator releases retain the complete test gate.
 
+## Database baseline
+
+A fresh database applies every file in `migrations/` in order. Migration 0025
+drops the tables left by the retired workflow engine, so a new self-hosted
+database ends with the same schema as an upgraded one. Check a fresh local copy
+with:
+
+```sh
+npx wrangler d1 migrations apply traceyard-prod-db --local
+```
+
 ## One-time credential setup
 
 In the Cloudflare account used by `wrangler.jsonc`, create a token restricted to
-that account with the permissions needed to deploy this Worker, its Workers
-Queues and Workflows bindings, and apply D1 migrations. Do not grant access to
+that account with the permissions needed to deploy this Worker and its Workflows
+binding, and apply D1 migrations. Do not grant access to
 unrelated accounts or zones. Store the token in the GitHub repository's encrypted
 Actions secret named `CLOUDFLARE_API_TOKEN`. Existing production application
 secrets remain on the Worker; never copy them into the repository or build output.
