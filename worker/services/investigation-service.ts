@@ -348,7 +348,7 @@ async function collect(
       check.status === "FAILED"
         ? "Inspect the reported failure and reproduce the affected test."
         : "Inspect application traces or select a focused test.";
-  } else if (target.kind === "trace") {
+  } else {
     const spans = await db
       .prepare(
         "SELECT name,status,started_at,ended_at,attributes_json,error_json FROM trace_spans WHERE project_id=? AND trace_id=? ORDER BY started_at,span_id LIMIT 101",
@@ -378,36 +378,6 @@ async function collect(
     );
     nextAction =
       "Inspect the failed span evidence or reproduce the request in an available environment.";
-  } else {
-    const run = await db
-      .prepare(
-        "SELECT id,status,workflow_id,workflow_version,error_json,parent_run_id,recovery_mode FROM runs WHERE id=? AND project_id=?",
-      )
-      .bind(target.ref, projectId)
-      .first<{ id: string; status: string; error_json: string | null }>();
-    if (!run) throw notFound("Execution not found.");
-    const steps = await db
-      .prepare(
-        "SELECT step_key,name,status,attempt_count,error_json,reused_from_run_id FROM execution_steps WHERE run_id=? ORDER BY ordinal LIMIT 100",
-      )
-      .bind(target.ref)
-      .all();
-    evidence.push({
-      kind: "execution",
-      basis: "observed",
-      title: "Traceyard execution and checkpoints",
-      ...bounded({ run, steps: steps.results }),
-    });
-    snapshot.commit = null;
-    snapshot.filesScanned = 0;
-    summary = `Traceyard workflow execution ${run.status}. ${run.error_json ?? "Inspect steps for retained execution evidence."}`;
-    limitations.push(
-      "This execution belongs to a Traceyard-defined workflow; it is not execution of an arbitrary repository function.",
-    );
-    nextAction =
-      run.status === "FAILED"
-        ? "Inspect checkpoints before choosing resume or restart."
-        : "Inspect the recorded output and attempts.";
   }
   return {
     snapshot,

@@ -47,7 +47,7 @@ export async function projectCatalog(
   if (!project) throw notFound("Project not found.");
   await syncGitHubDispatches(env, projectId);
   await syncRepositoryChecks(env, projectId);
-  const [repository, runs, jobs, config, cases, managed] = await Promise.all([
+  const [repository, runs, jobs, config, cases] = await Promise.all([
     env.DB.prepare("SELECT * FROM project_repositories WHERE project_id=?")
       .bind(projectId)
       .first<RepositoryRecord>(),
@@ -65,11 +65,6 @@ export async function projectCatalog(
     )
       .bind(projectId)
       .all<{ operation_key: string; count: number }>(),
-    env.DB.prepare(
-      "SELECT r.id,w.name,r.status,r.created_at AS startedAt,r.completed_at AS endedAt,(SELECT COUNT(*) FROM execution_steps WHERE run_id=r.id) AS steps FROM runs r JOIN workflows w ON w.id=r.workflow_id WHERE r.project_id=? ORDER BY r.created_at DESC LIMIT 100",
-    )
-      .bind(projectId)
-      .all<ApplicationRun>(),
   ]);
   const sourceIndex = repository?.scan_json ?? repository?.scan_progress_json;
   const scan = sourceIndex
@@ -173,13 +168,6 @@ export async function projectCatalog(
     operations,
     runs,
     jobs: jobs.results,
-    managedRuns: managed.results.map((r) => ({
-      ...r,
-      source: "managed",
-      attributes: {},
-      checkId: null,
-      commit: null,
-    })),
     config: config
       ? runnerConfigSchema.parse(JSON.parse(config.config_json))
       : runnerConfigSchema.parse({}),
