@@ -1,5 +1,3 @@
-import { executionTrace } from "../../integrations/execution-trace";
-import type { RunRow } from "../../persistence/rows";
 import { Hono } from "hono";
 import { z } from "zod";
 import { spanBatchSchema, redact, type TraceSpan } from "../../../shared/contracts/traces";
@@ -64,7 +62,7 @@ traceRoutes.post("/projects/:projectId/keys", async (c) => {
       .object({
         name: z.string().trim().min(1).max(80),
         scopes: z
-          .array(z.enum(["traces:write", "runs:read", "runs:write"]))
+          .array(z.enum(["traces:write"]))
           .min(1)
           .max(3),
       })
@@ -135,35 +133,12 @@ traceRoutes.get("/projects/:projectId/traces", async (c) => {
     .bind(projectId, before)
     .all();
   return c.json({
-    data: {
-      items: [
-        ...rows.results,
-        ...(
-          await c.env.DB.prepare(
-            "SELECT 'execution:'||id AS trace_id,workflow_id AS name,COALESCE(started_at,created_at) AS started_at,completed_at AS ended_at,(SELECT COUNT(*) FROM execution_steps s WHERE s.run_id=runs.id) AS span_count,(status='FAILED') AS failed,(status IN ('QUEUED','RUNNING','CANCELLING')) AS running FROM runs WHERE project_id=? AND created_at<? ORDER BY created_at DESC LIMIT 100",
-          )
-            .bind(projectId, before)
-            .all()
-        ).results,
-      ]
-        .sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))
-        .slice(0, 100),
-    },
+    data: { items: rows.results },
     meta: { requestId: getRequestContext(c).requestId },
   });
 });
 traceRoutes.get("/projects/:projectId/traces/:traceId", async (c) => {
   const { projectId } = await ownedProject(c);
-  if (c.req.param("traceId").startsWith("execution:")) {
-    const run = await c.env.DB.prepare("SELECT * FROM runs WHERE id=? AND project_id=?")
-      .bind(c.req.param("traceId").slice(10), projectId)
-      .first<RunRow>();
-    if (!run) throw notFound("Execution trace not found.");
-    return c.json({
-      data: { items: await executionTrace(c.env.DB, run), executionId: run.id },
-      meta: { requestId: getRequestContext(c).requestId },
-    });
-  }
   const rows = await c.env.DB.prepare(
     "SELECT * FROM trace_spans WHERE project_id=? AND trace_id=? ORDER BY started_at,span_id LIMIT 1000",
   )

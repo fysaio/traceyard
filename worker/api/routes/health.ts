@@ -33,8 +33,6 @@ healthRoutes.get("/health", async (c) => {
     timestamp: new Date().toISOString(),
     checks: {
       database: { status: databaseStatus, latencyMs },
-      queue: { status: "configured" },
-      workflow: { status: "configured" },
     },
   };
 

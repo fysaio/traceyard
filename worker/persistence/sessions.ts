@@ -1,7 +1,14 @@
 import { fingerprint, randomToken, sha256Hex } from "../lib/crypto";
 import { readSessionToken, sessionCookie } from "../lib/cookie";
 import { nowIso } from "../lib/time";
-import type { SandboxSessionRow } from "./rows";
+
+interface SandboxSessionRow {
+  id_hash: string;
+  ip_hash: string;
+  user_agent_hash: string | null;
+  created_at: string;
+  last_seen_at: string;
+}
 
 export interface ResolvedSession {
   idHash: string;
