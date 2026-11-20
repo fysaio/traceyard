@@ -23,6 +23,7 @@ export {
   parsePackageManagerField,
   scriptCommand,
 } from "./package-manager.mjs";
+export { failingTestsFromLog, parseActionsUrl, readCheckoutRevision } from "./ci-link.mjs";
 export { checkoutCommit, ensureCommit, githubFetchEnv, withCommit } from "./worktree.mjs";
 
 const DEFAULT_TIMEOUT_MS = 120000;

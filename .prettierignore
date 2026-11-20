@@ -8,3 +8,4 @@ blob-report/
 package-lock.json
 worker-configuration.d.ts
 *_worker.js
+.traceyard/
