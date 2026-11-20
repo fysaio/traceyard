@@ -124,3 +124,20 @@ export async function readReceipt(stateDir, id) {
     return null;
   }
 }
+
+/** Newest receipts first, without checking digests. */
+export async function listReceipts(stateDir, limit = 5) {
+  const files = (await readdir(receiptsDir(stateDir)).catch(() => []))
+    .filter((f) => /^rcpt_[0-9]{17}_[a-f0-9]{6}\.json$/.test(f))
+    .sort()
+    .reverse()
+    .slice(0, limit);
+  const receipts = [];
+  for (const file of files)
+    try {
+      receipts.push(JSON.parse(await readFile(join(receiptsDir(stateDir), file), "utf8")));
+    } catch {
+      // Skip unreadable receipts; `traceyard receipt <id>` reports them.
+    }
+  return receipts;
+}

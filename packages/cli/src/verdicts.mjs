@@ -3,7 +3,7 @@
 
 export const EXIT = {
   OK: 0, // REPRODUCED, PASSED, FIXED
-  FAILING: 1, // FAILING, STILL_FAILING
+  FAILING: 1, // FAILING, STILL_FAILING, UNVERIFIED
   REVIEW: 2, // NOT_REPRODUCED, NEEDS_REVIEW, INCONCLUSIVE
   BLOCKED: 3, // BLOCKED: the test could not run here
   USAGE: 64, // bad arguments
@@ -15,8 +15,10 @@ export const exitCodeFor = (verdict) =>
     REPRODUCED: EXIT.OK,
     PASSED: EXIT.OK,
     FIXED: EXIT.OK,
+    AVAILABLE: EXIT.OK,
     FAILING: EXIT.FAILING,
     STILL_FAILING: EXIT.FAILING,
+    UNVERIFIED: EXIT.FAILING,
     NOT_REPRODUCED: EXIT.REVIEW,
     NEEDS_REVIEW: EXIT.REVIEW,
     INCONCLUSIVE: EXIT.REVIEW,
@@ -144,4 +146,44 @@ export function verifyVerdict({ baseline, candidate, testPath, changedFiles }) {
     `${testPath} failed at ${short(baseline.commit)} and passes at ${short(candidate.commit)}, with no test files changed.`,
     "Open a pull request and attach the receipt.",
   );
+}
+
+/**
+ * The merge gate. FIXED only for an intact receipt whose verdict is FIXED and
+ * whose fix commit is exactly HEAD; anything else keeps the claim unproven.
+ */
+export function guardVerdict({ receipt, intact, head }) {
+  const verify = "Run `traceyard verify` on the fix commit, then run `traceyard guard` again.";
+  if (!receipt)
+    return {
+      verdict: "UNVERIFIED",
+      summary: "No receipt yet, so nothing proves this commit fixes a failing test.",
+      next: "Run `traceyard repro <test>` on the failing commit, fix the code, commit, then `traceyard verify`.",
+    };
+  if (!intact)
+    return {
+      verdict: "NEEDS_REVIEW",
+      summary: `Receipt ${receipt.id} was edited after it was written; its digest doesn't match.`,
+      next: verify,
+    };
+  if (receipt.verdict !== "FIXED")
+    return {
+      verdict: receipt.verdict === "NEEDS_REVIEW" ? "NEEDS_REVIEW" : "UNVERIFIED",
+      summary: `The latest receipt (${receipt.id}) says ${receipt.verdict}, not FIXED: ${receipt.summary}`,
+      next:
+        receipt.verdict === "NEEDS_REVIEW"
+          ? "A person should review the changed test files before this merges."
+          : verify,
+    };
+  if (!head || receipt.candidate?.commit !== head)
+    return {
+      verdict: "UNVERIFIED",
+      summary: `Receipt ${receipt.id} proves ${short(receipt.candidate?.commit)}, but HEAD is ${short(head)}. Commits after the receipt aren't verified.`,
+      next: verify,
+    };
+  return {
+    verdict: "FIXED",
+    summary: `HEAD ${short(head)} is proven: ${receipt.test.path} failed at ${short(receipt.baseline.commit)} and passes here, with no test files changed.`,
+    next: "Safe to open or merge the pull request. Attach the receipt.",
+  };
 }
