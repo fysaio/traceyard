@@ -477,6 +477,7 @@ function Evidence({
   const more = q.data.nextOffset !== null;
   return (
     <div className="stack-sm">
+      <p className="muted small">Technical evidence retained from the executor. Open it when you need the exact output.</p>
       <pre className="code">{q.data.text}</pre>
       {(offset > 0 || more) && (
         <div className="pager">
@@ -637,6 +638,12 @@ function InvestigationDetail() {
             </p>
           )}
           {i.execution && <ExecutionSummary execution={i.execution} />}
+          {i.status === "BLOCKED" && !running && (
+            <div className="notice" role="status">
+              <strong>This investigation is waiting for a prerequisite</strong>
+              <p>{i.finding.nextAction ?? "Review the explanation above before trying again."}</p>
+            </div>
+          )}
           {didNotReproduce && (
             <div className="notice">
               <Icon name="alert" />
@@ -824,7 +831,10 @@ function InvestigationDetail() {
 
         {!!output.length && (
           <section className="stack" id="evidence">
-            <h2 className="section-title">Output</h2>
+            <div>
+              <h2 className="section-title">Retained evidence</h2>
+              <p className="muted small">Human-readable findings come first. Open an item below for executor output.</p>
+            </div>
             <div className="list">
               {output.map((e) => (
                 <div key={e.id} className="row-group">
