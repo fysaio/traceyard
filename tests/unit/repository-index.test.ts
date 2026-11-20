@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeRepositoryFiles, relatedTests } from "../../agent/repository-index.mjs";
+import { analyzeRepositoryFiles, relatedTests } from "../../packages/core/src/repository-index.mjs";
 import {
   indexedFileSchema,
   repositoryPackageSchema,

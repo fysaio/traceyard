@@ -4,6 +4,7 @@ WORKDIR /opt/traceyard
 COPY runner/package/package.json runner/package/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY agent ./agent
+COPY packages/core ./packages/core
 RUN mkdir -p /workspace && chown node:node /workspace
 USER node
 ENTRYPOINT ["sleep", "900"]

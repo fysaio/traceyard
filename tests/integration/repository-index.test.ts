@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
-import { analyzeRepositoryFiles } from "../../agent/repository-index.mjs";
+import { analyzeRepositoryFiles } from "../../packages/core/src/repository-index.mjs";
 import {
   beginRepositoryIndex,
   uploadRepositoryIndexFiles,

@@ -5,5 +5,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --include=dev --ignore-scripts --no-audit --no-fund \
     && npx playwright install --with-deps chromium
 COPY agent ./agent
+COPY packages/core ./packages/core
 USER node
 ENTRYPOINT ["node", "agent/cli.mjs", "compare-browser"]

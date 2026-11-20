@@ -6,18 +6,22 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { discoverFile } from "./discovery.mjs";
-import { summarizeCommandFailure } from "./failure-summary.mjs";
+import { discoverFile } from "../packages/core/src/discovery.mjs";
+import { summarizeCommandFailure } from "../packages/core/src/failure-summary.mjs";
 import { buildRecording } from "./recording.mjs";
-import { indexRepository } from "./repository-index.mjs";
+import { indexRepository } from "../packages/core/src/repository-index.mjs";
 import {
   prepareTargetedTest,
   runInvestigationPlan,
   runTargetedTest,
   sanitizeDiagnostic,
-} from "./test-evidence.mjs";
+} from "../packages/core/src/test-evidence.mjs";
 import { createHash } from "node:crypto";
-import { pytestEnvironment } from "./pytest.mjs";
+import { pytestEnvironment } from "../packages/core/src/pytest.mjs";
+import { replayVitest } from "./replay-runner.mjs";
+
+// The hosted runner installs with `npm ci` only, and replays recordings in Docker.
+const hostedRunOptions = { replay: replayVitest, packageManager: "npm" };
 
 export async function scanDirectory(root) {
   const operations = [],
@@ -197,6 +201,7 @@ export async function runFlakiness(root, plan, env, checkoutToken) {
             index,
             { ...plan, timeoutMs: Math.min(45000, remaining()) },
             env,
+            hostedRunOptions,
           );
           status = result.status === "FAILED" && !result.counts.failed ? "BLOCKED" : result.status;
           message = [result.message, result.failures[0]?.name, result.failures[0]?.message]
@@ -695,6 +700,7 @@ export async function main(args = process.argv.slice(2)) {
                 JSON.stringify(new URL("./record-fetch.mjs", import.meta.url).href),
             }
           : testEnv,
+        hostedRunOptions,
       );
       if (plan.captureInteractions && focusedRunner !== "vitest")
         focused.message =
