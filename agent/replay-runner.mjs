@@ -1,10 +1,10 @@
 import { access, chmod, cp, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { sanitizeDiagnostic } from "./test-report.mjs";
+import { sanitizeDiagnostic } from "../packages/core/src/test-report.mjs";
 function command(args, timeout = 120000) {
   return new Promise((done, reject) => {
     const child = spawn("/usr/bin/docker", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -58,17 +58,20 @@ export async function replayVitest(root, invocation, plan) {
     data = await mkdtemp(join(tmpdir(), "traceyard-replay-data-")),
     name = "traceyard-replay-" + randomUUID();
   try {
+    // replay-entry.mjs imports ./test-report.mjs, which lives in the core package.
     const files = [
         "interaction-format.mjs",
         "record-fetch.mjs",
         "replay-entry.mjs",
-        "test-report.mjs",
+        "../packages/core/src/test-report.mjs",
       ],
       digest = createHash("sha256");
     for (const file of files) {
-      const source = fileURLToPath(new URL("./" + file, import.meta.url));
+      const source = fileURLToPath(
+        new URL(file.startsWith("../") ? file : "./" + file, import.meta.url),
+      );
       digest.update(await readFile(source));
-      await cp(source, join(context, file));
+      await cp(source, join(context, basename(file)));
     }
     const dockerfile = fileURLToPath(new URL("./replay.Dockerfile", import.meta.url));
     digest.update(await readFile(dockerfile));

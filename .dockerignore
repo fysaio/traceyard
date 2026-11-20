@@ -3,6 +3,9 @@
 !package-lock.json
 !agent/
 !agent/**
+!packages/
+!packages/core/
+!packages/core/**
 !runner/
 !runner/Dockerfile
 !runner/package/

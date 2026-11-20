@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
-import { indexRepository } from "../agent/repository-index.mjs";
-import { runInvestigationPlan } from "../agent/test-evidence.mjs";
+import { indexRepository } from "../packages/core/src/repository-index.mjs";
+import { runInvestigationPlan } from "../packages/core/src/test-evidence.mjs";
 const root = await mkdtemp(join(tmpdir(), "traceyard-benchmark-"));
 try {
   const api = pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href;
