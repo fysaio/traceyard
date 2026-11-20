@@ -2,6 +2,8 @@
 # runtime, with its database in SQLite files under /data.
 # Build from the repository root: docker build -f selfhost/Dockerfile .
 FROM node:22-bookworm-slim AS build
+# workerd, which generates the Worker types during the build, needs CA certificates.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
