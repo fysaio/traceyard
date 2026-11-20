@@ -63,17 +63,21 @@ export function AgentsPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Agents"
-        description="Let your coding agent reproduce the failure and prove its fix before you review the change."
+        title="Agents & MCP"
+        description="Connect a coding agent to reproduce failures, inspect retained evidence, and verify a fix for the selected repository."
       />
       <div className="stack-xl">
         <section className="card stack">
           <div className="section-head">
             <h2>Connect an agent</h2>
-            <a className="text-link" href="/oauth/connections">
-              Manage access
+            <a className="text-link" href="#agent-access">
+              Review access
             </a>
           </div>
+          <p className="muted">
+            This connection starts at Traceyard, then you explicitly allow it to use the selected
+            repository. Access is never broadened to your other repositories automatically.
+          </p>
           <div className="segmented" role="group" aria-label="Coding agent">
             {CLIENTS.map(([value, label]) => (
               <button
@@ -93,7 +97,7 @@ export function AgentsPage() {
           {client === "chatgpt" ? (
             <ol className="steps">
               <li>
-                In ChatGPT, open <strong>Plugins → + → Add custom MCP server</strong>.
+                In ChatGPT, open the area for connecting a remote MCP server.
               </li>
               <li>
                 Name it <strong>Traceyard</strong>, paste the URL and choose <strong>OAuth</strong>.
@@ -127,13 +131,18 @@ export function AgentsPage() {
               </li>
             </ol>
           )}
-          <p className="muted">
-            No API key needed. Your client must support remote MCP with OAuth.
-          </p>
+          <div className="notice" role="status">
+            <strong>What happens next</strong>
+            <p>
+              OAuth signs the client in first. Traceyard then asks for access to this repository,
+              not your whole account. You can review or revoke that access below.
+            </p>
+            <p className="muted">No API key is needed. Your client must support remote MCP with OAuth.</p>
+          </div>
         </section>
 
         {project && (
-          <section className="stack">
+          <section className="stack" id="agent-access">
             <div className="section-head">
               <h2 className="section-title">Access to {project.repository ?? project.name}</h2>
               <button

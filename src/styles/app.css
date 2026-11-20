@@ -629,6 +629,10 @@ input[type="checkbox"] {
   padding-left: 36px;
 }
 
+.search input[type="search"] {
+  padding-inline-start: 36px;
+}
+
 /* Segmented control */
 
 .segmented {
@@ -1904,6 +1908,39 @@ code.commit-id {
   line-height: 25px;
 }
 
+.welcome-flow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+  width: 100%;
+  max-width: 560px;
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--border);
+}
+
+.welcome-flow > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-width: 0;
+}
+
+.welcome-flow strong {
+  font-size: 13px;
+}
+
+.welcome-flow p {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.flow-step {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
 .welcome-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1979,6 +2016,21 @@ code.commit-id {
 @media (max-width: 720px) {
   :root {
     --control: 40px;
+  }
+
+  .welcome-flow {
+    grid-template-columns: 1fr;
+    gap: var(--s-3);
+  }
+
+  .welcome-flow > div {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    column-gap: var(--s-2);
+  }
+
+  .welcome-flow p {
+    grid-column: 2;
   }
 
   .topbar-inner {
