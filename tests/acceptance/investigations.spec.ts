@@ -332,6 +332,8 @@ test("reopening a baseline restores its repair verdict and readable execution ev
       .getByRole("region", { name: "Test execution result" })
       .getByText("Expected 42, received 41", { exact: true }),
   ).toBeVisible();
+  // The full executed SHA is visible, not only a short prefix.
+  await expect(page.getByLabel("Executed commit")).toHaveText(snapshot.commit);
   await expect(page.getByRole("link", { name: "Open after evidence" })).toHaveAttribute(
     "href",
     "/investigations/inv_candidate?project=prj_browser&evidence=evd_candidate#evidence",
