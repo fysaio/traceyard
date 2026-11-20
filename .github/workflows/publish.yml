@@ -86,7 +86,7 @@ jobs:
         run: |
           cd dist/npm/traceyard && npm pack --pack-destination "$RUNNER_TEMP"
           mkdir "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke" && npm init -y >/dev/null
-          npm install --no-audit --no-fund "$RUNNER_TEMP"/traceyard-*.tgz
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/fysaio-traceyard-*.tgz
           test "$(npx traceyard --version)" = "${{ needs.prepare.outputs.version }}"
           node "$GITHUB_WORKSPACE/scripts/smoke-mcp.mjs" "$RUNNER_TEMP/smoke/node_modules/.bin/traceyard"
       - name: Publish to npm with provenance
