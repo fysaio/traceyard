@@ -1,0 +1,29 @@
+name: Monitor production
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Public production smoke check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public endpoints
+        env:
+          BASE_URL: https://traceyard.pilotsaviour229.workers.dev
+        run: |
+          set -euo pipefail
+          for path in /health /api/health /.well-known/oauth-authorization-server; do
+            curl --fail --silent --show-error --retry 2 --retry-delay 2 \
+              --connect-timeout 10 --max-time 30 \
+              "$BASE_URL$path" >/dev/null
+          done
+          curl --fail --silent --show-error --retry 2 --retry-delay 2 \
+            --connect-timeout 10 --max-time 30 "$BASE_URL/" \
+            | grep -F '<title>Traceyard — Test evidence for your fixes</title>'
