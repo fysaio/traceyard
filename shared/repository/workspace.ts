@@ -93,7 +93,6 @@ export interface Catalog {
   operations: Operation[];
   runs: ApplicationRun[];
   jobs: RepositoryJob[];
-  managedRuns?: ApplicationRun[];
   config: RunnerConfig;
   warnings: string[];
   filesScanned: number;
