@@ -4,7 +4,7 @@ import { apiFetch, ORIGIN, createSession, readSuccess } from "./helpers";
 import { getOrCreateGitHubIdentity, createUserSession } from "../../worker/persistence/identity";
 import { getDefaultProjectId } from "../../worker/persistence/projects";
 import type { Catalog, Operation, SavedTestCase } from "../../shared/repository/workspace";
-import { discoverFile } from "../../agent/discovery.mjs";
+import { discoverFile } from "../../packages/core/src/discovery.mjs";
 async function account(id = 920) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
       id,

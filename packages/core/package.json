@@ -1,0 +1,27 @@
+{
+  "name": "@traceyard/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Run one test at an exact commit and get a structured result. No server, no network.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.d.mts",
+      "default": "./src/index.mjs"
+    },
+    "./*": {
+      "types": "./src/*.d.mts",
+      "default": "./src/*.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@babel/parser": "^7.29.14"
+  }
+}

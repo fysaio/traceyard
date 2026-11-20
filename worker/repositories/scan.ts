@@ -1,5 +1,5 @@
 import type { WorkflowStep } from "cloudflare:workers";
-import { discoverFile } from "../../agent/discovery.mjs";
+import { discoverFile } from "../../packages/core/src/discovery.mjs";
 import { githubRequest } from "./github";
 import { ApiError, serviceUnavailable } from "../api/errors";
 import { nowIso } from "../lib/time";

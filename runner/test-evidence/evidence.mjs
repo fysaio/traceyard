@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { SaxesParser } from "saxes";
-import { sanitizeDiagnostic } from "../../agent/test-report.mjs";
-import { isPytestFile, validPytestCase } from "../../agent/pytest.mjs";
+import { sanitizeDiagnostic } from "../../packages/core/src/test-report.mjs";
+import { isPytestFile, validPytestCase } from "../../packages/core/src/pytest.mjs";
 
 export const revisionPattern = /^[a-f0-9]{40}$/;
 export const lanePattern = /^[a-z0-9][a-z0-9_-]{0,59}$/;

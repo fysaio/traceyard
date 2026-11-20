@@ -1,14 +1,26 @@
 import type {
   InvestigationPlan,
   InvestigationReport,
-} from "../shared/contracts/investigation-execution";
+} from "../../../shared/contracts/investigation-execution";
 import type { RepositoryIndex } from "./repository-index.mjs";
+import type { PackageManagerName } from "./package-manager.mjs";
+export interface RunOptions {
+  /** Replays a recorded run. Only the hosted runner provides it. */
+  replay?: (
+    root: string,
+    command: InvestigationReport["command"],
+    plan: InvestigationPlan,
+  ) => Promise<Omit<InvestigationReport, "requestId" | "runId" | "commit">>;
+  /** Force a package manager instead of detecting it from the repository. */
+  packageManager?: PackageManagerName | { name: PackageManagerName; major: number | null };
+}
 export function sanitizeDiagnostic(value: unknown, max?: number): string;
 export function runInvestigationPlan(
   workspace: string,
   index: RepositoryIndex,
   plan: InvestigationPlan,
   env: Record<string, string | undefined>,
+  options?: RunOptions,
 ): Promise<Omit<InvestigationReport, "requestId" | "runId" | "commit">>;
 export function normalizeVitestReport(
   data: unknown,
@@ -25,6 +37,7 @@ export function runTargetedTest(
   index: RepositoryIndex,
   plan: InvestigationPlan,
   env: Record<string, string | undefined>,
+  options?: RunOptions,
 ): Promise<Omit<InvestigationReport, "requestId" | "runId" | "commit">>;
 export function prepareTargetedTest(
   workspace: string,

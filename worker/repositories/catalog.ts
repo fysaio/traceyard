@@ -1,7 +1,7 @@
 import type { Operation, ApplicationRun, Catalog } from "../../shared/repository/workspace";
 import { runnerConfigSchema } from "../../shared/repository/workspace";
 import type { RepositoryRecord, RepositoryJob } from "../../shared/repository/contracts";
-import type { DiscoveredOperation } from "../../agent/discovery.mjs";
+import type { DiscoveredOperation } from "../../packages/core/src/discovery.mjs";
 import { sha256Hex } from "../lib/crypto";
 import { getOwnedProject } from "../persistence/projects";
 import { notFound } from "../api/errors";

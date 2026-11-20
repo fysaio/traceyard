@@ -43,6 +43,7 @@ export default tseslint.config(
       "runner/**/*.mjs",
       "scripts/**/*.mjs",
       "agent/**/*.mjs",
+      "packages/**/*.mjs",
       "agent/**/*.cjs",
       "*.config.js",
     ],
