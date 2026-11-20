@@ -157,3 +157,16 @@ node /path/to/traceyard/agent/cli.mjs run .
 ```
 
 `scan` only prints source discoveries locally. `connect` uploads discovery without running application commands. `run` installs locked dependencies and executes configured checks on your machine. Local scripts receive your local environment except Traceyard's API key; configure test services deliberately. A published, browser-authenticated CLI installer is not yet shipped.
+
+## The Traceyard action
+
+The runner steps are also packaged as a composite action, [`action/action.yml`](../action/action.yml):
+
+```yaml
+- uses: fysaio/traceyard/action@v1
+  with:
+    run-request: ${{ inputs.run_request }}
+    origin: https://YOUR_TRACEYARD_HOST
+```
+
+It installs the runner's locked dependencies with lifecycle scripts off, prepares the trusted runner and runs the check. Releases move the `v1` tag to the newest 1.x version. See [releasing](RELEASING.md). The workflow that Traceyard proposes during setup is the one it dispatches and checks, and it still pins the runner by full commit SHA.
