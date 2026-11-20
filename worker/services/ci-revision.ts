@@ -1,64 +1,21 @@
 import { badRequest } from "../api/errors";
 import { repositoryActionsReader } from "../repositories/github";
+import { parseActionsUrl, readCheckoutRevision } from "../../packages/core/src/ci-link.mjs";
 
-const shaPattern = /^[a-f0-9]{40}$/i;
 const numberPattern = /^[1-9]\d{0,17}$/;
 const pasteSha = "Open the job log and paste the full SHA from the checkout used by the test.";
 
+export { readCheckoutRevision };
+
 export function parseCiLink(value: string, repository: string) {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw badRequest("INVALID_CI_LINK", "Paste a GitHub Actions run or job link.");
-  }
-  const match = url.pathname.match(
-    /^\/([\w.-]+\/[\w.-]+)\/actions\/runs\/([1-9]\d{0,17})(?:\/attempts\/([1-9]\d{0,17}))?(?:\/job\/([1-9]\d{0,17}))?\/?$/,
-  );
-  if (
-    url.origin !== "https://github.com" ||
-    url.username ||
-    url.password ||
-    !match?.[1] ||
-    !match[2]
-  )
-    throw badRequest("INVALID_CI_LINK", "Paste a GitHub Actions run or job link.");
-  if (match[1].toLowerCase() !== repository.toLowerCase())
+  const link = parseActionsUrl(value);
+  if (!link) throw badRequest("INVALID_CI_LINK", "Paste a GitHub Actions run or job link.");
+  if (link.repository.toLowerCase() !== repository.toLowerCase())
     throw badRequest(
       "CI_REPOSITORY_MISMATCH",
       "Use an Actions link from the connected repository.",
     );
-  return { runId: match[2], attempt: match[3], jobId: match[4] };
-}
-
-export function readCheckoutRevision(log: string, repository: string) {
-  const lines = log.split(/\r?\n/).map((line) =>
-    line
-      .replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z\s+/, "")
-      // eslint-disable-next-line no-control-regex -- GitHub can colorize the checkout log.
-      .replace(/\x1b\[[\d;]*m/g, "")
-      .trim(),
-  );
-  const checkouts: { commit: string; merge: boolean }[] = [];
-  let observing = false,
-    merge = false;
-  for (const [index, line] of lines.entries()) {
-    const checkout = line.match(/^(?:##\[group\])?Syncing repository: (\S+)$/i);
-    if (checkout?.[1]) {
-      observing = checkout[1].toLowerCase() === repository.toLowerCase();
-      merge = false;
-    }
-    if (!observing) continue;
-    if (/^\[command\].*\s(?:checkout|fetch)\s.*refs\/(?:remotes\/)?pull\/\d+\/merge\b/.test(line))
-      merge = true;
-    if (/^\[command\].*\bgit\s+log\s+-1\s+--format=%H$/.test(line)) {
-      const commit = lines[index + 1];
-      if (commit && shaPattern.test(commit))
-        checkouts.push({ commit: commit.toLowerCase(), merge });
-      observing = false;
-    }
-  }
-  return checkouts.length === 1 ? checkouts[0] : null;
+  return { runId: link.runId, attempt: link.attempt, jobId: link.jobId };
 }
 
 export async function resolveCiRevision(

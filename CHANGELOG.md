@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the `traceyard` command-line tool: `repro` reruns a failing test at the exact commit (or the commit a GitHub Actions job tested), `check` runs it against your edits, `verify` confirms it failed before and passes now without test changes, and `receipt` prints the result for a pull request. It returns stable JSON and documented exit codes, and needs no account. [CLI guide](docs/CLI.md)
 - Run focused Vitest and Jest tests from the selected npm package, including nested workspaces and named scripts such as `test:unit`.
 - Cache npm downloads for GitHub checks using the application and runner lockfiles. Each check still installs dependencies and runs the selected tests.
 

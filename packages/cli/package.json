@@ -1,0 +1,18 @@
+{
+  "name": "@traceyard/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reproduce a failing test at the exact commit, check a fix, and record a receipt that it passed. No account, no server.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "traceyard": "./bin/traceyard.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ]
+}

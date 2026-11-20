@@ -7,6 +7,7 @@ export * from "./discovery.mjs";
 export * from "./runners.mjs";
 export * from "./package-manager.mjs";
 export * from "./worktree.mjs";
+export * from "./ci-link.mjs";
 export function summarizeCommandFailure(output: string, phase: string, result: unknown): string;
 export function isPytestFile(path: string): boolean;
 export function validPytestCase(value: unknown): boolean;
