@@ -1,21 +1,12 @@
 # Production release
 
-Merging a pull request starts the full checks on main. Once every check succeeds,
-`Deploy Traceyard` deploys that exact commit. Pull-request workflows cannot trigger
-the production job. A revision that has been superseded on main is refused.
+Merging a pull request starts the full checks on `main`. Once every check succeeds, `Deploy TraceYard` checks out and deploys that exact commit. Pull-request workflows cannot trigger the production job, and a revision superseded on `main` is refused.
 
-The release builds once, applies pending D1 migrations, syncs the reviewed runner
-pin and deploys the Worker and assets. It verifies the public source revision,
-database health, OAuth discovery and MCP authorization challenge afterward.
-The CI release does not repeat the already successful full test suite. Local
-operator releases retain the complete test gate.
+The current path builds twice: CI builds and validates the revision, then the deployment job checks out the same revision and rebuilds it before applying pending D1 migrations, syncing the reviewed runner pin, and deploying the Worker and assets. It does not promote a persisted CI build artifact. Deployment checks public source revision, database health, protected-resource metadata, and the MCP authorization challenge afterward. A browser authorization and one focused repository test are still required for acceptance.
 
 ## Database baseline
 
-A fresh database applies every file in `migrations/` in order. Migration 0025
-drops the tables left by the retired workflow engine, so a new self-hosted
-database ends with the same schema as an upgraded one. Check a fresh local copy
-with:
+A fresh database applies every file in `migrations/` in order. Migration `0025` drops tables left by the retired workflow engine. Check a fresh local copy with:
 
 ```sh
 npx wrangler d1 migrations apply traceyard-prod-db --local
@@ -23,20 +14,14 @@ npx wrangler d1 migrations apply traceyard-prod-db --local
 
 ## One-time credential setup
 
-In the Cloudflare account used by `wrangler.jsonc`, create a token restricted to
-that account with the permissions needed to deploy this Worker and its Workflows
-binding, and apply D1 migrations. Do not grant access to
-unrelated accounts or zones. Store the token in the GitHub repository's encrypted
-Actions secret named `CLOUDFLARE_API_TOKEN`. Existing production application
-secrets remain on the Worker; never copy them into the repository or build output.
+Use a Cloudflare API token restricted to the target account and resources. It must cover the operations actually performed by the deployment script:
 
-The configured account ID is the existing Traceyard account. If hosting moves,
-update that ID and the public origin in the release workflow together.
+- D1 remote migrations for the production database.
+- Worker/script deployment and the Workflows/Durable Object bindings selected by the config.
+- Writing the `TRACEYARD_RUNNER_REF` Worker secret.
+- Best-effort cleanup of retired Queue/Workflow resources, if those resources still exist in the account.
 
-If the secret is absent, the release fails immediately with a clear instruction;
-it does not wait, prompt for interactive login, or start a retry loop. Add the
-secret and rerun the failed release job. A Cloudflare API failure stops the release
-at its failing stage; inspect the error before deliberately rerunning it.
+Store the token in the GitHub repository's encrypted Actions secret named `CLOUDFLARE_API_TOKEN`. Existing production application secrets remain on the Worker; never copy them into the repository or build output. Validate the token and account against a non-production environment before using it for the live origin. The configured account ID and public origin are maintained in the release workflow and must be changed together if hosting moves.
 
 ## Local hosting
 
@@ -52,10 +37,22 @@ Use a separate HTTPS callback and encrypted secrets for a deployed instance. For
 
 ## Deploy from a checkout
 
+Before running a live deployment, confirm all of the following:
+
+- The checkout is clean and on `main`, unless `--validated-revision` is intentionally used by the CI deployment workflow.
+- The exact commit is the intended release and is fetchable by GitHub.
+- Node.js 22.12.0 or newer is available; `npm ci`, `npm test`, and `npm run build` pass.
+- The reviewed 40-character runner revision in `shared/repository/runner-version.ts` is published and fetchable.
+- Wrangler is authenticated to the intended Cloudflare account with D1 migration, Worker deploy, secret-write, and required binding permissions.
+
+The command changes remote state: it applies migrations, updates the runner secret, deploys the Worker, and may clean up retired resources. Do not run it against an unintended account.
+
 ```sh
 npm ci
+npm test
+npm run build
 npx wrangler login
 npm run deploy:investigations -- --origin https://your-traceyard-host.example
 ```
 
-Use the Cloudflare account and bindings for your deployment. The script checks health and the MCP authorization challenge after deploying. See [CHANGELOG.md](../CHANGELOG.md) for hosted verification records.
+After deployment, verify the public origin, complete one browser authorization in **Agents**, connect a disposable test repository, and run one focused repository test. See [CHANGELOG.md](../CHANGELOG.md) for hosted verification records.
