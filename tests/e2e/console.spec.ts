@@ -5,7 +5,7 @@ test("a fresh browser reads the backend auth state and never fabricates a worksp
 }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /See the failure.*where it began/ }),
+    page.getByRole("heading", { name: /Find what broke.*Prove it’s fixed/ }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Explore the sandbox" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Workflows & agents", exact: true })).toHaveCount(
