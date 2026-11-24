@@ -225,7 +225,7 @@ test("local account opens a real persisted investigation and returns to the same
   await page.goto("/__acceptance/account");
   await page.getByRole("button", { name: "Open local test account" }).click();
   await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Start with a repository" })).toBeVisible();
+  await expect(page.getByText("Running tests isn’t available on this server yet.")).toBeVisible();
   const projects = await (await page.request.get("/api/projects")).json();
   const project = projects.data.items[0];
   expect(project.id).toBeTruthy();
@@ -440,13 +440,14 @@ test("a new account can open agent setup before choosing a repository", async ({
   await page.setViewportSize({ width: 320, height: 800 });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Start with a repository" })).toBeVisible();
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("link", { name: "Agents" }).click();
   await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy URL" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Manage access" })).toHaveAttribute(
+  await expect(page.getByRole("status")).toContainText("What happens next");
+  await expect(page.getByRole("link", { name: "Review access" })).toHaveAttribute(
     "href",
-    "/oauth/connections",
+    "#agent-access",
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -473,7 +474,7 @@ test("a regular local user can open every workspace destination on desktop and m
       await page.goto("/" + route);
       await expect(page.getByRole("main")).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      await expect(page.getByRole("status")).toHaveCount(0);
+      await expect(page.getByRole("alert")).toHaveCount(0);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
         `${route} at ${width}px`,
