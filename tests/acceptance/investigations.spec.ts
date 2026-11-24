@@ -225,7 +225,6 @@ test("local account opens a real persisted investigation and returns to the same
   await page.goto("/__acceptance/account");
   await page.getByRole("button", { name: "Open local test account" }).click();
   await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
-  await expect(page.getByText("Running tests isn’t available on this server yet.")).toBeVisible();
   const projects = await (await page.request.get("/api/projects")).json();
   const project = projects.data.items[0];
   expect(project.id).toBeTruthy();
