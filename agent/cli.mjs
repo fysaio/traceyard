@@ -19,6 +19,12 @@ import {
 import { createHash } from "node:crypto";
 import { pytestEnvironment } from "../packages/core/src/pytest.mjs";
 import { replayVitest } from "./replay-runner.mjs";
+import { parseEnv } from "node:util";
+import {
+  LOCAL_ENV_FILE_KEYS,
+  startTelemetryRelay,
+  untrustedEnvironment,
+} from "./telemetry-relay.mjs";
 
 // The hosted runner installs with `npm ci` only, and replays recordings in Docker.
 const hostedRunOptions = { replay: replayVitest, packageManager: "npm" };
@@ -272,10 +278,18 @@ export async function main(args = process.argv.slice(2)) {
     console.log(JSON.stringify(await scanDirectory(root), null, 2));
     return;
   }
-  try {
-    process.loadEnvFile(join(root, ".env.traceyard"));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+  // `.env.traceyard` is repository content. Hosted runs never read it, and a
+  // local run accepts only connection settings that are not already set.
+  if (process.env.GITHUB_ACTIONS !== "true" && !process.env.TRACEYARD_MANAGED_RUN_ID) {
+    let values = {};
+    try {
+      values = parseEnv(await readFile(join(root, ".env.traceyard"), "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    for (const name of LOCAL_ENV_FILE_KEYS)
+      if (values[name] !== undefined && process.env[name] === undefined)
+        process.env[name] = values[name];
   }
   const rawOrigin = process.env.TRACEYARD_ORIGIN;
   if (!rawOrigin) throw Error("Set TRACEYARD_ORIGIN to your Traceyard server URL.");
@@ -412,7 +426,7 @@ export async function main(args = process.argv.slice(2)) {
     !(await lstat(root)).isDirectory()
   )
     throw Error("The configured application directory is not inside this project.");
-  let repositoryIndex, pytestSandbox;
+  let repositoryIndex, pytestSandbox, relay;
   try {
     const desired = manifest.investigation?.commit;
     if (manifest.investigation?.flakeCandidate) {
@@ -420,15 +434,7 @@ export async function main(args = process.argv.slice(2)) {
         throw Error(
           "Flakiness checks require the hosted GitHub runner and two selected revisions.",
         );
-      const env = { ...process.env, CI: "true" };
-      for (const name of [
-        "TRACEYARD_KEY",
-        "TRACEYARD_RUN_TOKEN",
-        "NODE_OPTIONS",
-        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-        "ACTIONS_ID_TOKEN_REQUEST_URL",
-      ])
-        delete env[name];
+      const env = { ...untrustedEnvironment(process.env), CI: "true" };
       const result = await runFlakiness(workspaceRoot, manifest.investigation, env, checkoutToken);
       await send(
         "investigations/" + encodeURIComponent(manifest.investigation.investigationId) + "/report",
@@ -552,12 +558,7 @@ export async function main(args = process.argv.slice(2)) {
         return;
       }
     }
-    const env = { ...process.env };
-    delete env.TRACEYARD_KEY;
-    delete env.TRACEYARD_RUN_TOKEN;
-    delete env.NODE_OPTIONS;
-    delete env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const env = untrustedEnvironment(process.env);
     await report("install", "RUNNING", "Installing project dependencies.");
     let pytestPython;
     if (focusedRunner === "pytest") {
@@ -656,7 +657,14 @@ export async function main(args = process.argv.slice(2)) {
     );
     const preload = fileURLToPath(new URL("./register.cjs", import.meta.url));
     const esmPreload = new URL("./esm-register.mjs", import.meta.url).href;
-    const key = pytestPython ? "" : await credential();
+    // Instrumented tests export spans to a loopback relay in this process; the
+    // reporting credential never enters their environment.
+    relay = pytestPython
+      ? null
+      : await startTelemetryRelay({
+          target: origin + "/api/v1/otlp/v1/traces",
+          credential,
+        });
     const testEnv = pytestPython
       ? { ...pytestEnvironment(env), CI: "true", TRACEYARD_PYTEST_PYTHON: pytestPython }
       : {
@@ -671,8 +679,7 @@ export async function main(args = process.argv.slice(2)) {
           OTEL_METRICS_EXPORTER: "none",
           OTEL_LOGS_EXPORTER: "none",
           OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
-          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: origin + "/api/v1/otlp/v1/traces",
-          OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Bearer%20" + encodeURIComponent(key),
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: relay.endpoint,
           OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "32",
           OTEL_BSP_SCHEDULE_DELAY: "200",
           OTEL_NODE_RESOURCE_DETECTORS: "env,process",
@@ -693,7 +700,7 @@ export async function main(args = process.argv.slice(2)) {
           ? {
               ...testEnv,
               TRACEYARD_CAPTURE_FILE: captureFile,
-              TRACEYARD_RECORDING_EXCLUDE_ORIGIN: origin,
+              TRACEYARD_RECORDING_EXCLUDE_ORIGIN: relay.origin,
               NODE_OPTIONS:
                 testEnv.NODE_OPTIONS +
                 " --import " +
@@ -858,6 +865,7 @@ export async function main(args = process.argv.slice(2)) {
     throw error;
   } finally {
     if (pytestSandbox) await rm(pytestSandbox, { recursive: true, force: true }).catch(() => {});
+    if (relay) await relay.close();
   }
 }
 if (

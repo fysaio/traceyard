@@ -82,7 +82,7 @@ async function emit(test, start, end, traceId, spanId, failed) {
     .find((v) => v.startsWith("Authorization="))
     ?.slice(14);
   const endpoint = process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT;
-  if (!endpoint || !auth) throw Error("Trace recording is not configured.");
+  if (!endpoint) throw Error("Trace recording is not configured.");
   const attrs = {
     "traceyard.operation.key": test.operationKey,
     "traceyard.test.case": test.id,
@@ -92,7 +92,10 @@ async function emit(test, start, end, traceId, spanId, failed) {
   };
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: decodeURIComponent(auth) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(auth ? { Authorization: decodeURIComponent(auth) } : {}),
+    },
     body: JSON.stringify({
       resourceSpans: [
         {
