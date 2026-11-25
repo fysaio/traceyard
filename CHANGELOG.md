@@ -3,6 +3,7 @@
 ## Unreleased
 
 - `traceyard repro`, `check` and `verify` return a versioned `evidenceEnvelope` that keeps run state, claim, scope, trust, revision and limitations explicit. Local evidence is always a focused, provisional claim about one test. The MCP tools return a compact `claim` that is never dropped when a response is shortened. Receipts include the envelope, and `guard` rejects a receipt whose envelope disagrees with its verdict. [CLI guide](docs/CLI.md#json-output)
+- Hosted verifications return the same `evidence` envelope, marked `HOSTED_UNATTESTED` and bound to the exact candidate commit. A focused pass is claimed only when the verdict is `PASSED`, and the MCP `inspect` response keeps the claim when shortened. Hosted results are not attested until reporting moves to a trusted supervisor. [MCP guide](docs/MCP.md)
 - `traceyard check` reports `INCONCLUSIVE` (state `STALE`) when tracked files change while the test runs, instead of a pass or failure for a tree that no longer exists.
 
 ## 0.1.0
