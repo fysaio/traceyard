@@ -86,13 +86,30 @@ export async function startTelemetryRelay({ target, credential, fetch: send = fe
 }
 
 // Credentials and control-plane values that untrusted repository code must
-// never inherit. Values are matched by exact name or by prefix.
+// never inherit. Values are matched case-insensitively. Operational tracing
+// values are added explicitly by the agent after this filter, so repository
+// supplied values cannot redirect reporting or replace an output file.
 const SECRET_NAMES = new Set([
   "TRACEYARD_KEY",
   "TRACEYARD_RUN_TOKEN",
   "TRACEYARD_GITHUB_FETCH_TOKEN",
+  "TRACEYARD_ORIGIN",
+  "TRACEYARD_MANAGED_RUN_ID",
+  "TRACEYARD_COMMIT_SHA",
+  "TRACEYARD_SANDBOX_USER",
+  "TRACEYARD_RUN_REQUEST",
+  "TRACEYARD_CAPTURE_FILE",
+  "TRACEYARD_RECORDING_EXCLUDE_ORIGIN",
+  "TRACEYARD_RESULTS_FILE",
+  "TRACEYARD_PRELOAD",
+  "TRACEYARD_PYTEST_PYTHON",
+  "TRACEYARD_FLUSH_ON_TERM",
   "GITHUB_TOKEN",
   "GH_TOKEN",
+  "GITHUB_STEP_SUMMARY",
+  "GITHUB_ENV",
+  "GITHUB_OUTPUT",
+  "GITHUB_PATH",
   "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
   "ACTIONS_ID_TOKEN_REQUEST_URL",
   "ACTIONS_RUNTIME_TOKEN",
