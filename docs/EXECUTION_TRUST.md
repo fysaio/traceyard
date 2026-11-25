@@ -39,10 +39,24 @@ The boundary fails closed. If `TRACEYARD_SANDBOX_USER` is set but the agent cann
 
 The runner image check in CI ([`scripts/verify-runner-image.mjs`](../scripts/verify-runner-image.mjs)) runs this inside the built image. Its fixture test acts as a hostile test: it scans every `/proc/<pid>/environ` and `cmdline` in the container for the credential and fails if it finds it.
 
+## Test inputs
+
+A pass only counts as a fix when nothing changed how the test runs. `traceyard verify` and hosted verification share one set of rules, in [`packages/core/src/test-inputs.mjs`](../packages/core/src/test-inputs.mjs). They flag:
+
+- tests, fixtures, snapshots and mocks;
+- setup files such as `vitest.setup.ts`, `jest.setup.js`, `setupTests.ts` and `*.setup.ts`;
+- Vitest, Vite and Jest config and workspace files;
+- Pytest modules, `conftest.py` and Pytest or dependency configuration.
+
+Each JavaScript run also records a digest of its runner configuration. The digest covers the package script that ran, the `jest` key in `package.json`, and the contents of any file the script names with `--config` or `-c`. When the two runs' digests differ, `package.json` is reported as a changed test input. This catches a fix commit that points the test script at a lenient config, or edits a config file whose name matches no rule. When only one run has a digest, for example a baseline from an older runner, the comparison is recorded as a limitation. If `package.json` also changed, it is flagged as a changed test input.
+
+Hostile fix commits for each of these cases are kept as fixtures in [`tests/unit/adversarial-evidence.test.ts`](../tests/unit/adversarial-evidence.test.ts). Files that a config imports, rather than names, are not followed.
+
 ## Known gaps
 
 These gaps are why hosted evidence is not yet attested:
 
 - **GitHub Actions and local runs share a user.** There, repository processes run as the same user as the agent. On Linux, a process can read another process's original environment through `/proc/<pid>/environ` when both run as the same user. That holds even after the agent deletes the variable, so repository code can still recover the agent's credential or write to its output.
-- **GitHub Actions.** In GitHub Actions, the step's shell and the runner also hold the OIDC request token as the same user. A GitHub-hosted job cannot hide it from code that runs in the same job. Moving reporting to a separate trusted job, or to the managed supervisor, is tracked in #80.
+- **GitHub Actions.** In GitHub Actions, the step's shell and the runner also hold the OIDC request token as the same user. A GitHub-hosted job cannot hide it from code that runs in the same job. The damage is bounded to that run. The server accepts a GitHub token only for its own workflow run and attempt at its own commit, and it rejects reports, recordings and index uploads for any other run or revision. A second job in the same workflow gets a token with the same claims, so a separate reporting job would not change what the server can check.
+- **Results come from the test process.** Vitest and Jest write their structured report from inside the process that runs repository code, and Pytest reports through a plugin in that process. In every mode, including managed checks, code under test can write a passing report and exit. That is no stronger than code that detects the test and returns the expected value, which no test runner can rule out. Traceyard's claims stay focused for this reason. They say the selected test reported a pass at an exact commit, not that the behavior is correct.
 - **Network.** Repository processes can reach the Traceyard origin and the internet. Without a credential they cannot post reports, but outbound network is not restricted.

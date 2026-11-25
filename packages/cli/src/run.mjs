@@ -366,7 +366,10 @@ export async function runTest({
       throw new BlockedError(error.message);
     }
     const cached = await readEvidence(stateDir, commitEvidenceId(sha, testPath, testCase));
-    if (cached && !fresh) return { ...cached, cached: true };
+    // JavaScript evidence from before runner configs were recorded can't be
+    // compared for a changed test script, so it is rerun rather than reused.
+    const comparable = isPytestFile(testPath) || typeof cached?.runnerConfig === "string";
+    if (cached && !fresh && comparable) return { ...cached, cached: true };
   }
   const python = isPytestFile(testPath);
   let dependencies = "none";
@@ -428,6 +431,7 @@ export async function runTest({
     runner: report.command?.script
       ? { script: report.command.script, directory: report.command.directory }
       : null,
+    runnerConfig: report.runnerConfig ?? null,
     output: cleanOutput(report.output ?? "", repo),
     dependencies,
     cached: false,

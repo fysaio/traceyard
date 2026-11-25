@@ -8,6 +8,7 @@ import { relatedTests } from "./repository-index.mjs";
 import { isPytestFile } from "./pytest.mjs";
 import { adapterForFile, adapterForScript, runnerAdapters } from "./runners.mjs";
 import { detectPackageManager, scriptCommand } from "./package-manager.mjs";
+import { runnerConfigDigest } from "./test-inputs.mjs";
 
 import { sanitizeDiagnostic, normalizeVitestReport } from "./test-report.mjs";
 export { sanitizeDiagnostic, normalizeVitestReport };
@@ -118,6 +119,7 @@ export async function prepareTargetedTest(workspace, index, plan) {
     directory,
     file,
     runner: selected.runner,
+    runnerConfig: await runnerConfigDigest({ root, directory, pkg, script: selected.name }),
     command: { directory: test.packageDirectory, script: selected.name, testPath: test.path },
   };
 }
@@ -143,7 +145,7 @@ export async function runTargetedTest(workspace, index, plan, env, options = {})
   });
   const prepared = await prepareTargetedTest(workspace, index, plan);
   if (prepared.reason) return blocked(prepared.reason);
-  const { root, directory, file, runner, command } = prepared;
+  const { root, directory, file, runner, command, runnerConfig } = prepared;
   if (plan.replayRecording)
     return options.replay
       ? options.replay(root, command, plan)
@@ -254,6 +256,7 @@ export async function runTargetedTest(workspace, index, plan, env, options = {})
       exitCode,
       nodeVersion: process.version,
       command,
+      ...(runnerConfig ? { runnerConfig } : {}),
     };
   } finally {
     await rm(temporary, { recursive: true, force: true });

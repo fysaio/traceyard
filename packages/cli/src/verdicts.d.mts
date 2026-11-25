@@ -14,6 +14,8 @@ interface Run {
   counts: { passed: number; failed: number; skipped: number };
   failures: { name: string; message: string }[];
   message: string;
+  runner?: { script: string; directory: string } | null;
+  runnerConfig?: string | null;
 }
 interface Verdict {
   verdict: string;

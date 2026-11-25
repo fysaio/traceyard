@@ -1,5 +1,6 @@
 // Verdicts and exit codes for every command. Pure functions, so the rules are
 // easy to read and test. Exit codes are part of the public contract (docs/CLI.md).
+import { isTestInput, runnerConfigChange } from "../../core/src/test-inputs.mjs";
 
 export const EXIT = {
   OK: 0, // REPRODUCED, PASSED, FIXED
@@ -28,15 +29,8 @@ export const exitCodeFor = (verdict) =>
 
 const short = (sha) => (sha ? sha.slice(0, 12) : "your working tree");
 
-/** Tests, fixtures, snapshots and Pytest configuration: edits here can make a test pass without a fix. */
-export const isTestInput = (path) =>
-  /\.(?:test|spec|fixture)\.[cm]?[jt]sx?$|(?:^|\/)(?:__(?:tests|fixtures|snapshots|mocks)__|tests?|fixtures?)\/|\.snap$/i.test(
-    path,
-  ) ||
-  /(?:^|\/)(?:test_[^/]+\.py|[^/]+_test\.py|conftest\.py|pytest\.ini|pyproject\.toml|setup\.cfg|tox\.ini|requirements[^/]*\.txt)$/.test(
-    path,
-  ) ||
-  /(?:^|\/)(?:vitest|vite|jest)\.config\.[cm]?[jt]s$/.test(path);
+/** Tests, fixtures, snapshots, setup files and runner config: edits here can make a test pass without a fix. */
+export { isTestInput };
 
 export function reproVerdict(run, testPath, { fromCi = false } = {}) {
   if (run.status === "BLOCKED")
@@ -92,7 +86,14 @@ export function checkVerdict(run, testPath) {
  * the same test passed, nothing was skipped away and no test inputs changed.
  */
 export function verifyVerdict({ baseline, candidate, testPath, changedFiles }) {
-  const changedTests = changedFiles.filter(isTestInput);
+  // A changed test script or runner config changes how the test runs even when
+  // no file matched the path rules, so it counts as a changed test input.
+  const changedTests = [
+    ...new Set([
+      ...changedFiles.filter(isTestInput),
+      ...runnerConfigChange(baseline, candidate, baseline.runner?.directory, changedFiles).changed,
+    ]),
+  ];
   const result = (verdict, summary, next) => ({ verdict, summary, next, changedTests });
   if (baseline.status === "BLOCKED")
     return result(

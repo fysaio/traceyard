@@ -10,15 +10,11 @@ import { getRecording } from "./recording-service";
 import { nowIso } from "../lib/time";
 import { managedChecksAvailable } from "../repositories/managed";
 import { verificationEnvelope } from "./verification-evidence";
-const testFile = (p: string) =>
-  /\.(?:test|spec|fixture)\.[cm]?[jt]sx?$|(?:^|\/)(?:__(?:tests|fixtures|snapshots|mocks)__|tests?|fixtures?)\/|\.snap$/i.test(
-    p,
-  );
-
-const pytestInputs = (path: string) =>
-  /(?:^|\/)(?:test_[^/]+\.py|[^/]+_test\.py|conftest\.py|pytest\.ini|pyproject\.toml|setup\.cfg|tox\.ini|requirements[^/]*\.txt)$/.test(
-    path,
-  );
+import {
+  isJavaScriptTestInput,
+  isPytestInput,
+  runnerConfigChange,
+} from "../../packages/core/src/test-inputs.mjs";
 
 export async function startFlakinessCheck(
   env: Env,
@@ -218,9 +214,17 @@ export async function getVerification(
     baselineRun = runEvidence(original, baseline),
     candidateRun = runEvidence(rerun, report);
   const changedFiles = JSON.parse(row.changed_files_json) as string[],
-    changedTests = changedFiles.filter(
-      (path) => testFile(path) || (baselineRun?.testPath.endsWith(".py") && pytestInputs(path)),
-    );
+    configChange = runnerConfigChange(baseline, report, baseline?.command.directory, changedFiles),
+    changedTests = [
+      ...new Set([
+        ...changedFiles.filter(
+          (path) =>
+            isJavaScriptTestInput(path) ||
+            (baselineRun?.testPath.endsWith(".py") && isPytestInput(path)),
+        ),
+        ...configChange.changed,
+      ]),
+    ];
   let verdict: Verification["verdict"] = "PENDING";
   let label: Verification["label"] = "Running";
   let summary = "Waiting for the candidate run. Its result will appear here.";
@@ -282,6 +286,10 @@ export async function getVerification(
     }
   }
   const limitations = JSON.parse(row.limitations_json) as string[];
+  if (configChange.unknown)
+    limitations.push(
+      "Only one of the two runs recorded its runner configuration, so a changed test script or runner config was not compared.",
+    );
   if (report?.coverage?.omittedTests)
     limitations.push(
       `${report.coverage.omittedTests} related test file(s) were outside the execution budget.`,
