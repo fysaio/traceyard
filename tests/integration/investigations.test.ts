@@ -611,6 +611,11 @@ describe("explicit commit selection", () => {
     )
       .bind(attempt.requestId)
       .run();
+    // The fixture has no dispatch endpoint, so starting it closed the attempt.
+    // A runner only reports for a launched attempt, so reopen it as launched.
+    await env.DB.prepare("UPDATE investigation_attempts SET status='QUEUED' WHERE request_id=?")
+      .bind(attempt.requestId)
+      .run();
 
     const mismatchedReport: InvestigationReport = {
       requestId: attempt.requestId,

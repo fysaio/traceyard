@@ -124,6 +124,80 @@ describe("investigation execution lifecycle", () => {
       "CANCELLED",
     );
   });
+  it("rejects a result that arrives after the server closed a stalled attempt", async () => {
+    const a = await setup(),
+      report = await seed(a);
+    await env.DB.prepare("UPDATE investigations SET status='EXECUTING',updated_at=? WHERE id=?")
+      .bind(new Date(Date.now() - 20 * 60000).toISOString(), a.inv.id)
+      .run();
+    await maintainInvestigations(env.DB);
+    const closed = await getInvestigation(env.DB, a.userId, a.projectId, a.inv.id);
+    expect(closed.status).toBe("BLOCKED");
+    await expect(recordInvestigationReport(env.DB, a.projectId, a.inv.id, report)).rejects.toThrow(
+      /closed before its result arrived|conflicted/,
+    );
+    const after = await getInvestigation(env.DB, a.userId, a.projectId, a.inv.id);
+    expect(after.status).toBe("BLOCKED");
+    expect(after.finding).toEqual(closed.finding);
+    expect(after.evidence.filter((e) => e.kind === "diagnostic")).toHaveLength(0);
+  });
+  it("keeps a superseded attempt's late result from replacing the newer attempt", async () => {
+    const a = await setup(),
+      stale = await seed(a),
+      requestId = "req_" + "e".repeat(32),
+      at = new Date(Date.now() + 1000).toISOString();
+    // The investigation was retried: a newer attempt with its own request is now running.
+    await env.DB.prepare(
+      "INSERT INTO repository_check_requests(id,project_id,snapshot_json,runner_id,created_at) VALUES(?,?,'{}','local-retry',?)",
+    )
+      .bind(requestId, a.projectId, at)
+      .run();
+    await env.DB.prepare(
+      "INSERT INTO investigation_attempts(id,investigation_id,request_id,plan_json,status,created_at,updated_at) VALUES(?,?,?,?,'QUEUED',?,?)",
+    )
+      .bind(
+        "iat_" + "f".repeat(32),
+        a.inv.id,
+        requestId,
+        JSON.stringify({ commit: "a".repeat(40), testPath: "test/actual.test.ts" }),
+        at,
+        at,
+      )
+      .run();
+    await env.DB.prepare("UPDATE investigations SET status='EXECUTING' WHERE id=?")
+      .bind(a.inv.id)
+      .run();
+    await expect(
+      recordInvestigationReport(env.DB, a.projectId, a.inv.id, {
+        ...stale,
+        status: "SUCCEEDED",
+        counts: { passed: 3, failed: 0, skipped: 0 },
+        failures: [],
+        message: "3 passed",
+        exitCode: 0,
+      }),
+    ).rejects.toThrow(/newer attempt|conflicted/);
+    expect((await getInvestigation(env.DB, a.userId, a.projectId, a.inv.id)).status).toBe(
+      "EXECUTING",
+    );
+    await recordInvestigationReport(env.DB, a.projectId, a.inv.id, {
+      ...stale,
+      requestId,
+      runId: "local-retry",
+    });
+    const inv = await getInvestigation(env.DB, a.userId, a.projectId, a.inv.id);
+    expect(inv.status).toBe("EVIDENCE_READY");
+    expect(inv.finding.summary).toContain("preserves context");
+    const stored = await env.DB.prepare(
+      "SELECT request_id,report_json FROM investigation_attempts WHERE investigation_id=? ORDER BY rowid",
+    )
+      .bind(a.inv.id)
+      .all<{ request_id: string; report_json: string | null }>();
+    expect(stored.results.map((r) => [r.request_id, r.report_json !== null])).toEqual([
+      [stale.requestId, false],
+      [requestId, true],
+    ]);
+  });
 });
 
 describe("interaction recordings", () => {
