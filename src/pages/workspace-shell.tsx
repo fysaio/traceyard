@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ProjectLink as Link } from "../components/project-link";
 import { api, type AuthSession } from "../lib/api";
 import { WorkspaceContext, readPreference, savePreference } from "../lib/workspace";
-import { ConnectRepository } from "./repositories";
 import { Empty, ErrorMessage, GitHubMark, Icon, Spinner, type IconName } from "../components/ui";
+
+const ConnectRepository = lazy(() =>
+  import("./repositories").then((module) => ({ default: module.ConnectRepository })),
+);
 
 const NAV: [path: string, label: string, icon: IconName][] = [
   ["/investigations", "Investigations", "bug"],
@@ -218,7 +221,9 @@ export function WorkspaceShell({
           ))}
         </nav>
         {menu === "connect" && (
-          <ConnectRepository close={() => setMenu(null)} connected={() => setMenu(null)} />
+          <Suspense fallback={<Spinner label="Loading repository picker…" />}>
+            <ConnectRepository close={() => setMenu(null)} connected={() => setMenu(null)} />
+          </Suspense>
         )}
       </div>
     </WorkspaceContext.Provider>

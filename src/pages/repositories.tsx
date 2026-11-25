@@ -22,12 +22,12 @@ import {
 } from "../components/repository-picker";
 import { ApiClientError, type ProjectSummary } from "../lib/api";
 import { integrationRequest } from "../lib/integrations-api";
+import { repositoryPath } from "../lib/repository-path";
 import { savePreference, useWorkspace } from "../lib/workspace";
 import type { Catalog, RunnerConfig } from "../../shared/repository/workspace";
 import type { RepositoryJob } from "../../shared/repository/contracts";
 import { checkDisplayStatus } from "../../shared/repository/check-status";
 
-export const repositoryPath = (id: string) => "/repositories/" + encodeURIComponent(id);
 const checkPath = (p: string, id: string) =>
   repositoryPath(p) + "/checks/" + encodeURIComponent(id);
 
@@ -541,10 +541,13 @@ export function CheckPage() {
           <div className="notice danger" role="alert">
             <strong>This check needs investigation</strong>
             <p>
-              Review the retained check details in Traceyard first. Provider logs are available as
-              a technical fallback.
+              Review the retained check details in Traceyard first. Provider logs are available as a
+              technical fallback.
             </p>
-            <Link className="text-link" to={`/investigations?project=${encodeURIComponent(projectId)}`}>
+            <Link
+              className="text-link"
+              to={`/investigations?project=${encodeURIComponent(projectId)}`}
+            >
               Start an investigation
             </Link>
           </div>
