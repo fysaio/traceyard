@@ -56,8 +56,10 @@ export async function runnerConfigDigest({ root, directory, pkg, script }) {
   let config = null;
   if (configPath) {
     try {
+      // Compare resolved paths: on Windows a temporary root may be a short 8.3
+      // name while realpath returns the long one.
       const file = await realpath(resolve(directory, configPath));
-      const inside = relative(root, file);
+      const inside = relative(await realpath(root), file);
       config =
         inside.startsWith("..") || isAbsolute(inside)
           ? "outside-repository"
