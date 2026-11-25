@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `traceyard repro`, `check` and `verify` return a versioned `evidenceEnvelope` that keeps run state, claim, scope, trust, revision and limitations explicit. Local evidence is always a focused, provisional claim about one test. The MCP tools return a compact `claim` that is never dropped when a response is shortened. Receipts include the envelope, and `guard` rejects a receipt whose envelope disagrees with its verdict. [CLI guide](docs/CLI.md#json-output)
+- `traceyard check` reports `INCONCLUSIVE` (state `STALE`) when tracked files change while the test runs, instead of a pass or failure for a tree that no longer exists.
+
 ## 0.1.0
 
 - Added `traceyard mcp`, a local MCP server for Claude Code, Cursor, Codex and Copilot. Its tools are `reproduce`, `check`, `verify`, `guard`, `explain` and `inspect`, and they return the same bounded envelope as the hosted server. [Setup](docs/CLI.md#coding-agents-mcp)

@@ -111,7 +111,14 @@ describe("traceyard CLI on a local repository", () => {
       trust: "local",
       verdict: "FIXED",
       test: { path: "sum.test.js" },
+      evidenceEnvelope: {
+        claim: "FOCUSED_PASS",
+        scope: "FOCUSED",
+        source: "LOCAL_PROVISIONAL",
+        revision: { commit: fixed },
+      },
     });
+    expect(result.evidenceEnvelope).toEqual(receipt.evidenceEnvelope);
     expect(await readFile(join(repo, result.receipt!.markdownPath), "utf8")).toContain(
       "Traceyard receipt: FIXED",
     );
@@ -131,6 +138,12 @@ describe("traceyard CLI on a local repository", () => {
     const result = await cli(repo, ["verify", "sum.test.js", "--before", broken, "--after", cheat]);
     expect(result).toMatchObject({ verdict: "NEEDS_REVIEW", exitCode: 2 });
     expect(result.changedTests).toEqual(["sum.test.js"]);
+    expect(result.evidenceEnvelope).toMatchObject({ state: "COMPLETED", claim: "INCONCLUSIVE" });
+    expect(result.evidenceEnvelope!.checks).toContainEqual({
+      id: "test-inputs-unchanged",
+      status: "FAILED",
+      required: false,
+    });
   }, 60_000);
 
   it("reports a test that passes at the failing commit as not reproduced", async () => {
@@ -139,6 +152,7 @@ describe("traceyard CLI on a local repository", () => {
     const verify = await cli(repo, ["verify", "sum.test.js", "--before", fixed, "--after", fixed]);
     expect(verify).toMatchObject({ verdict: "NOT_REPRODUCED", exitCode: 2 });
     expect(verify.runs).toHaveLength(1);
+    expect(verify.evidenceEnvelope).toMatchObject({ claim: "INCONCLUSIVE" });
   }, 60_000);
 
   it("blocks missing tests and commits with clear errors", async () => {

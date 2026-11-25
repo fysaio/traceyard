@@ -147,6 +147,11 @@ traceyard verify --json
 - `next` is one sentence telling a person or agent what to do next.
 - Output is bounded for agents: up to 5 failures, 600 characters each, with stack frames from `node_modules` removed. Raw output only appears with `--log`. A full result stays well under 1,500 tokens.
 - Every run that executed has an `evidenceId`. The full log stays on disk; read it with `inspect <evidenceId>` in bounded slices. Terminal colours, progress bars, repeated lines and absolute paths are removed first.
+- `repro`, `check` and `verify` also return `evidenceEnvelope`, the versioned evidence contract in [`shared/contracts/evidence.ts`](../shared/contracts/evidence.ts). It keeps the execution `state` (`COMPLETED`, `FAILED`, `BLOCKED`, `STALE`, ...) separate from the `claim` made about it (`FOCUSED_PASS`, `FAILED`, `INCONCLUSIVE`, ...), and records the exact revision (`commit`, or a `worktreeFingerprint` for `check`), input, policy and environment fingerprints, one entry per rule in `checks`, the `limitations`, and `next`. The claim is always derived from the state and checks, never set by hand.
+  - CLI evidence is always `source: "LOCAL_PROVISIONAL"` and `scope: "FOCUSED"`: one selected test on this machine. `FOCUSED_PASS` is not proof that the whole suite passes or that a change is safe to merge.
+  - `verify` reaches `FOCUSED_PASS` only for a `FIXED` verdict. Its checks are `reproduces-before`, `passes-after`, `distinct-commits`, `no-new-skips` and `test-inputs-unchanged`, so an `INCONCLUSIVE` claim names the rule that failed.
+  - `check` fingerprints the working tree before and after the run. If a tracked file, or an untracked file that existed before, changes while the test runs, the state is `STALE`, the claim is `INCONCLUSIVE` and the verdict is `INCONCLUSIVE` (exit code 2). New untracked files, such as caches a test runner writes, don't count.
+  - Receipts store the envelope inside their digest. `guard` treats a `FIXED` receipt whose envelope doesn't claim `FOCUSED_PASS` for the same fix commit as `NEEDS_REVIEW`. Receipts written before the envelope existed are still accepted.
 - `dependencies` says how packages were made available:
   - `existing`: already installed.
   - `linked`: the commit has the same lockfile as your clone, so your `node_modules` was linked in.

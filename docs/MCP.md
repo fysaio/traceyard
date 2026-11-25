@@ -4,6 +4,8 @@
 
 Run `npx traceyard mcp` to give an agent six local tools—`reproduce`, `check`, `verify`, `guard`, `explain`, and `inspect`—on the same machine as the repository. The local server uses stdio, does not require a TraceYard account, and does not upload local edits. Setup examples for Claude Code, Cursor, Copilot, and Codex are in the [CLI guide](CLI.md#coding-agents-mcp).
 
+`reproduce`, `check`, and `verify` responses include a compact `claim` with the evidence `state`, `claim`, `scope`, `source`, and `commit` (plus a short `worktree` fingerprint for `check`), and any run-specific `limitations`. When a response is shortened to fit `outputChars`, the claim is never removed; only its limitations shrink, down to one. Local claims are always `LOCAL_PROVISIONAL` and `FOCUSED`. The full envelope is available from `traceyard <command> --json` and in the receipt.
+
 ## Hosted MCP
 
 The hosted server is available at `https://traceyard.pilotsaviour229.workers.dev/mcp` using Streamable HTTP with OAuth. In the hosted TraceYard UI, open **Agents** at `/agents` and choose the client setup instructions. **Agents** is the current workspace page; “connection” may describe OAuth state, but it is not the current navigation label.
