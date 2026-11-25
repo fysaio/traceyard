@@ -2,6 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import { installationAccessToken } from "./github";
 import { finishManagedCheck } from "./managed";
 
+// The `node` user in runner/Dockerfile (node:22-bookworm-slim).
+export const RUNNER_SANDBOX_USER = "1000:1000";
+
 export interface ManagedExecution {
   id: string;
   projectId: string;
@@ -109,9 +112,18 @@ export async function runManagedCheck(
       !/^[a-f0-9]{40}$/.test(snapshot.sha)
     )
       throw Error("Invalid checkout snapshot");
-    const exec = async (argv: string[], env: Record<string, string> = {}) => {
+    // Checkout runs as the unprivileged image user so it owns the workspace.
+    // Only the agent runs as root, and it starts every repository command as
+    // that same unprivileged user (TRACEYARD_SANDBOX_USER), so repository code
+    // cannot read the agent's environment or credential.
+    const exec = async (
+      argv: string[],
+      env: Record<string, string> = {},
+      user: "node" | "root" = "node",
+    ) => {
       const process = await container.exec(argv, {
         env,
+        user,
         signal: deadline,
         stdout: "ignore",
         stderr: "ignore",
@@ -180,12 +192,17 @@ export async function runManagedCheck(
     githubToken = null;
     const origin = new URL(env.PUBLIC_APP_ORIGIN!).origin;
     phase = "application";
-    await exec(["node", "/opt/traceyard/agent/cli.mjs", "run", "/workspace/application"], {
-      TRACEYARD_ORIGIN: origin,
-      TRACEYARD_RUN_TOKEN: input.token,
-      TRACEYARD_MANAGED_RUN_ID: input.id,
-      TRACEYARD_COMMIT_SHA: snapshot.sha,
-    });
+    await exec(
+      ["node", "/opt/traceyard/agent/cli.mjs", "run", "/workspace/application"],
+      {
+        TRACEYARD_ORIGIN: origin,
+        TRACEYARD_RUN_TOKEN: input.token,
+        TRACEYARD_MANAGED_RUN_ID: input.id,
+        TRACEYARD_COMMIT_SHA: snapshot.sha,
+        TRACEYARD_SANDBOX_USER: RUNNER_SANDBOX_USER,
+      },
+      "root",
+    );
     await finishManagedCheck(
       env,
       input.id,

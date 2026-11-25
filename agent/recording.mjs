@@ -1,9 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { readUntrustedFile } from "./sandbox.mjs";
 import { eligibleRecording } from "./interaction-format.mjs";
 export async function buildRecording(path, sourceCommit, testPath) {
   let text = "";
   try {
-    text = await readFile(path, "utf8");
+    text = await readUntrustedFile(path);
   } catch {
     /* No supported fetch was exercised. */
   }
