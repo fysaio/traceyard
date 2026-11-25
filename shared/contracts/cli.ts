@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { evidenceEnvelopeSchema } from "./evidence";
 
 // The `traceyard --json` output contract. Documented in docs/CLI.md. The local
 // MCP server (#48) returns the same shapes. Additive changes keep
@@ -149,12 +150,28 @@ export const cliResultSchema = z
       })
       .strict()
       .optional(),
+    // repro, check and verify: the versioned evidence envelope for the run.
+    evidenceEnvelope: evidenceEnvelopeSchema.optional(),
     warnings: z.array(z.string()),
   })
   .strict()
   .superRefine((result, ctx) => {
     if (result.exitCode !== cliExitCodes[result.verdict])
       ctx.addIssue({ code: "custom", message: "exitCode must match the verdict." });
+    const envelope = result.evidenceEnvelope;
+    if (!envelope) return;
+    const add = (message: string) =>
+      ctx.addIssue({ code: "custom", message, path: ["evidenceEnvelope", "claim"] });
+    if (envelope.source !== "LOCAL_PROVISIONAL" || envelope.scope !== "FOCUSED")
+      add("CLI evidence is local and focused on one selected test.");
+    const passing = result.verdict === "PASSED" || result.verdict === "FIXED";
+    if (passing && envelope.claim !== "FOCUSED_PASS")
+      add(`A ${result.verdict} verdict needs a FOCUSED_PASS claim.`);
+    if (
+      envelope.claim === "FOCUSED_PASS" &&
+      !["PASSED", "FIXED", "NOT_REPRODUCED"].includes(result.verdict)
+    )
+      add(`A FOCUSED_PASS claim can't back a ${result.verdict} verdict.`);
   });
 
 export type CliResult = z.infer<typeof cliResultSchema>;

@@ -66,6 +66,8 @@ export const evidenceEnvelopeSchema = z
       .strict(),
     checks: z.array(evidenceCheckSchema).max(1000),
     limitations: z.array(z.string().min(1).max(500)).max(100),
+    /** The next step for a person or agent. Optional so older envelopes still parse. */
+    next: z.string().min(1).max(500).optional(),
     startedAt: z.string().datetime({ offset: true }),
     completedAt: z.string().datetime({ offset: true }).nullable(),
   })
@@ -110,6 +112,11 @@ export const evidenceEnvelopeSchema = z
       add("A completed inconclusive run must identify incomplete checks or a limitation.");
     if (evidence.claim === "NOT_RUN" && !["PLANNED", "QUEUED", "RUNNING"].includes(evidence.state))
       add("A not-run claim requires planned, queued, or running evidence.");
+    if (!evidence.revision.commit && !evidence.revision.worktreeFingerprint)
+      add("Evidence must identify an exact commit or a working-tree fingerprint.", [
+        "revision",
+        "commit",
+      ]);
     if (evidence.source === "HOSTED_ATTESTED" && !evidence.revision.commit)
       add("Hosted attested evidence must identify an exact commit.", ["revision", "commit"]);
     if (

@@ -175,6 +175,20 @@ export function guardVerdict({ receipt, intact, head }) {
           ? "A person should review the changed test files before this merges."
           : verify,
     };
+  // Receipts written since the evidence envelope must agree with it. Older
+  // receipts have none and are judged on their verdict alone.
+  const envelope = receipt.evidenceEnvelope;
+  if (
+    envelope &&
+    (envelope.claim !== "FOCUSED_PASS" ||
+      envelope.state !== "COMPLETED" ||
+      envelope.revision?.commit !== receipt.candidate?.commit)
+  )
+    return {
+      verdict: "NEEDS_REVIEW",
+      summary: `Receipt ${receipt.id} says FIXED, but its evidence claims ${envelope.claim ?? "nothing"} for ${short(envelope.revision?.commit)}.`,
+      next: verify,
+    };
   if (!head || receipt.candidate?.commit !== head)
     return {
       verdict: "UNVERIFIED",
