@@ -116,6 +116,20 @@ for (const mode of [
       test('real application HTTP request', async () => {
         if (process.env.TRACEYARD_RUN_TOKEN) throw Error('Control token leaked to application environment');
         if (JSON.stringify(process.env).includes(${JSON.stringify(token)})) throw Error('Control token leaked to application environment');
+        for (const name of ${JSON.stringify([
+          "TRACEYARD_ORIGIN",
+          "TRACEYARD_MANAGED_RUN_ID",
+          "TRACEYARD_COMMIT_SHA",
+          "TRACEYARD_SANDBOX_USER",
+          "TRACEYARD_CAPTURE_FILE",
+          "TRACEYARD_RESULTS_FILE",
+          "GITHUB_STEP_SUMMARY",
+          "GITHUB_ENV",
+          "GITHUB_OUTPUT",
+          "GITHUB_PATH",
+        ])}) {
+          if (process.env[name] !== undefined) throw Error(name + ' leaked to application environment');
+        }
         ${
           local
             ? ""
@@ -155,6 +169,12 @@ for (const mode of [
           TRACEYARD_MANAGED_RUN_ID: id,
           TRACEYARD_COMMIT_SHA: sha,
           TRACEYARD_RUN_TOKEN: token,
+          TRACEYARD_CAPTURE_FILE: join(root, "capture.jsonl"),
+          TRACEYARD_RESULTS_FILE: join(root, "results.json"),
+          GITHUB_STEP_SUMMARY: join(root, "summary.md"),
+          GITHUB_ENV: join(root, "github-env"),
+          GITHUB_OUTPUT: join(root, "github-output"),
+          GITHUB_PATH: join(root, "github-path"),
           ...(local ? {} : { TRACEYARD_SANDBOX_USER: SANDBOX }),
         },
         // The unprivileged case starts the agent itself as node: it must refuse.
