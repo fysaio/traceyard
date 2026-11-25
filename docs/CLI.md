@@ -35,7 +35,7 @@ Runs the test at the failing commit (`--before`, default: the last reproduced co
 
 1. The test failed at `--before`.
 2. The same test file passed at `--after`, with at least one passing test and no extra skips.
-3. No tests, fixtures, snapshots, mocks or test runner config changed between the two commits.
+3. No tests, fixtures, snapshots, mocks, setup files or test runner config changed between the two commits. A change to the test script, the `jest` key in `package.json`, or a config file the script names counts as a runner config change. See [execution trust](EXECUTION_TRUST.md#test-inputs).
 
 Each verify writes a receipt to `.traceyard/receipts/` as JSON and Markdown.
 

@@ -51,6 +51,7 @@ export function prepareTargetedTest(
       runner: "vitest" | "jest" | "pytest";
       requirements?: string;
       root?: string;
+      runnerConfig?: string;
       command: InvestigationReport["command"];
     }
 >;
