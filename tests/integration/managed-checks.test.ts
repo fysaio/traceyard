@@ -112,7 +112,7 @@ async function fixture() {
 function controller(configured: Env, input: ManagedExecution, started = false) {
   const values = new Map<string, unknown>([["input", input]]);
   if (started) values.set("started", true);
-  const commands: { argv: string[]; env: Record<string, string> }[] = [];
+  const commands: { argv: string[]; env: Record<string, string>; user?: string }[] = [];
   const container = {
     running: false,
     images: { runner: "fixture-image" },
@@ -122,8 +122,8 @@ function controller(configured: Env, input: ManagedExecution, started = false) {
     destroy: vi.fn(async () => {
       container.running = false;
     }),
-    exec: vi.fn(async (argv: string[], options: { env: Record<string, string> }) => {
-      commands.push({ argv, env: options.env });
+    exec: vi.fn(async (argv: string[], options: { env: Record<string, string>; user?: string }) => {
+      commands.push({ argv, env: options.env, user: options.user });
       return { exitCode: Promise.resolve(0) };
     }),
   };
@@ -171,9 +171,9 @@ describe("Traceyard-managed repository checks", () => {
       throw Error("Unexpected network request");
     });
     c.container.exec.mockImplementation(
-      async (argv: string[], options: { env: Record<string, string> }) => {
+      async (argv: string[], options: { env: Record<string, string>; user?: string }) => {
         if (argv[0] === "node") expect(revoked).toBe(true);
-        c.commands.push({ argv, env: options.env });
+        c.commands.push({ argv, env: options.env, user: options.user });
         return { exitCode: Promise.resolve(0) };
       },
     );
@@ -188,6 +188,10 @@ describe("Traceyard-managed repository checks", () => {
     expect(gitFetch?.env.GIT_CONFIG_VALUE_0).toContain("Authorization: Basic");
     const app = c.commands.find((cmd) => cmd.argv[0] === "node");
     expect(app?.env.TRACEYARD_RUN_TOKEN).toBe(f.queued[0]!.token);
+    // Only the agent runs as root, and it must drop repository code to the image user.
+    expect(app?.user).toBe("root");
+    expect(app?.env.TRACEYARD_SANDBOX_USER).toBe("1000:1000");
+    expect(c.commands.filter((cmd) => cmd !== app).every((cmd) => cmd.user === "node")).toBe(true);
     expect(JSON.stringify(app)).not.toContain("fixture-only-read-token");
     expect(app?.env.GITHUB_APP_PRIVATE_KEY).toBeUndefined();
     expect(

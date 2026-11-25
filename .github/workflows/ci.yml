@@ -104,7 +104,7 @@ jobs:
         run: docker build --file runner/Dockerfile --tag traceyard-runner:ci .
       - name: Check actual runner processes without external network
         run: >-
-          docker run --rm --network none --entrypoint node
+          docker run --rm --network none --user root --entrypoint node
           --mount "type=bind,source=${{ github.workspace }}/scripts/verify-runner-image.mjs,target=/tmp/verify-runner-image.mjs,readonly"
           traceyard-runner:ci /tmp/verify-runner-image.mjs
       - name: Check replay bootstrap cannot run installation hooks
