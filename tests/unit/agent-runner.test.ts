@@ -1,6 +1,6 @@
 import { it, expect } from "vitest";
 import { createServer } from "node:http";
-import { mkdtemp, writeFile, rm, mkdir, symlink } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, mkdir, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -146,7 +146,7 @@ it.each([
         );
       await writeFile(
         join(appRoot, "test.mjs"),
-        `import {test} from ${JSON.stringify(mode === "vitest" ? pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href : "node:test")};import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${mode === "vitest" ? "await new Promise(r=>setTimeout(r,700));" : ""}${expectedStatus === "FAILED" ? "throw new Error('supabaseUrl is required. private@example.test');" : ""}});`,
+        `import {test} from ${JSON.stringify(mode === "vitest" ? pathToFileURL(resolve("node_modules/vitest/dist/index.js")).href : "node:test")};import {createServer} from 'node:http';import {once} from 'node:events';test('application HTTP flow',async()=>{(await import('node:fs')).writeFileSync(${JSON.stringify(join(root, "test-env.json"))},JSON.stringify(process.env));const server=createServer((req,res)=>res.end('ok'));server.listen(0,'127.0.0.1');await once(server,'listening');const response=await fetch('http://127.0.0.1:'+server.address().port+'/interpret');await response.text();server.closeAllConnections();server.close();${mode === "vitest" ? "await new Promise(r=>setTimeout(r,700));" : ""}${expectedStatus === "FAILED" ? "throw new Error('supabaseUrl is required. private@example.test');" : ""}});`,
       );
       if (focused) {
         await mkdir(join(appRoot, "tests", "unit"), { recursive: true });
@@ -224,6 +224,15 @@ it.each([
         return;
       }
       expect(exports.length, result.output).toBeGreaterThan(0);
+      // The repository's own test process must never hold the reporting credential.
+      if (!focused) {
+        const testEnv = await readFile(join(root, "test-env.json"), "utf8");
+        expect(testEnv).not.toMatch(/ty[kr]_A{43}/);
+        expect(testEnv).not.toContain("OTEL_EXPORTER_OTLP_HEADERS");
+        expect(JSON.parse(testEnv).OTEL_EXPORTER_OTLP_TRACES_ENDPOINT).toMatch(
+          /^http:\/\/127\.0\.0\.1:\d+\/v1\/traces$/,
+        );
+      }
       expect(exports[0]?.authorization).toBe(
         "Bearer " + (managed ? "tyr_" : "tyk_") + "A".repeat(43),
       );
