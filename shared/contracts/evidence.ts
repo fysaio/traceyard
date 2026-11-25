@@ -6,7 +6,19 @@ const evidenceId = z.string().regex(/^ev_[a-z0-9][a-z0-9_-]{2,127}$/);
 export const evidenceScopeSchema = z.enum(["FOCUSED", "AFFECTED", "REQUIRED", "FULL"]);
 export type EvidenceScope = z.infer<typeof evidenceScopeSchema>;
 
-export const evidenceSourceSchema = z.enum(["LOCAL_PROVISIONAL", "HOSTED_ATTESTED"]);
+/**
+ * Where evidence came from and how far it can be trusted.
+ * - LOCAL_PROVISIONAL: a developer's machine.
+ * - HOSTED_UNATTESTED: a hosted runner whose report path is still reachable by
+ *   the repository code under test, so the report could be forged.
+ * - HOSTED_ATTESTED: a hosted runner whose report comes from a trusted
+ *   supervisor that untrusted code cannot reach.
+ */
+export const evidenceSourceSchema = z.enum([
+  "LOCAL_PROVISIONAL",
+  "HOSTED_UNATTESTED",
+  "HOSTED_ATTESTED",
+]);
 export type EvidenceSource = z.infer<typeof evidenceSourceSchema>;
 
 /** Execution lifecycle is deliberately separate from the claim made about the result. */
@@ -117,8 +129,8 @@ export const evidenceEnvelopeSchema = z
         "revision",
         "commit",
       ]);
-    if (evidence.source === "HOSTED_ATTESTED" && !evidence.revision.commit)
-      add("Hosted attested evidence must identify an exact commit.", ["revision", "commit"]);
+    if (evidence.source !== "LOCAL_PROVISIONAL" && !evidence.revision.commit)
+      add("Hosted evidence must identify an exact commit.", ["revision", "commit"]);
     if (
       evidence.state === "STALE" &&
       !evidence.limitations.some((item) => /stale|changed|superseded/i.test(item))
@@ -127,6 +139,20 @@ export const evidenceEnvelopeSchema = z
   });
 
 export type EvidenceEnvelope = z.infer<typeof evidenceEnvelopeSchema>;
+
+const sortKeys = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map(sortKeys)
+    : value && typeof value === "object"
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, sortKeys((value as Record<string, unknown>)[key])]),
+        )
+      : value;
+
+/** Stable JSON with sorted keys at every level, the input to every fingerprint. */
+export const canonicalJson = (value: unknown) => JSON.stringify(sortKeys(value));
 
 export type EvidenceOutcome = Pick<EvidenceEnvelope, "state" | "claim">;
 

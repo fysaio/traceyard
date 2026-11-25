@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { EvidenceEnvelope } from "./evidence";
 import type { InvestigationReport } from "./investigation-execution";
 export const verificationRequestSchema = z
   .object({
@@ -30,6 +31,8 @@ export interface Verification {
   changedTests: string[];
   limitations: string[];
   summary: string;
+  /** Versioned evidence envelope for this verification. Always HOSTED_UNATTESTED for now. */
+  evidence: EvidenceEnvelope;
   metrics: {
     baselineDurationMs: number | null;
     candidateDurationMs: number | null;

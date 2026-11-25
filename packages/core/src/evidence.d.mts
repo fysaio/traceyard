@@ -1,5 +1,5 @@
 export type EvidenceScope = "FOCUSED" | "AFFECTED" | "REQUIRED" | "FULL";
-export type EvidenceSource = "LOCAL_PROVISIONAL" | "HOSTED_ATTESTED";
+export type EvidenceSource = "LOCAL_PROVISIONAL" | "HOSTED_UNATTESTED" | "HOSTED_ATTESTED";
 export type EvidenceState =
   | "PLANNED"
   | "QUEUED"

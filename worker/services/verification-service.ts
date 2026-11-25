@@ -9,6 +9,7 @@ import { randomId, sha256Hex } from "../lib/crypto";
 import { getRecording } from "./recording-service";
 import { nowIso } from "../lib/time";
 import { managedChecksAvailable } from "../repositories/managed";
+import { verificationEnvelope } from "./verification-evidence";
 const testFile = (p: string) =>
   /\.(?:test|spec|fixture)\.[cm]?[jt]sx?$|(?:^|\/)(?:__(?:tests|fixtures|snapshots|mocks)__|tests?|fixtures?)\/|\.snap$/i.test(
     p,
@@ -93,11 +94,17 @@ export async function startFlakinessCheck(
     fetcher,
   );
 }
-type Attempt = { id: string; status: string; report_json: string | null };
+type Attempt = {
+  id: string;
+  status: string;
+  report_json: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
 async function firstCandidateAttempt(db: D1Database, id: string) {
   return db
     .prepare(
-      "SELECT id,status,report_json FROM investigation_attempts WHERE investigation_id=? ORDER BY rowid LIMIT 1",
+      "SELECT id,status,report_json,created_at,updated_at FROM investigation_attempts WHERE investigation_id=? ORDER BY rowid LIMIT 1",
     )
     .bind(id)
     .first<Attempt>();
@@ -279,6 +286,29 @@ export async function getVerification(
     limitations.push(
       `${report.coverage.omittedTests} related test file(s) were outside the execution budget.`,
     );
+  const evidence = await verificationEnvelope({
+    id: row.id,
+    repository: candidate.snapshot.repository ?? null,
+    candidateCommit: row.candidate_commit,
+    createdAt: row.created_at,
+    verdict,
+    summary,
+    baselineRun,
+    candidateRun,
+    baseline,
+    report,
+    candidateAttempt: rerun
+      ? {
+          status: rerun.status,
+          created_at: rerun.created_at ?? row.created_at,
+          updated_at: rerun.updated_at ?? row.created_at,
+        }
+      : null,
+    changedFiles,
+    changedTests,
+    comparisonIncomplete,
+    limitations,
+  });
   return {
     id: row.id,
     baselineId: row.baseline_id,
@@ -291,6 +321,7 @@ export async function getVerification(
     changedTests,
     limitations,
     summary,
+    evidence,
     metrics: {
       baselineDurationMs: baseline?.durationMs ?? null,
       candidateDurationMs: report?.durationMs ?? null,
