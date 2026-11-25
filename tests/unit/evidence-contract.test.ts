@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveEvidenceOutcome, evidenceEnvelopeSchema } from "../../shared/contracts/evidence";
+import { investigationReportSchema } from "../../shared/contracts/investigation-execution";
 
 const fingerprint = "a".repeat(64);
 const base = {
@@ -23,6 +24,20 @@ const base = {
   limitations: ["Only the selected test file was executed."],
   startedAt: "2026-11-23T17:00:00+00:00",
   completedAt: "2026-11-23T17:00:01+00:00",
+};
+const report = {
+  requestId: "req_" + "a".repeat(32),
+  runId: "runner-a",
+  commit: "a".repeat(40),
+  status: "SUCCEEDED" as const,
+  command: { directory: ".", script: "npm test", testPath: "sum.test.ts" },
+  counts: { passed: 1, failed: 0, skipped: 0 },
+  failures: [],
+  message: "1 passed",
+  durationMs: 10,
+  exitCode: 0,
+  truncated: false,
+  nodeVersion: "v22",
 };
 
 describe("versioned evidence contract", () => {
@@ -101,5 +116,25 @@ describe("versioned evidence contract", () => {
       ],
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects a forged success that carries failure evidence", () => {
+    const result = investigationReportSchema.safeParse({
+      ...report,
+      failures: [{ file: "sum.test.ts", name: "adds", message: "Expected 3" }],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Expected contradictory success to be rejected");
+    expect(result.error.issues.some((issue) => issue.path.join(".") === "failures")).toBe(true);
+  });
+
+  it("rejects an incomplete success with a failed sub-check", () => {
+    const result = investigationReportSchema.safeParse({
+      ...report,
+      checks: [{ testPath: "sum.test.ts", status: "FAILED" }],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("Expected incomplete success to be rejected");
+    expect(result.error.issues.some((issue) => issue.path.join(".") === "checks")).toBe(true);
   });
 });
