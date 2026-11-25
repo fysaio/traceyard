@@ -148,6 +148,12 @@ describe("repair verification", () => {
         github(["sum.ts"]),
       );
     expect(v.verdict).toBe("BLOCKED");
+    expect(v.evidence).toMatchObject({
+      source: "HOSTED_UNATTESTED",
+      scope: "FOCUSED",
+      claim: expect.not.stringMatching(/PASS/),
+      revision: { commit: "b".repeat(40) },
+    });
     expect(
       (await getInvestigation(env.DB, a.userId, a.projectId, v.candidateId)).snapshot.commit,
     ).toBe("b".repeat(40));
@@ -167,6 +173,14 @@ describe("repair verification", () => {
       label: "Confirmed",
       baselineRun: { commit: a.report.commit, status: "FAILED" },
       candidateRun: { commit: "b".repeat(40), status: "SUCCEEDED" },
+      evidence: {
+        schemaVersion: 1,
+        source: "HOSTED_UNATTESTED",
+        scope: "FOCUSED",
+        state: "COMPLETED",
+        claim: "FOCUSED_PASS",
+        revision: { commit: "b".repeat(40) },
+      },
     });
     const reopened = await getInvestigation(env.DB, a.userId, a.projectId, a.baseline.id);
     expect(reopened.verifications).toEqual([
@@ -216,6 +230,12 @@ describe("repair verification", () => {
     await complete(a, v.candidateId);
     const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
     expect(result.verdict).toBe("REVIEW_TEST_CHANGES");
+    expect(result.evidence).toMatchObject({ state: "COMPLETED", claim: "INCONCLUSIVE" });
+    expect(result.evidence.checks).toContainEqual({
+      id: "test-inputs-unchanged",
+      status: "FAILED",
+      required: false,
+    });
     expect(result.metrics.agentTokens).toBeNull();
   });
   it("keeps a passing result inconclusive when changed-file integrity is incomplete", async () => {
@@ -233,6 +253,12 @@ describe("repair verification", () => {
     const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
     expect(result.verdict).toBe("INCONCLUSIVE");
     expect(result.summary).toContain("incomplete");
+    expect(result.evidence.claim).toBe("INCONCLUSIVE");
+    expect(result.evidence.checks).toContainEqual({
+      id: "comparison-complete",
+      status: "FAILED",
+      required: false,
+    });
   });
   it("rejects unsupported ancestry and reused requests with a different candidate", async () => {
     const a = await fixture();

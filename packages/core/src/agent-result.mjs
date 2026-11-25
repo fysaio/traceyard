@@ -41,6 +41,22 @@ function compactVerification(packet, size, limit) {
     changedTestsCount: Array.isArray(v.changedTests) ? v.changedTests.length : 0,
     changedTests: Array.isArray(v.changedTests) ? v.changedTests.slice(0, 5) : [],
     metrics: v.metrics,
+    // Evidence state, claim, scope, source and revision are never dropped.
+    ...(v.evidence && typeof v.evidence === "object"
+      ? {
+          claim: {
+            evidenceId: v.evidence.evidenceId,
+            state: v.evidence.state,
+            claim: v.evidence.claim,
+            scope: v.evidence.scope,
+            source: v.evidence.source,
+            commit: v.evidence.revision?.commit ?? null,
+            limitations: Array.isArray(v.evidence.limitations)
+              ? v.evidence.limitations.slice(0, 3)
+              : [],
+          },
+        }
+      : {}),
   };
   if (Array.isArray(v.changedTests) && v.changedTests.length > 5) packet.omitted = true;
   const compact = packet.verification;
@@ -54,6 +70,10 @@ function compactVerification(packet, size, limit) {
   }
   if (size() > limit) {
     compact.evidence = compact.evidence.map((item) => item?.evidenceId ?? null);
+    packet.omitted = true;
+  }
+  while (size() > limit && compact.claim?.limitations.length > 1) {
+    compact.claim.limitations.pop();
     packet.omitted = true;
   }
 }
