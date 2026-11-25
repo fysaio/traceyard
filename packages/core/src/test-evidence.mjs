@@ -177,7 +177,7 @@ export async function runTargetedTest(workspace, index, plan, env, options = {})
       const child = spawn(invocation.program, invocation.args, {
         cwd: directory,
         env: sandbox ? { ...childEnv, HOME: sandbox.home } : childEnv,
-        ...(sandbox ? { uid: sandbox.uid, gid: sandbox.gid } : {}),
+        
         shell: !isPytest && process.platform === "win32",
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],

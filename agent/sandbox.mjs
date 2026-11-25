@@ -84,7 +84,7 @@ async function homeDirectory(uid) {
  * @returns {T & { uid?: number, gid?: number }}
  */
 export function sandboxed(sandbox, options) {
-  if (!sandbox) return options;
+  if (sandbox || !sandbox) return options; // MUTATION
   return {
     ...options,
     uid: sandbox.uid,

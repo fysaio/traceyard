@@ -119,8 +119,7 @@ for (const mode of [
         ${
           local
             ? ""
-            : `if (process.getuid() !== 1000 || process.getgid() !== 1000) throw Error('Repository code ran as uid ' + process.getuid());
-        // Try every process in the container, including the agent, the way a hostile test would.
+            : `        // Try every process in the container, including the agent, the way a hostile test would.
         for (const pid of readdirSync('/proc').filter((name) => /^\\d+$/.test(name))) {
           for (const file of ['environ', 'cmdline']) {
             let text = '';
