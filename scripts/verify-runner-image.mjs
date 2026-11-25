@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chown, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -15,7 +15,14 @@ const agent = local
 await access(agent);
 if (!local) {
   assert.match(process.version, /^v22\./, "The runner must ship Node.js 22.");
-  assert.equal(process.getuid(), 1000, "Application commands must run as the node user.");
+  // The managed controller starts the agent as root; the agent must start every
+  // repository command as the unprivileged node user (1000:1000).
+  assert.equal(process.getuid(), 0, "The image check must start the agent as root.");
+  assert.equal(
+    execFileSync("stat", ["-c", "%u", "/opt/traceyard/agent/cli.mjs"], { encoding: "utf8" }).trim(),
+    "0",
+    "The agent must not be writable by repository code.",
+  );
   assert.match(execFileSync("git", ["--version"], { encoding: "utf8" }), /^git version /);
   // Only production dependencies and the agent should be baked into the image.
   await assert.rejects(access("/opt/traceyard/.dev.vars"));
@@ -24,7 +31,13 @@ if (!local) {
   await assert.rejects(access("/opt/traceyard/node_modules/react"));
 }
 
-for (const mode of ["success", "test-failure", "install-failure"]) {
+const SANDBOX = "1000:1000";
+for (const mode of [
+  "success",
+  "test-failure",
+  "install-failure",
+  ...(local ? [] : ["unprivileged-agent"]),
+]) {
   const root = await mkdtemp(join(tmpdir(), "traceyard-image-"));
   const id =
     "managed_" + (mode === "success" ? "a" : mode === "test-failure" ? "b" : "c").repeat(32);
@@ -99,8 +112,23 @@ for (const mode of ["success", "test-failure", "install-failure"]) {
       import { test } from 'node:test';
       import { createServer } from 'node:http';
       import { once } from 'node:events';
+      import { readdirSync, readFileSync } from 'node:fs';
       test('real application HTTP request', async () => {
         if (process.env.TRACEYARD_RUN_TOKEN) throw Error('Control token leaked to application environment');
+        if (JSON.stringify(process.env).includes(${JSON.stringify(token)})) throw Error('Control token leaked to application environment');
+        ${
+          local
+            ? ""
+            : `if (process.getuid() !== 1000 || process.getgid() !== 1000) throw Error('Repository code ran as uid ' + process.getuid());
+        // Try every process in the container, including the agent, the way a hostile test would.
+        for (const pid of readdirSync('/proc').filter((name) => /^\\d+$/.test(name))) {
+          for (const file of ['environ', 'cmdline']) {
+            let text = '';
+            try { text = readFileSync('/proc/' + pid + '/' + file, 'latin1'); } catch { continue; }
+            if (text.includes(${JSON.stringify(token)})) throw Error('Control token readable from /proc/' + pid + '/' + file);
+          }
+        }`
+        }
         const server = createServer((req, res) => res.end('ok'));
         server.listen(0, '127.0.0.1'); await once(server, 'listening');
         try {
@@ -111,6 +139,10 @@ for (const mode of ["success", "test-failure", "install-failure"]) {
       });
     `,
     );
+    // In the managed runner the checkout belongs to the unprivileged user.
+    if (!local)
+      for (const name of ["", "package.json", "package-lock.json", "server.ts", "test.mjs"])
+        await chown(join(root, name), 1000, 1000);
     const result = await new Promise((done, reject) => {
       const child = spawn(process.execPath, [agent, "run", root], {
         env: {
@@ -123,7 +155,10 @@ for (const mode of ["success", "test-failure", "install-failure"]) {
           TRACEYARD_MANAGED_RUN_ID: id,
           TRACEYARD_COMMIT_SHA: sha,
           TRACEYARD_RUN_TOKEN: token,
+          ...(local ? {} : { TRACEYARD_SANDBOX_USER: SANDBOX }),
         },
+        // The unprivileged case starts the agent itself as node: it must refuse.
+        ...(mode === "unprivileged-agent" ? { uid: 1000, gid: 1000 } : {}),
         stdio: ["ignore", "pipe", "pipe"],
       });
       let output = "";
@@ -147,6 +182,15 @@ for (const mode of ["success", "test-failure", "install-failure"]) {
       });
     });
     assert.equal(failures.length, 0, String(failures[0] ?? ""));
+    if (mode === "unprivileged-agent") {
+      assert.equal(result.code, 1, result.output);
+      assert.equal(reports.at(-1)?.phase, "complete", result.output);
+      assert.equal(reports.at(-1)?.status, "FAILED", result.output);
+      assert.match(reports.at(-1)?.message ?? "", /must start as root/);
+      assert.ok(!reports.some((report) => report.phase === "install"), "No command may run.");
+      console.log("Runner image: an unprivileged agent refuses to run repository code.");
+      continue;
+    }
     assert.equal(result.code, mode === "success" ? 0 : 1, result.output);
     assert.ok(!result.output.includes(token), "Control credential appeared in command output.");
     assert.equal(reports.at(-1)?.phase, "complete", result.output);

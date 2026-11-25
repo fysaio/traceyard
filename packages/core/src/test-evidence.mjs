@@ -1,4 +1,5 @@
-import { readFile, realpath, mkdtemp, rm } from "node:fs/promises";
+import { chown, readFile, realpath, mkdtemp, rm } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { join, resolve, relative, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -152,6 +153,10 @@ export async function runTargetedTest(workspace, index, plan, env, options = {})
   const testArgument = path.startsWith("-") ? "./" + path : path;
   const temporary = await mkdtemp(join(tmpdir(), "traceyard-evidence-")),
     output = join(temporary, "report.json");
+  // A hosted sandbox runs the test as a separate user, which must own the
+  // directory its structured reporter writes to.
+  const sandbox = options.sandbox ?? null;
+  if (sandbox) await chown(temporary, sandbox.uid, sandbox.gid);
   let tail = "",
     timedOut = false;
   try {
@@ -168,9 +173,11 @@ export async function runTargetedTest(workspace, index, plan, env, options = {})
         );
     let evidenceError;
     const exitCode = await new Promise((done, reject) => {
+      const childEnv = adapter.environment ? adapter.environment(env) : env;
       const child = spawn(invocation.program, invocation.args, {
         cwd: directory,
-        env: adapter.environment ? adapter.environment(env) : env,
+        env: sandbox ? { ...childEnv, HOME: sandbox.home } : childEnv,
+        ...(sandbox ? { uid: sandbox.uid, gid: sandbox.gid } : {}),
         shell: !isPytest && process.platform === "win32",
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
@@ -207,7 +214,12 @@ export async function runTargetedTest(workspace, index, plan, env, options = {})
     let result;
     const retainedOutput = sanitizeDiagnostic(tail.slice(-4000), 4000);
     try {
-      const text = await readFile(output, "utf8");
+      // The reporter output is written by the test process; never follow a link
+      // it planted in place of the file.
+      const text = await readFile(output, {
+        encoding: "utf8",
+        flag: process.platform === "win32" ? "r" : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      });
       if (Buffer.byteLength(text) > 8_000_000)
         return blocked("The structured reporter exceeded the supported artifact size.");
       if (timedOut)
