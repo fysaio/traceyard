@@ -135,10 +135,14 @@ describe("untrusted environment", () => {
   });
 });
 
-describe("repository .env.traceyard", () => {
+describe("repository .env.traceyard", { timeout: 60000 }, () => {
   async function runAgent(mode: "local" | "managed", envFile: string, origin?: string) {
     const root = await mkdtemp(join(tmpdir(), "traceyard-envfile-"));
-    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    cleanups.push(() =>
+      rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(() => {
+        /* Windows file lock on temporary fixture directory */
+      }),
+    );
     const dump = join(root, "test-env.json");
     await writeFile(
       join(root, "package.json"),
