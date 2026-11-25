@@ -14,7 +14,6 @@ it.each([true, false])(
     const bound = reserve.address();
     if (!bound || typeof bound === "string") throw Error("No test port");
     const port = bound.port;
-    await new Promise<void>((r) => reserve.close(() => r()));
     const reports: {
         phase: string;
         status: string;
@@ -59,6 +58,9 @@ it.each([true, false])(
       res.end(JSON.stringify({ data: { received: true } }));
     });
     await new Promise<void>((r) => collector.listen(0, "127.0.0.1", r));
+    // Release the application port only after the collector is bound, so the
+    // operating system cannot assign the same ephemeral port to both servers.
+    await new Promise<void>((r) => reserve.close(() => r()));
     const addr = collector.address();
     if (!addr || typeof addr === "string") throw Error("No collector");
     try {
