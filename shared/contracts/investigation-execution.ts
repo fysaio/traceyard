@@ -126,6 +126,18 @@ export const investigationReportSchema = z
         code: "custom",
         message: "A successful report needs a passing executed test and no failure.",
       });
+    if (r.status === "SUCCEEDED" && r.failures.length)
+      c.addIssue({
+        code: "custom",
+        path: ["failures"],
+        message: "A successful report cannot contain failure evidence.",
+      });
+    if (r.status === "SUCCEEDED" && r.checks?.some((check) => check.status !== "SUCCEEDED"))
+      c.addIssue({
+        code: "custom",
+        path: ["checks"],
+        message: "A successful report cannot contain a failed or blocked check.",
+      });
     if (r.status === "FAILED" && r.exitCode === 0)
       c.addIssue({ code: "custom", message: "A failed report cannot claim a successful process." });
   });
