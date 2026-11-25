@@ -11,6 +11,12 @@ async function openConsent(page: Page) {
   });
   expect(response.status()).toBe(201);
   const project = (await response.json()).data;
+  const repository = `example/oauth-browser-${project.id}`;
+  const agentName = `Browser acceptance agent ${project.id}`;
+  const repositoryResponse = await page.request.post("/__acceptance/repository", {
+    data: { projectId: project.id, fullName: repository },
+  });
+  expect(repositoryResponse.status()).toBe(201);
   const metadata = await (
     await page.request.get("/.well-known/oauth-protected-resource/mcp")
   ).json();
@@ -21,7 +27,7 @@ async function openConsent(page: Page) {
   );
   const registered = await page.request.post("/oauth/register", {
     data: {
-      client_name: "Browser acceptance agent",
+      client_name: agentName,
       redirect_uris: [callback],
       token_endpoint_auth_method: "none",
     },
@@ -43,7 +49,7 @@ async function openConsent(page: Page) {
   expect(consent?.headers()["referrer-policy"]).toBe("same-origin");
   await expect(page.getByLabel("Traceyard project")).toHaveCount(0);
   await expect(page.getByText(/give it access to a project when you’re ready/)).toBeVisible();
-  return { project, client, verifier, callback, metadata };
+  return { project, repository, agentName, client, verifier, callback, metadata };
 }
 
 test("MCP connects first and grants project access later in the browser", async ({
@@ -51,7 +57,8 @@ test("MCP connects first and grants project access later in the browser", async 
   baseURL,
 }) => {
   test.setTimeout(150000);
-  const { project, client, verifier, callback, metadata } = await openConsent(page);
+  const { project, repository, agentName, client, verifier, callback, metadata } =
+    await openConsent(page);
   const [post] = await Promise.all([
     page.waitForRequest(
       (r) => r.method() === "POST" && new URL(r.url()).pathname === "/oauth/authorize",
@@ -124,7 +131,8 @@ test("MCP connects first and grants project access later in the browser", async 
     expect(access.origin).toBe(new URL(metadata.resource).origin);
     // The acceptance worker advertises a synthetic public origin.
     await page.goto(access.pathname + access.search);
-    const row = page.locator("form").filter({ hasText: "OAuth browser selection" });
+    const row = page.locator("form.project-access").filter({ hasText: repository });
+    await expect(row).toHaveCount(1);
     await row.getByRole("button", { name: "Allow access" }).click();
     await expect(row.getByRole("button", { name: "Remove access" })).toBeVisible();
     const finding = await sdk.callTool({
@@ -173,7 +181,7 @@ test("MCP connects first and grants project access later in the browser", async 
       `${baseURL}/api/projects/${project.id}/agent-connections`,
     );
     const grants = (await grantsResponse.json()).data.items;
-    const grant = grants.find((g: { name: string }) => g.name === "Browser acceptance agent");
+    const grant = grants.find((g: { name: string }) => g.name === agentName);
     expect(grant).toBeTruthy();
     expect(
       (
@@ -183,7 +191,8 @@ test("MCP connects first and grants project access later in the browser", async 
       ).status(),
     ).toBe(200);
     await page.getByRole("button", { name: "Disconnect agent" }).click();
-    await expect(page.getByText("No matching connection.")).toBeVisible();
+    await expect(page).toHaveURL(/\/oauth\/connections$/);
+    await expect(page.getByRole("heading", { name: agentName, exact: true })).toHaveCount(0);
     expect((await reader.read()).done).toBe(true);
     const denied = await fetch(baseURL + "/mcp", {
       headers: { Authorization: "Bearer " + token.access_token, Accept: "text/event-stream" },
@@ -227,9 +236,9 @@ test("an expired browser sign-in returns to an actionable welcome screen", async
     }),
   );
   await page.goto("/api/auth/github/callback?state=expired&code=not-a-real-code");
-  await expect(page).toHaveURL(/\/\?signIn=retry$/);
-  await expect(page.getByRole("alert")).toContainText("sign-in link expired");
-  await expect(page.getByRole("link", { name: "Continue with GitHub" })).toHaveAttribute(
+  await expect(page).toHaveURL(/\/?signIn=retry$/);
+  await expect(page.getByRole("alert")).toContainText("link expired");
+  await expect(page.getByRole("link", { name: "Start with GitHub" }).first()).toHaveAttribute(
     "href",
     "/api/auth/github/start",
   );
