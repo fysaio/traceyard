@@ -110,6 +110,11 @@ async function complete(
   )
     .bind(attempt.requestId)
     .run();
+  // No executor is configured here, so the dispatch closed the attempt. A
+  // runner only reports for a launched attempt, so reopen it as launched.
+  await env.DB.prepare("UPDATE investigation_attempts SET status='QUEUED' WHERE request_id=?")
+    .bind(attempt.requestId)
+    .run();
   await recordInvestigationReport(env.DB, a.projectId, candidateId, {
     ...a.report,
     requestId: attempt.requestId,

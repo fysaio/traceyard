@@ -283,7 +283,7 @@ export async function recordInvestigationReport(
 ) {
   const row = await db
     .prepare(
-      "SELECT a.id,a.plan_json,a.report_json,a.status,r.runner_id,i.status AS investigation_status FROM investigation_attempts a JOIN investigations i ON i.id=a.investigation_id JOIN repository_check_requests r ON r.id=a.request_id AND r.project_id=i.project_id WHERE a.investigation_id=? AND a.request_id=? AND i.project_id=?",
+      "SELECT a.id,a.plan_json,a.report_json,a.status,r.runner_id,i.status AS investigation_status,EXISTS(SELECT 1 FROM investigation_attempts n WHERE n.investigation_id=a.investigation_id AND n.rowid>a.rowid) AS superseded FROM investigation_attempts a JOIN investigations i ON i.id=a.investigation_id JOIN repository_check_requests r ON r.id=a.request_id AND r.project_id=i.project_id WHERE a.investigation_id=? AND a.request_id=? AND i.project_id=?",
     )
     .bind(id, report.requestId, projectId)
     .first<{
@@ -293,6 +293,7 @@ export async function recordInvestigationReport(
       status: string;
       runner_id: string | null;
       investigation_status: string;
+      superseded: number;
     }>();
   if (!row) throw notFound("Investigation attempt not found.");
   const plan = JSON.parse(row.plan_json) as InvestigationPlan;
@@ -350,6 +351,19 @@ export async function recordInvestigationReport(
   }
   if (row.investigation_status === "CANCELLED")
     throw conflict("INVESTIGATION_CANCELLED", "The investigation was cancelled.");
+  // A result only counts for the open, newest attempt. An attempt the server
+  // already closed (timed out, blocked or cancelled), or one a newer attempt
+  // replaced, must not overwrite the investigation's current state.
+  if (row.superseded)
+    throw conflict(
+      "INVESTIGATION_ATTEMPT_SUPERSEDED",
+      "A newer attempt replaced this one, so its result was not recorded.",
+    );
+  if (row.status !== "QUEUED" && row.status !== "RUNNING")
+    throw conflict(
+      "INVESTIGATION_ATTEMPT_CLOSED",
+      "This attempt was closed before its result arrived, so its result was not recorded.",
+    );
   const summary =
     report.message +
     (report.failures[0]
@@ -378,7 +392,7 @@ export async function recordInvestigationReport(
   await db.batch([
     db
       .prepare(
-        "UPDATE investigation_attempts SET status=?,report_json=?,updated_at=? WHERE id=? AND report_json IS NULL AND EXISTS(SELECT 1 FROM investigations WHERE id=? AND status!='CANCELLED')",
+        "UPDATE investigation_attempts SET status=?,report_json=?,updated_at=? WHERE id=? AND report_json IS NULL AND status IN ('QUEUED','RUNNING') AND NOT EXISTS(SELECT 1 FROM investigation_attempts n WHERE n.investigation_id=investigation_attempts.investigation_id AND n.rowid>investigation_attempts.rowid) AND EXISTS(SELECT 1 FROM investigations WHERE id=? AND status!='CANCELLED')",
       )
       .bind(report.status, json, at, row.id, id),
     db

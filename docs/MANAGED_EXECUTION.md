@@ -16,6 +16,8 @@ The controller destroys the container after completion, failure, or cancellation
 
 `project_repositories.scan_json` retains the last successful source index. `scan_progress_json` holds a replacement scan in progress. A failed replacement retains the successful index. A late report for an older commit cannot overwrite the current successful index or clear an active/failed source scan.
 
+An investigation result is accepted only for its newest attempt, and only while that attempt is still open. The server closes an attempt when it is cancelled, when it fails to start, or when it stalls past the execution window. A result that arrives after that, or for an attempt a retry replaced, is rejected with a conflict. It cannot change the investigation's status, finding or evidence. A repeated delivery of the same result is accepted without change.
+
 `repository_jobs` holds each check's phases and outcome. `managed_repository_checks` holds queue/admission, identity, immutable input and expiry. Application spans/results remain separate. A failed build is a failed check, not evidence that every source operation has failed. A test with no supported activity is not labelled a successful observed workflow.
 
 Managed execution is optional and requires the managed configuration, Workers Paid with Containers enabled, an HTTPS non-local origin, and the required Durable Object/Container binding. Ordinary `npm run dev` is not managed mode. Without those prerequisites, the standard deployment uses the reviewed GitHub Actions workflow for repository tests and managed checks remain unavailable.
