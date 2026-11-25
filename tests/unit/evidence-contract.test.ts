@@ -73,18 +73,22 @@ describe("versioned evidence contract", () => {
     expect(result.error.issues.some((issue) => issue.path.join(".") === "limitations")).toBe(true);
   });
 
-  it("requires an exact commit for hosted attested evidence", () => {
-    const result = evidenceEnvelopeSchema.safeParse({
-      ...base,
-      source: "HOSTED_ATTESTED",
-      revision: { ...base.revision, commit: null },
-    });
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error("Expected hosted evidence without a commit to be rejected");
-    expect(result.error.issues.some((issue) => issue.path.join(".") === "revision.commit")).toBe(
-      true,
-    );
-  });
+  it.each(["HOSTED_UNATTESTED", "HOSTED_ATTESTED"] as const)(
+    "requires an exact commit for %s evidence",
+    (source) => {
+      const result = evidenceEnvelopeSchema.safeParse({
+        ...base,
+        source,
+        revision: { ...base.revision, commit: null },
+      });
+      expect(result.success).toBe(false);
+      if (result.success)
+        throw new Error("Expected hosted evidence without a commit to be rejected");
+      expect(result.error.issues.some((issue) => issue.path.join(".") === "revision.commit")).toBe(
+        true,
+      );
+    },
+  );
 
   it("rejects a required pass with a missing required check", () => {
     const result = evidenceEnvelopeSchema.safeParse({

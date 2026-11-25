@@ -33,7 +33,7 @@ verify({ investigationId: "<investigation-id>", commit: "<40-character-candidate
 
 For an exact Pytest run, include `mode: "execute"`, `testPath`, the failing full SHA, and a `testCase` such as `TestCheckout::test_total[wallet]`. The selector excludes the file path. [Python package setup](CI_TEST_EVIDENCE.md#rerun-a-pytest-failure).
 
-After `verify`, poll hosted `inspect` with `section: "verification"` and the verification ID. The result references both evidence sets. Hosted `investigate`/`verify` apply to the recorded test and conditions, not to application-wide correctness.
+After `verify`, poll hosted `inspect` with `section: "verification"` and the verification ID. The result references both evidence sets. Hosted `investigate`/`verify` apply to the recorded test and conditions, not to application-wide correctness. The verification also carries `evidence`, the same versioned envelope, and its compact `claim` survives shortening. Hosted claims are `HOSTED_UNATTESTED` and `FOCUSED`: they bind the exact candidate commit, but the runner that reported them is not yet attested, so `FOCUSED_PASS` is not a merge approval. `FOCUSED_PASS` appears only when the verdict is `PASSED`; every other verdict, including `REVIEW_TEST_CHANGES` and an incomplete comparison, is `INCONCLUSIVE` or `FAILED`.
 
 In Antigravity, copy the setup request from the **Agents** page, or add the MCP URL as `serverUrl` in the existing `mcpServers` configuration. Open **Customizations → Installed → MCP Servers** and select **Authenticate**.
 
