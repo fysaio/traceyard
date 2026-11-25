@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ProjectLink as Link } from "../components/project-link";
@@ -19,7 +19,8 @@ import { useWorkspace } from "../lib/workspace";
 import { investigations } from "../lib/investigations-api";
 import { integrationRequest } from "../lib/integrations-api";
 import { newIdempotencyKey } from "../lib/api";
-import { EnableGitHubChecks, repositoryPath, type CISetupResult } from "./repositories";
+import { repositoryPath } from "../lib/repository-path";
+import type { CISetupResult } from "./repositories";
 import {
   investigationRepositorySchema,
   type Investigation,
@@ -27,6 +28,10 @@ import {
 import { pytestCaseSchema } from "../../shared/contracts/investigation-execution";
 import { repositoryPathSchema } from "../../shared/contracts/repository-index";
 import type { Catalog } from "../../shared/repository/workspace";
+
+const EnableGitHubChecks = lazy(() =>
+  import("./repositories").then((module) => ({ default: module.EnableGitHubChecks })),
+);
 
 const STATE: Record<string, [label: string, tone: Tone]> = {
   EVIDENCE_READY: ["Done", "neutral"],
@@ -477,7 +482,9 @@ function Evidence({
   const more = q.data.nextOffset !== null;
   return (
     <div className="stack-sm">
-      <p className="muted small">Technical evidence retained from the executor. Open it when you need the exact output.</p>
+      <p className="muted small">
+        Technical evidence retained from the executor. Open it when you need the exact output.
+      </p>
       <pre className="code">{q.data.text}</pre>
       {(offset > 0 || more) && (
         <div className="pager">
@@ -833,7 +840,9 @@ function InvestigationDetail() {
           <section className="stack" id="evidence">
             <div>
               <h2 className="section-title">Retained evidence</h2>
-              <p className="muted small">Human-readable findings come first. Open an item below for executor output.</p>
+              <p className="muted small">
+                Human-readable findings come first. Open an item below for executor output.
+              </p>
             </div>
             <div className="list">
               {output.map((e) => (
