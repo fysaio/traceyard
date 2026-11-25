@@ -6,6 +6,7 @@ import landingScript from "./landing-template.js?raw";
 
 export function Welcome({ session }: { session: AuthSession }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const signInRetry = new URLSearchParams(window.location.search).get("signIn") === "retry";
 
   useEffect(() => {
     const root = rootRef.current;
@@ -43,5 +44,14 @@ export function Welcome({ session }: { session: AuthSession }) {
     };
   }, [session.githubSignInAvailable]);
 
-  return <div ref={rootRef} className="traceyard-html-landing" />;
+  return (
+    <>
+      {signInRetry && (
+        <p className="notice danger" role="alert">
+          GitHub sign-in could not be completed or the link expired. You can try again below.
+        </p>
+      )}
+      <div ref={rootRef} className="traceyard-html-landing" />
+    </>
+  );
 }

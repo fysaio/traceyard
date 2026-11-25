@@ -35,6 +35,39 @@ export default {
         },
       });
     }
+    if (url.pathname === "/__acceptance/repository" && env.LOCAL_ACCEPTANCE === "true") {
+      if (request.method !== "POST" || !["localhost", "127.0.0.1"].includes(url.hostname))
+        return new Response("Forbidden", { status: 403 });
+      const body = (await request.json().catch(() => null)) as {
+        projectId?: unknown;
+        fullName?: unknown;
+      } | null;
+      if (
+        typeof body?.projectId !== "string" ||
+        typeof body.fullName !== "string" ||
+        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(body.fullName)
+      )
+        return new Response("Invalid test repository", { status: 400 });
+      const user = await getOrCreateGitHubIdentity(env.DB, {
+        id: 900000001,
+        login: "local-acceptance",
+        name: "Local acceptance account",
+        avatarUrl: null,
+      });
+      const project = await env.DB.prepare("SELECT id FROM projects WHERE id=? AND owner_user_id=?")
+        .bind(body.projectId, user.id)
+        .first();
+      if (!project) return new Response("Project not found", { status: 404 });
+      await env.DB.prepare(
+        "INSERT INTO project_repositories(project_id,full_name,status,updated_at) VALUES(?,?,'CONNECTED',?)",
+      )
+        .bind(body.projectId, body.fullName, new Date().toISOString())
+        .run();
+      return Response.json(
+        { data: { projectId: body.projectId, fullName: body.fullName } },
+        { status: 201 },
+      );
+    }
     return worker.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;
