@@ -176,8 +176,15 @@ describe("test-input rules", () => {
       await writeFile(join(root, "a.js"), "two");
       expect(await digest(base)).not.toBe(first);
       // A config outside the repository can't be read into the digest; it is marked instead.
-      const outside = await digest({ scripts: { test: "jest -c ../../etc/hostname" } });
-      expect(outside).toMatch(/^[a-f0-9]{64}$/);
+      const outsideFile = join(await mkdtemp(join(tmpdir(), "traceyard-outside-")), "c.js");
+      await writeFile(outsideFile, "one");
+      const outside = { scripts: { test: `jest -c ${outsideFile}` } };
+      const marked = await digest(outside);
+      await writeFile(outsideFile, "two");
+      expect(await digest(outside)).toBe(marked);
+      await rm(join(outsideFile, ".."), { recursive: true, force: true, maxRetries: 5 }).catch(
+        () => {},
+      );
     } finally {
       await rm(root, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
     }
