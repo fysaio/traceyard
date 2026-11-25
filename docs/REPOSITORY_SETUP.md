@@ -142,6 +142,8 @@ TRACEYARD_ORIGIN=https://YOUR_TRACEYARD_HOST
 TRACEYARD_KEY=<project-scoped API key>
 ```
 
+Only `TRACEYARD_ORIGIN` and `TRACEYARD_KEY` are read from this file; other lines are ignored, and values already set in the environment take precedence. Hosted runs (GitHub Actions and managed checks) never read it, because it is repository content. The key is used by the runner only: your tests export traces through a loopback relay and never receive it. See [execution trust](EXECUTION_TRUST.md).
+
 With Node.js 22.12.0 or newer and Git, run this from that repository (no separate TraceYard checkout required):
 
 ```bash
