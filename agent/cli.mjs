@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import { pytestEnvironment } from "../packages/core/src/pytest.mjs";
 import { replayVitest } from "./replay-runner.mjs";
 import { parseEnv } from "node:util";
+import { grantToSandbox, readUntrustedFile, sandboxed, sandboxIdentity } from "./sandbox.mjs";
 import {
   LOCAL_ENV_FILE_KEYS,
   startTelemetryRelay,
@@ -426,10 +427,13 @@ export async function main(args = process.argv.slice(2)) {
     !(await lstat(root)).isDirectory()
   )
     throw Error("The configured application directory is not inside this project.");
-  let repositoryIndex, pytestSandbox, relay;
+  let repositoryIndex, pytestSandbox, relay, sandbox;
   try {
+    // Confirm the user boundary before any repository command runs.
+    sandbox = await sandboxIdentity();
     const desired = manifest.investigation?.commit;
     if (manifest.investigation?.flakeCandidate) {
+      if (sandbox) throw Error("Flakiness checks are not available in the sandboxed runner.");
       if (!isActions || !desired || !manifest.investigation.testPath)
         throw Error(
           "Flakiness checks require the hosted GitHub runner and two selected revisions.",
@@ -564,7 +568,11 @@ export async function main(args = process.argv.slice(2)) {
     if (focusedRunner === "pytest") {
       const python = process.platform === "win32" ? "python.exe" : "python3";
       pytestSandbox = await mkdtemp(join(tmpdir(), "traceyard-pytest-"));
-      const options = { cwd: packageDirectory, env: pytestEnvironment(env, true) };
+      await grantToSandbox(sandbox, pytestSandbox);
+      const options = sandboxed(sandbox, {
+        cwd: packageDirectory,
+        env: pytestEnvironment(env, true),
+      });
       await execute(python, ["-I", "-m", "venv", pytestSandbox], options, "install");
       pytestPython =
         process.platform === "win32"
@@ -611,7 +619,7 @@ export async function main(args = process.argv.slice(2)) {
       await execute(
         process.platform === "win32" ? "npm.cmd" : "npm",
         replaying ? ["ci", "--ignore-scripts", "--no-audit", "--no-fund"] : ["ci"],
-        { cwd: installRoot, env: installEnv },
+        sandboxed(sandbox, { cwd: installRoot, env: installEnv }),
         "install",
       );
     }
@@ -621,10 +629,7 @@ export async function main(args = process.argv.slice(2)) {
       await execute(
         process.platform === "win32" ? "npm.cmd" : "npm",
         ["run", "build"],
-        {
-          cwd: root,
-          env,
-        },
+        sandboxed(sandbox, { cwd: root, env }),
         "build",
       );
       await report("build", "SUCCEEDED", "Build completed.");
@@ -691,6 +696,7 @@ export async function main(args = process.argv.slice(2)) {
         plan.captureInteractions && !plan.replayRecording && focusedRunner === "vitest"
           ? await mkdtemp(join(tmpdir(), "traceyard-capture-"))
           : null;
+      if (capture) await grantToSandbox(sandbox, capture);
       const captureFile = capture ? join(capture, "interactions.jsonl") : null;
       const focused = await runInvestigationPlan(
         workspaceRoot,
@@ -707,7 +713,7 @@ export async function main(args = process.argv.slice(2)) {
                 JSON.stringify(new URL("./record-fetch.mjs", import.meta.url).href),
             }
           : testEnv,
-        hostedRunOptions,
+        { ...hostedRunOptions, sandbox },
       );
       if (plan.captureInteractions && focusedRunner !== "vitest")
         focused.message =
@@ -752,6 +758,7 @@ export async function main(args = process.argv.slice(2)) {
       if (!pkg.scripts?.[manifest.config.startScript])
         throw Error("The configured startup script is missing from package.json.");
       const temporary = await mkdtemp(join(tmpdir(), "traceyard-check-"));
+      await grantToSandbox(sandbox, temporary);
       const resultFile = join(temporary, "results.json");
       // Feed test data through stdin, never command-line arguments or log output.
       try {
@@ -759,7 +766,7 @@ export async function main(args = process.argv.slice(2)) {
           const child = spawn(
             process.execPath,
             [fileURLToPath(new URL("./http-check.mjs", import.meta.url))],
-            {
+            sandboxed(sandbox, {
               cwd: root,
               env: {
                 ...testEnv,
@@ -770,7 +777,7 @@ export async function main(args = process.argv.slice(2)) {
               stdio: ["pipe", "inherit", "inherit"],
               detached: process.platform !== "win32",
               shell: false,
-            },
+            }),
           );
           child.stdin.end(JSON.stringify(manifest));
           const timer = setTimeout(() => {
@@ -797,7 +804,7 @@ export async function main(args = process.argv.slice(2)) {
             else reject(Error("The request test runner stopped unexpectedly."));
           });
         });
-        testResults = JSON.parse(await readFile(resultFile, "utf8"));
+        testResults = JSON.parse(await readUntrustedFile(resultFile));
       } finally {
         await rm(temporary, { recursive: true, force: true });
       }
@@ -814,10 +821,7 @@ export async function main(args = process.argv.slice(2)) {
       await execute(
         process.platform === "win32" ? "npm.cmd" : "npm",
         ["test"],
-        {
-          cwd: root,
-          env: testEnv,
-        },
+        sandboxed(sandbox, { cwd: root, env: testEnv }),
         "test",
       );
     }

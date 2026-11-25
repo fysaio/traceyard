@@ -31,10 +31,18 @@ Repository code can still send made-up spans through the relay. Spans are diagno
 
 `.env.traceyard` is repository content. Hosted runs never read it. Local runs read only `TRACEYARD_ORIGIN` and `TRACEYARD_KEY`, and never override a value already in the environment.
 
+## Managed checks: separate user
+
+The managed controller runs the checkout as the image's unprivileged `node` user, so that user owns the workspace. Only the agent is started as `root`, with `TRACEYARD_SANDBOX_USER=1000:1000`. The agent then starts every repository command as that user, with supplementary groups dropped: install, build, test, request checks and the application. Repository code therefore cannot read the agent's `/proc/<pid>/environ` or `cmdline`, open its file descriptors, signal it, or modify the agent's files in `/opt/traceyard`.
+
+The boundary fails closed. If `TRACEYARD_SANDBOX_USER` is set but the agent cannot confirm the switch with a probe process, it reports a failed check and runs no repository command. Files that repository code writes for the agent, such as reporter output, are read without following symbolic links.
+
+The runner image check in CI ([`scripts/verify-runner-image.mjs`](../scripts/verify-runner-image.mjs)) runs this inside the built image. Its fixture test acts as a hostile test: it scans every `/proc/<pid>/environ` and `cmdline` in the container for the credential and fails if it finds it.
+
 ## Known gaps
 
 These gaps are why hosted evidence is not yet attested:
 
-- **Same operating-system user.** In managed checks and on GitHub Actions, repository processes run as the same user as the agent. On Linux, a process can read another process's original environment through `/proc/<pid>/environ` when both run as the same user. That holds even after the agent deletes the variable. Repository code can therefore still recover the agent's credential, or write to its output. The next step is to run repository processes as a separate, unprivileged user in the managed image.
+- **GitHub Actions and local runs share a user.** There, repository processes run as the same user as the agent. On Linux, a process can read another process's original environment through `/proc/<pid>/environ` when both run as the same user. That holds even after the agent deletes the variable, so repository code can still recover the agent's credential or write to its output.
 - **GitHub Actions.** In GitHub Actions, the step's shell and the runner also hold the OIDC request token as the same user. A GitHub-hosted job cannot hide it from code that runs in the same job. Moving reporting to a separate trusted job, or to the managed supervisor, is tracked in #80.
 - **Network.** Repository processes can reach the Traceyard origin and the internet. Without a credential they cannot post reports, but outbound network is not restricted.
