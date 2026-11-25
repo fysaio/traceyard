@@ -67,6 +67,11 @@ export const investigationReportSchema = z
       )
       .max(8),
     message: z.string().max(2000),
+    // Digest of the runner configuration the run used (script, jest key, named config).
+    runnerConfig: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     durationMs: z.number().int().min(0).max(600000),
     exitCode: z.number().int().nullable(),
     truncated: z.boolean(),

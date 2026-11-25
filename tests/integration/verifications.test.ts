@@ -38,7 +38,7 @@ beforeAll(async () => {
       "\n-----END PRIVATE KEY-----",
   };
 });
-async function fixture() {
+async function fixture(baselineOverrides: Partial<InvestigationReport> = {}) {
   const user = await getOrCreateGitHubIdentity(env.DB, {
     id: 960,
     login: "verify-owner",
@@ -77,6 +77,7 @@ async function fixture() {
     exitCode: 1,
     truncated: false,
     nodeVersion: "v22",
+    ...baselineOverrides,
   };
   await env.DB.prepare(
     "INSERT INTO investigation_attempts(id,investigation_id,request_id,plan_json,status,report_json,created_at,updated_at) VALUES(?,?,?,'{}','FAILED',?,?,?)",
@@ -97,7 +98,11 @@ function github(files: string[], status = "ahead"): typeof fetch {
     throw Error("Unexpected GitHub request: " + path);
   };
 }
-async function complete(a: Awaited<ReturnType<typeof fixture>>, candidateId: string) {
+async function complete(
+  a: Awaited<ReturnType<typeof fixture>>,
+  candidateId: string,
+  overrides: Partial<InvestigationReport> = {},
+) {
   const inv = await getInvestigation(env.DB, a.userId, a.projectId, candidateId),
     attempt = inv.attempts![0]!;
   await env.DB.prepare(
@@ -115,6 +120,7 @@ async function complete(a: Awaited<ReturnType<typeof fixture>>, candidateId: str
     failures: [],
     message: "One test passed",
     exitCode: 0,
+    ...overrides,
   });
 }
 describe("repair verification", () => {
@@ -237,6 +243,73 @@ describe("repair verification", () => {
       required: false,
     });
     expect(result.metrics.agentTokens).toBeNull();
+  });
+  it("treats a changed runner configuration as a changed test input", async () => {
+    // A hostile fix that points the test script at a lenient config file whose
+    // name matches no test-input rule.
+    const a = await fixture({ runnerConfig: "1".repeat(64) }),
+      v = await createVerification(
+        configured,
+        a.userId,
+        a.projectId,
+        a.baseline.id,
+        "b".repeat(40),
+        undefined,
+        github(["package.json", "lenient.js", "boot.js"]),
+      );
+    await complete(a, v.candidateId, { runnerConfig: "2".repeat(64) });
+    const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
+    expect(result.verdict).toBe("REVIEW_TEST_CHANGES");
+    expect(result.changedTests).toEqual(["package.json"]);
+    expect(result.evidence.claim).toBe("INCONCLUSIVE");
+  });
+  it("uses the shared rules for setup files and runner config", async () => {
+    const a = await fixture(),
+      v = await createVerification(
+        configured,
+        a.userId,
+        a.projectId,
+        a.baseline.id,
+        "b".repeat(40),
+        undefined,
+        github(["sum.ts", "vitest.setup.ts", "vitest.config.ts"]),
+      );
+    await complete(a, v.candidateId);
+    const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
+    expect(result.verdict).toBe("REVIEW_TEST_CHANGES");
+    expect(result.changedTests).toEqual(["vitest.setup.ts", "vitest.config.ts"]);
+  });
+  it("records a limitation when only one run recorded its runner configuration", async () => {
+    const a = await fixture(),
+      v = await createVerification(
+        configured,
+        a.userId,
+        a.projectId,
+        a.baseline.id,
+        "b".repeat(40),
+        undefined,
+        github(["sum.ts"]),
+      );
+    await complete(a, v.candidateId, { runnerConfig: "2".repeat(64) });
+    const result = await getVerification(env.DB, a.userId, a.projectId, v.id);
+    expect(result.verdict).toBe("PASSED");
+    expect(result.limitations.join(" ")).toContain("runner configuration");
+  });
+  it("needs review when an unrecorded runner configuration sits beside a changed package.json", async () => {
+    const b = await fixture(),
+      w = await createVerification(
+        configured,
+        b.userId,
+        b.projectId,
+        b.baseline.id,
+        "b".repeat(40),
+        undefined,
+        github(["sum.ts", "package.json"]),
+      );
+    await complete(b, w.candidateId, { runnerConfig: "2".repeat(64) });
+    const flagged = await getVerification(env.DB, b.userId, b.projectId, w.id);
+    expect(flagged.verdict).toBe("REVIEW_TEST_CHANGES");
+    expect(flagged.changedTests).toEqual(["package.json"]);
   });
   it("keeps a passing result inconclusive when changed-file integrity is incomplete", async () => {
     const a = await fixture(),
