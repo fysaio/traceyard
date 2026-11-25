@@ -97,6 +97,17 @@ export function agentResult(value, limit = 4000) {
     packet.explanation.source = null;
     packet.omitted = true;
   }
+  // The claim summary is never dropped; only its limitations shorten, to one.
+  const claimNotes = packet.claim?.limitations;
+  if (Array.isArray(claimNotes))
+    while (claimNotes.length > 1 && size() > limit) {
+      claimNotes.pop();
+      packet.omitted = true;
+    }
+  if (Array.isArray(claimNotes) && claimNotes[0]?.length > 160 && size() > limit) {
+    claimNotes[0] = claimNotes[0].slice(0, 160);
+    packet.omitted = true;
+  }
   for (const key of OPTIONAL_ARRAYS) {
     const array = packet[key];
     if (Array.isArray(array))
@@ -111,6 +122,32 @@ export function agentResult(value, limit = 4000) {
       delete packet[key];
       packet.omitted = true;
     }
+  }
+  // Last resort before cutting the summary: diagnostic run fields, then the
+  // claim's copy of an evidence ID that a run already carries. The claim's
+  // state, scope, source and revision are never removed.
+  if (Array.isArray(packet.runs))
+    for (const field of ["durationMs", "dependencies", "cached", "workingTree", "message"])
+      for (const run of packet.runs)
+        if (size() > limit && run && typeof run === "object" && field in run) {
+          delete run[field];
+          packet.omitted = true;
+        }
+  if (Array.isArray(packet.runs) && typeof packet.test?.path === "string")
+    for (const run of packet.runs)
+      for (const failure of run?.failures ?? [])
+        if (size() > limit && failure?.file === packet.test.path) {
+          delete failure.file;
+          packet.omitted = true;
+        }
+  if (
+    size() > limit &&
+    packet.claim?.evidenceId &&
+    Array.isArray(packet.runs) &&
+    packet.runs.some((run) => run?.evidenceId === packet.claim.evidenceId)
+  ) {
+    delete packet.claim.evidenceId;
+    packet.omitted = true;
   }
   while (size() > limit && typeof packet.summary === "string" && packet.summary.length > 20) {
     packet.summary = packet.summary.slice(

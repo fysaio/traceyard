@@ -34,7 +34,10 @@ const runSummary = (run) => ({
  * Trust level is "local": it was produced on this machine and is evidence for
  * the developer and their agent, not a signed CI attestation.
  */
-export async function writeReceipt(stateDir, { repository, test, verdict, baseline, candidate }) {
+export async function writeReceipt(
+  stateDir,
+  { repository, test, verdict, baseline, candidate, evidenceEnvelope },
+) {
   const createdAt = new Date().toISOString();
   const id =
     "rcpt_" + createdAt.replace(/[-:.TZ]/g, "").slice(0, 17) + "_" + randomBytes(3).toString("hex");
@@ -52,6 +55,8 @@ export async function writeReceipt(stateDir, { repository, test, verdict, baseli
     baseline: runSummary(baseline),
     candidate: runSummary(candidate),
     changedTests: verdict.changedTests,
+    // Inside the digest, so the claim can't be edited without breaking it.
+    ...(evidenceEnvelope ? { evidenceEnvelope } : {}),
   };
   const receipt = {
     ...body,
@@ -84,6 +89,10 @@ export function receiptMarkdown(r) {
   lines.push(
     `- **Test files changed between commits:** ${r.changedTests.length ? r.changedTests.map((p) => "`" + p + "`").join(", ") : "none"}`,
   );
+  if (r.evidenceEnvelope)
+    lines.push(
+      `- **Claim:** ${r.evidenceEnvelope.claim} (${r.evidenceEnvelope.scope.toLowerCase()} scope, ${r.evidenceEnvelope.source.toLowerCase().replace("_", " ")}). A focused pass covers this test only, not the whole suite or merge safety.`,
+    );
   if (r.baseline.failures[0])
     lines.push(
       "",

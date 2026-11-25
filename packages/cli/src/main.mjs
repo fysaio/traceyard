@@ -11,7 +11,10 @@ import {
   hasUncommittedChanges,
   repositoryRoot,
   resolveCommit,
+  worktreeChanged,
+  worktreeSnapshot,
 } from "./git.mjs";
+import { newRequestId, repositoryId, singleRunEnvelope, verifyEnvelope } from "./evidence.mjs";
 import { githubAuth, resolveActionsLink } from "./github.mjs";
 import { listReceipts, readReceipt, receiptMarkdown, writeReceipt } from "./receipt.mjs";
 import { cacheDirectory, listEvidence, readEvidence, runTest } from "./run.mjs";
@@ -287,6 +290,8 @@ export async function execute(
       timeoutMs: timeoutSeconds * 1000,
       env,
       fetcher,
+      requestId: newRequestId(),
+      startedAt: new Date().toISOString(),
     };
     const result = await handlers[command](context);
     return { schemaVersion: 1, command, ...result, exitCode: exitCodeFor(result.verdict) };
@@ -395,6 +400,17 @@ async function repro(ctx) {
     warnings.push("Ran the last commit (HEAD). Your uncommitted changes were not included.");
   const run = await runTest({ ...runOptions(ctx), commit, testPath, testCase: values.case });
   const verdict = reproVerdict(run, testPath, { fromCi: Boolean(source) });
+  const test = { path: testPath, case: values.case ?? null };
+  const evidenceEnvelope = singleRunEnvelope({
+    command: "repro",
+    run,
+    test,
+    repository: repositoryId(await githubRepository(root), root),
+    requestId: ctx.requestId,
+    next: verdict.next,
+    startedAt: ctx.startedAt,
+    completedAt: new Date().toISOString(),
+  });
   if (run.status !== "BLOCKED")
     await writeFile(
       join(ctx.stateDir, "last-repro.json"),
@@ -406,9 +422,10 @@ async function repro(ctx) {
     );
   return {
     ...verdict,
-    test: { path: testPath, case: values.case ?? null },
+    test,
     runs: [publicRun("repro", run, values, root)],
     ...(source ? { source } : {}),
+    evidenceEnvelope,
     warnings,
   };
 }
@@ -426,6 +443,8 @@ async function defaultTest(ctx) {
 
 async function check(ctx) {
   const test = await defaultTest(ctx);
+  // Fingerprint the tree before and after: an edit during the run makes it stale.
+  const before = await worktreeSnapshot(ctx.root);
   const run = await runTest({
     ...runOptions(ctx),
     commit: null,
@@ -433,10 +452,36 @@ async function check(ctx) {
     testCase: test.case ?? undefined,
     install: ctx.values.install,
   });
+  const after = await worktreeSnapshot(ctx.root);
+  const verdict = checkVerdict(run, test.path);
+  const stale = worktreeChanged(before, after);
+  const selected = { path: test.path, case: test.case };
+  const evidenceEnvelope = singleRunEnvelope({
+    command: "check",
+    run,
+    test: selected,
+    repository: repositoryId(await githubRepository(ctx.root), ctx.root),
+    requestId: ctx.requestId,
+    worktree: {
+      fingerprint: before.fingerprint,
+      stale,
+      complete: before.complete && after.complete,
+    },
+    next: stale ? "Stop editing files, then rerun `traceyard check`." : verdict.next,
+    startedAt: ctx.startedAt,
+    completedAt: new Date().toISOString(),
+  });
   return {
-    ...checkVerdict(run, test.path),
-    test: { path: test.path, case: test.case },
+    ...(stale
+      ? {
+          verdict: "INCONCLUSIVE",
+          summary: `Files changed while ${test.path} ran, so the result may not match your working tree.`,
+          next: "Stop editing files, then rerun `traceyard check`.",
+        }
+      : verdict),
+    test: selected,
     runs: [publicRun("check", run, ctx.values, ctx.root)],
+    evidenceEnvelope,
     warnings: [],
   };
 }
@@ -479,14 +524,27 @@ async function verify(ctx) {
   });
   const runs = [publicRun("baseline", baseline, values, root)];
   if (candidate) runs.push(publicRun("candidate", candidate, values, root));
+  const repository = await githubRepository(root);
+  const evidenceEnvelope = verifyEnvelope({
+    baseline,
+    candidate,
+    test: { path: test.path, case: test.case },
+    changedTests: verdict.changedTests,
+    repository: repositoryId(repository, root),
+    requestId: ctx.requestId,
+    next: verdict.next,
+    startedAt: ctx.startedAt,
+    completedAt: new Date().toISOString(),
+  });
   let receiptInfo;
   if (candidate && verdict.verdict !== "BLOCKED") {
     const written = await writeReceipt(ctx.stateDir, {
-      repository: await githubRepository(root),
+      repository,
       test: { path: test.path, case: test.case },
       verdict,
       baseline,
       candidate,
+      evidenceEnvelope,
     });
     receiptInfo = {
       id: written.receipt.id,
@@ -502,6 +560,7 @@ async function verify(ctx) {
     runs,
     changedTests: verdict.changedTests,
     ...(receiptInfo ? { receipt: receiptInfo } : {}),
+    evidenceEnvelope,
     warnings,
   };
 }

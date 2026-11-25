@@ -36,6 +36,11 @@ export function guardVerdict(input: {
     test: { path: string; case: string | null };
     baseline: { commit: string | null };
     candidate: { commit: string | null };
+    evidenceEnvelope?: {
+      claim?: string;
+      state?: string;
+      revision?: { commit?: string | null };
+    };
   } | null;
   intact: boolean;
   head: string | null;
