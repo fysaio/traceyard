@@ -147,6 +147,223 @@ test("connected developer investigates, inspects bounded evidence and opens agen
   await expect(page.getByText("http://localhost:5173/mcp", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("issue #30: keyboard-only composer, evidence and repair flow at narrow and desktop widths", async ({
+  page,
+}) => {
+  const candidateCommit = "b".repeat(40);
+  let createWrites = 0;
+  let verificationWrites = 0;
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route("**/api/auth/session", (r) =>
+    r.fulfill(
+      json({
+        user: { id: "usr_browser", login: "browser", name: "Browser", avatarUrl: null },
+        sessions: [],
+        githubSignInAvailable: true,
+      }),
+    ),
+  );
+  await page.route("**/api/projects", (r) =>
+    r.fulfill(json({ items: [{ id: "prj_browser", name: "Browser", repository: "example/app" }] })),
+  );
+  await page.route("**/api/projects/prj_browser/investigations", async (r) => {
+    if (r.request().method() === "POST") {
+      expect(r.request().postDataJSON()).toMatchObject({
+        testPath: execution.command.testPath,
+        commit: snapshot.commit,
+        mode: "execute",
+      });
+      createWrites += 1;
+      return r.fulfill(json(inv));
+    }
+    return r.fulfill(json({ items: [] }));
+  });
+  await page.route("**/api/projects/prj_browser/investigations/inv_browser", (r) =>
+    r.fulfill(json(inv)),
+  );
+  await page.route(
+    "**/api/projects/prj_browser/investigations/inv_browser/evidence/evd_browser?*",
+    (r) =>
+      r.fulfill(
+        json({
+          id: "evd_browser",
+          text: "Expected 42, received 41",
+          offset: 0,
+          nextOffset: null,
+          truncated: false,
+        }),
+      ),
+  );
+  await page.route("**/api/projects/prj_browser/investigations/inv_browser/verify", async (r) => {
+    expect(r.request().method()).toBe("POST");
+    expect(r.request().postDataJSON()).toEqual({ commit: candidateCommit });
+    verificationWrites += 1;
+    return r.fulfill(
+      json({
+        id: "ver_browser",
+        baselineId: inv.id,
+        candidateId: "inv_candidate",
+        candidateCommit,
+        verdict: "PENDING",
+        label: "Queued",
+        baselineRun: null,
+        candidateRun: null,
+        changedTests: [],
+        limitations: [],
+        summary: "Checking candidate.",
+        metrics: {},
+      }),
+    );
+  });
+  await page.route("**/api/projects/prj_browser/repository/index?kind=tests", (r) =>
+    r.fulfill(json(null)),
+  );
+  await page.route("**/api/projects/prj_browser/catalog", (r) =>
+    r.fulfill(json({ executionAvailable: true, executionProvider: "github" })),
+  );
+  await page.route("**/api/projects/prj_browser/repository/setup", (r) =>
+    r.fulfill(json({ state: "READY" })),
+  );
+
+  for (const width of [320, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
+    expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
+      true,
+    );
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+
+    const testFile = page.getByLabel("Test file");
+    const tabTo = async (locator: typeof testFile) => {
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (await locator.evaluate((element) => element === document.activeElement)) return;
+        await page.keyboard.press("Tab");
+      }
+      throw new Error("Keyboard tab order did not reach the expected investigation control.");
+    };
+    const expectVisibleFocus = async (locator: typeof testFile) => {
+      const styles = await locator.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+          boxShadow: style.boxShadow,
+        };
+      });
+      const hasOutline = styles.outlineStyle !== "none" && styles.outlineWidth >= 2;
+      expect(hasOutline || styles.boxShadow !== "none").toBe(true);
+    };
+
+    await tabTo(testFile);
+    await expectVisibleFocus(testFile);
+    await page.keyboard.type(execution.command.testPath);
+    const failedCommit = page.getByLabel("Commit where it failed");
+    await page.keyboard.press("Tab");
+    await expect(failedCommit).toBeFocused();
+    await expectVisibleFocus(failedCommit);
+    await page.keyboard.type(snapshot.commit);
+    const changeInputMode = page.getByRole("button", {
+      name: "Paste a GitHub Actions link instead",
+    });
+    await page.keyboard.press("Tab");
+    await expect(changeInputMode).toBeFocused();
+    const runTest = page.getByRole("button", { name: "Run test", exact: true });
+    await page.keyboard.press("Tab");
+    await expect(runTest).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Verify a fix" })).toBeVisible();
+    expect(createWrites).toBe(width === 320 ? 1 : 2);
+    const evidenceToggle = page.getByRole("button", { name: /Full test output/ });
+    await tabTo(evidenceToggle);
+    await expectVisibleFocus(evidenceToggle);
+    await page.keyboard.press("Enter");
+    await expect(evidenceToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#evidence pre")).toContainText("Expected 42, received 41");
+    await expect(evidenceToggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(evidenceToggle).toHaveAttribute("aria-expanded", "false");
+    await expect(evidenceToggle).toBeFocused();
+
+    const verifyButton = page.getByRole("button", { name: "Verify", exact: true });
+    await tabTo(verifyButton);
+    await expect(verifyButton).toBeFocused();
+    await expectVisibleFocus(verifyButton);
+    await page.keyboard.press("Shift+Tab");
+    const fixCommit = page.getByLabel("Fix commit");
+    await expect(fixCommit).toBeFocused();
+    await expectVisibleFocus(fixCommit);
+    await page.keyboard.type("not-a-commit");
+    await page.keyboard.press("Tab");
+    await expect(verifyButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(fixCommit).toBeFocused();
+    const invalidState = await fixCommit.evaluate((element) => {
+      const input = element as HTMLInputElement;
+      return {
+        patternMismatch: input.validity.patternMismatch,
+        validationMessage: input.validationMessage,
+      };
+    });
+    expect(invalidState.patternMismatch).toBe(true);
+    expect(invalidState.validationMessage.length).toBeGreaterThan(0);
+    expect(verificationWrites).toBe(width === 320 ? 0 : 1);
+
+    await page.keyboard.press("Control+A");
+    await page.keyboard.type(candidateCommit);
+    await expect
+      .poll(() => fixCommit.evaluate((element) => (element as HTMLInputElement).checkValidity()))
+      .toBe(true);
+    await page.keyboard.press("Tab");
+    await expect(verifyButton).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "Your fix" })).toBeVisible();
+    await expect(page.getByText("Checking candidate.", { exact: true })).toBeVisible();
+    expect(verificationWrites).toBe(width === 320 ? 1 : 2);
+    await page.keyboard.press("Tab");
+    await expect(evidenceToggle).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(verifyButton).toBeFocused();
+
+    const reducedMotion = await page.locator(".page").evaluate((element) => {
+      const toMs = (value: string) => {
+        const amount = Number.parseFloat(value);
+        return value.trim().endsWith("ms") ? amount : amount * 1000;
+      };
+      return [element, ...element.querySelectorAll("*")].reduce(
+        (result, node) => {
+          const style = getComputedStyle(node);
+          result.animationDurations.push(...style.animationDuration.split(",").map(toMs));
+          result.transitionDurations.push(...style.transitionDuration.split(",").map(toMs));
+          result.animationIterations.push(
+            ...style.animationIterationCount
+              .split(",")
+              .map((value) => Number.parseFloat(value.trim())),
+          );
+          return result;
+        },
+        {
+          animationDurations: [] as number[],
+          transitionDurations: [] as number[],
+          animationIterations: [] as number[],
+        },
+      );
+    });
+    expect(Math.max(...reducedMotion.animationDurations)).toBeLessThanOrEqual(0.1);
+    expect(Math.max(...reducedMotion.transitionDurations)).toBeLessThanOrEqual(0.1);
+    expect(reducedMotion.animationIterations.every((count) => count <= 1)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+});
+
 test("a CI link prefills the exact Pytest case in its connected repository", async ({ page }) => {
   const testPath = "tests/test_checkout.py";
   const testCase = "TestCheckout::test_total[wallet]";
