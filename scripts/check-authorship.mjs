@@ -12,7 +12,7 @@ const people = new Set(
 const automated = (email) =>
   !/dependabot\[bot\]/i.test(email) && /^noreply@|\[bot\]@|(agent|bot)@/i.test(email);
 const footer =
-  /^\W*(<sub>)?\W*(created|generated|made|written|built) (with|by|using) (\[|.*https?:\/\/)/im;
+  /^[\W_]*(<sub>)?[\W_]*(created|generated|made|written|built) (with|by|using) (\[|.*https?:\/\/)/im;
 const session = /^[a-z-]*session(-url)?:\s*https?:/im;
 
 const problems = [];
