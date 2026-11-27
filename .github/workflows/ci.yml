@@ -223,8 +223,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      BASE_SHA: 2f3815ff34379fc2c40691e44fab3d565843dff8
-      FIX_SHA: db61d48b2af4ae2670c2a4258bdeaa64d40246ec
+      BASE_SHA: c2687716cbcca860d187de56ee4e1770b197edac
+      FIX_SHA: 8a2c735f003dd63301bd9491fe115f98f99d5435
       WRANGLER_SEND_METRICS: "false"
       WRANGLER_SEND_ERROR_REPORTS: "false"
     steps:

@@ -147,7 +147,7 @@ Only `TRACEYARD_ORIGIN` and `TRACEYARD_KEY` are read from this file; other lines
 With Node.js 22.12.0 or newer and Git, run this from that repository (no separate TraceYard checkout required):
 
 ```bash
-npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#6bfde2973ff92f322b6d575e60a3212e2474bbcc -- traceyard run .
+npm exec --yes --ignore-scripts --package=git+https://github.com/fysaio/traceyard.git#1b68c886d1ddd63b9094d2d0870a5a99e8308adc -- traceyard run .
 ```
 
 The command installs an immutable reviewed runner revision into npm's cache. In TraceYard, **Run locally** creates a scoped project key and provides the environment template and copyable command. To use an existing TraceYard checkout instead:
@@ -165,7 +165,7 @@ node /path/to/traceyard/agent/cli.mjs run .
 The runner steps are also packaged as a composite action, [`action/action.yml`](../action/action.yml):
 
 ```yaml
-  - uses: fysaio/traceyard/action@e388d18620cbd2435ef5f4998353091fd3b635d4
+  - uses: fysaio/traceyard/action@9e0f03c88009cb72dc2a650407605f190baf0357
   with:
     run-request: ${{ inputs.run_request }}
     origin: https://YOUR_TRACEYARD_HOST

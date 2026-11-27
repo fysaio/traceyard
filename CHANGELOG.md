@@ -30,7 +30,7 @@
 
 ### Hosted verification
 
-An authorized MCP client requested a fresh verification of the saved failure in `tests/unit/repair-acceptance.test.ts`. The controlled baseline at `bf0364f` failed its checksum assertion. The same test passed at `3111676` after a change to `shared/repair-target.ts`. Traceyard reported `PASSED` with zero changed test files (`ver_11fc36d6c884461badc1c7e8912e1020`). [Failing run](https://github.com/fysaio/traceyard/actions/runs/44373451602) · [Passing rerun](https://github.com/fysaio/traceyard/actions/runs/44425840177) · [Source diff](https://github.com/fysaio/traceyard/compare/bf0364f9bdda461345d932716dbcc5db6b364496...31116766d45d49fcd4e0364ce4a67b753f22ad23)
+An authorized MCP client requested a fresh verification of the saved failure in `tests/unit/repair-acceptance.test.ts`. The controlled baseline at `6a62805` failed its checksum assertion. The same test passed at `3111676` after a change to `shared/repair-target.ts`. Traceyard reported `PASSED` with zero changed test files (`ver_11fc36d6c884461badc1c7e8912e1020`). [Failing run](https://github.com/fysaio/traceyard/actions/runs/44373451602) · [Passing rerun](https://github.com/fysaio/traceyard/actions/runs/44425840177) · [Source diff](https://github.com/fysaio/traceyard/compare/bf0364f9bdda461345d932716dbcc5db6b364496...31116766d45d49fcd4e0364ce4a67b753f22ad23)
 
 ## 2026-11-18
 
