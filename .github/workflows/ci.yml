@@ -213,9 +213,14 @@ jobs:
       - run: npm ci
       - name: Install Playwright WebKit
         run: npx playwright install webkit
+      - name: Enable keyboard navigation to all controls
+        run: |
+          defaults write NSGlobalDomain AppleKeyboardUIMode -int 2
+          test "$(defaults read NSGlobalDomain AppleKeyboardUIMode)" = "2"
       - name: Record macOS and browser runtime versions
         run: |
           sw_vers
+          defaults read NSGlobalDomain AppleKeyboardUIMode
           node --version
           npx playwright --version
           npx playwright install --list
