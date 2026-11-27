@@ -336,7 +336,12 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
         const amount = Number.parseFloat(value);
         return value.trim().endsWith("ms") ? amount : amount * 1000;
       };
-      return [element, ...element.querySelectorAll("*")].reduce(
+      const nodes = [element, ...Array.from(element.querySelectorAll("*"))];
+      return nodes.reduce<{
+        animationDurations: number[];
+        transitionDurations: number[];
+        animationIterations: number[];
+      }>(
         (result, node) => {
           const style = getComputedStyle(node);
           result.animationDurations.push(...style.animationDuration.split(",").map(toMs));
@@ -357,7 +362,7 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
     });
     expect(Math.max(...reducedMotion.animationDurations)).toBeLessThanOrEqual(0.1);
     expect(Math.max(...reducedMotion.transitionDurations)).toBeLessThanOrEqual(0.1);
-    expect(reducedMotion.animationIterations.every((count) => count <= 1)).toBe(true);
+    expect(reducedMotion.animationIterations.every((count: number) => count <= 1)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
