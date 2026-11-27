@@ -150,7 +150,7 @@ test("connected developer investigates, inspects bounded evidence and opens agen
 
 test("issue #30: keyboard-only composer, evidence and repair flow at narrow and desktop widths", async ({
   page,
-}) => {
+}, testInfo) => {
   const candidateCommit = "b".repeat(40);
   let createWrites = 0;
   let verificationWrites = 0;
@@ -366,6 +366,12 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
+    const screenshotPath = testInfo.outputPath(`issue-30-${width}px.png`);
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach(`issue-30-${width}px`, {
+      path: screenshotPath,
+      contentType: "image/png",
+    });
   }
 });
 

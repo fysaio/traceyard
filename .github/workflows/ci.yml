@@ -233,7 +233,7 @@ jobs:
           name: issue-30-macos-webkit-evidence
           path: test-results/
           retention-days: 7
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   windows:
     name: Windows tests and release build
