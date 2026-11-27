@@ -315,7 +315,7 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
     expect(invalidState.validationMessage.length).toBeGreaterThan(0);
     expect(verificationWrites).toBe(width === 320 ? 0 : 1);
 
-    await page.keyboard.press("Control+A");
+    await page.keyboard.press("ControlOrMeta+A");
     await page.keyboard.type(candidateCommit);
     await expect
       .poll(() => fixCommit.evaluate((element) => (element as HTMLInputElement).checkValidity()))
