@@ -211,6 +211,17 @@ describe("hosted verification evidence", () => {
     expect(envelope.limitations.join(" ")).toMatch(/did not confirm a pass/);
   });
 
+  it("does not promote a report whose revision differs from the candidate", async () => {
+    const envelope = await verificationEnvelope(facts({ report: { ...passing, commit: A } }));
+    expect(envelope.claim).toBe("INCONCLUSIVE");
+    expect(envelope.checks).toContainEqual({
+      id: "report-commit",
+      status: "FAILED",
+      required: false,
+    });
+    expect(envelope.limitations.join(" ")).toMatch(/report-commit/);
+  });
+
   it("keeps an unmanaged network boundary explicitly unattested", async () => {
     const envelope = await verificationEnvelope(facts());
     expect(envelope.source).toBe("HOSTED_UNATTESTED");
