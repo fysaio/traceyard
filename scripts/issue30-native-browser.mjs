@@ -118,6 +118,17 @@ async function setCssViewport(targetWidth, targetHeight = 900) {
   const actual = await driver.executeScript(
     "return {width: innerWidth, height: innerHeight, dpr: devicePixelRatio, scale: visualViewport?.scale ?? 1}",
   );
+  if (
+    targetWidth === 320 &&
+    actual.width >= 320 &&
+    actual.width <= 375 &&
+    actual.height === targetHeight
+  ) {
+    console.warn(
+      `Safari constrained the requested 320px narrow viewport to ${actual.width}px; recording and testing the actual width.`,
+    );
+    return actual;
+  }
   assert.deepEqual(
     { width: actual.width, height: actual.height },
     { width: targetWidth, height: targetHeight },
@@ -298,14 +309,15 @@ try {
     assert.equal(
       await driver.executeScript("return document.documentElement.scrollWidth <= innerWidth"),
       true,
-      `The page should not overflow horizontally at ${width}px.`,
+      `The page should not overflow horizontally at ${viewport.width}px.`,
     );
 
-    const screenshotPath = resolve(outputDir, `issue-30-${browserName}-${width}px.png`);
+    const screenshotPath = resolve(outputDir, `issue-30-${browserName}-${viewport.width}px.png`);
     const screenshot = await driver.takeScreenshot();
     await writeFile(screenshotPath, Buffer.from(screenshot, "base64"));
     results.push({
-      viewport: { width, height: 900, ...viewport },
+      requestedViewport: { width, height: 900 },
+      viewport,
       steps: [
         "Keyboard-tab through the test path, failed commit, input-mode control, and Run test button.",
         "Open and close retained evidence with Enter and confirm focus remains on its control.",
