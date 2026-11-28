@@ -60,14 +60,18 @@ async function isFocused(element) {
   return driver.executeScript("return arguments[0] === document.activeElement", element);
 }
 
+async function activeElementDescription() {
+  return driver.executeScript(
+    `const e = document.activeElement; return {tag:e?.tagName, id:e?.id, ariaLabel:e?.getAttribute("aria-label"), placeholder:e?.getAttribute("placeholder"), text:e?.textContent?.trim()};`,
+  );
+}
+
 async function tabTo(element, description) {
   for (let attempt = 0; attempt < 80; attempt += 1) {
     if (await isFocused(element)) return;
     await driver.actions().sendKeys(Key.TAB).perform();
   }
-  const active = await driver.executeScript(
-    `const e = document.activeElement; return {tag:e?.tagName, id:e?.id, label:e?.labels?.[0]?.textContent?.trim(), text:e?.textContent?.trim()};`,
-  );
+  const active = await activeElementDescription();
   throw new Error(
     `Keyboard Tab did not reach ${description}; active element: ${JSON.stringify(active)}`,
   );
@@ -226,12 +230,12 @@ try {
     const verifyButton = await buttonContaining("Verify");
     await tabTo(verifyButton, "the repair Verify button");
     await assertVisibleFocus();
-    await driver.actions().sendKeys(Key.SHIFT, Key.TAB).perform();
+    await driver.actions().keyDown(Key.SHIFT).sendKeys(Key.TAB).keyUp(Key.SHIFT).perform();
     const fixCommit = await labelledControl("Fix commit");
     assert.equal(
       await isFocused(fixCommit),
       true,
-      "Shift+Tab should return to the fix commit field.",
+      `Shift+Tab should return to the fix commit field; active element: ${JSON.stringify(await activeElementDescription())}`,
     );
     await assertVisibleFocus();
     await driver.switchTo().activeElement().sendKeys("not-a-commit");
@@ -280,7 +284,7 @@ try {
       true,
       "Tab should continue from repair verification to evidence.",
     );
-    await driver.actions().sendKeys(Key.SHIFT, Key.TAB).perform();
+    await driver.actions().keyDown(Key.SHIFT).sendKeys(Key.TAB).keyUp(Key.SHIFT).perform();
     assert.equal(
       await isFocused(verifyButton),
       true,
