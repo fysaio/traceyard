@@ -22,6 +22,8 @@ type Status = Check["status"];
 
 export const HOSTED_UNATTESTED_LIMITATION =
   "Hosted result, not attested: the runner that executed the repository's code also reported the result.";
+export const HOSTED_NETWORK_LIMITATION =
+  "Hosted network boundary not attested: repository processes run with unrestricted outbound network access; Traceyard does not enforce a deny or allowlist policy.";
 
 const fingerprint = (value: unknown) => sha256Hex(canonicalJson(value));
 const pass = (ok: boolean): Status => (ok ? "PASSED" : "FAILED");
@@ -126,6 +128,7 @@ export async function verificationEnvelope(facts: VerificationFacts): Promise<Ev
     : null;
   const limitations = [
     HOSTED_UNATTESTED_LIMITATION,
+    HOSTED_NETWORK_LIMITATION,
     `Covers only ${test ? test.path + (test.case ? "::" + test.case : "") : "the recorded test"}; it says nothing about other tests or whether the change is safe to merge.`,
     ...facts.limitations,
   ];
