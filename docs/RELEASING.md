@@ -25,11 +25,24 @@ Images are tagged `X.Y.Z`, `X.Y`, and `latest`; the moving `X` major tag begins 
    git tag vX.Y.Z && git push origin vX.Y.Z
    ```
 
-The [Publish release](../.github/workflows/publish.yml) workflow refuses a tag that does not match `packages/cli/package.json`, is not on `main`, or has no changelog section. It runs the CLI tests, installs the packed package from a clean directory, builds both images for both architectures, then publishes and signs the artifacts.
+The [Publish release](../.github/workflows/publish.yml) workflow refuses a tag that does not match `packages/cli/package.json`, is not on `main`, has no changelog section, or would move the latest release backward. It serializes all release runs so mutable aliases cannot race or roll back. Manual dispatch is dry-run-only; a real release must be a matching semver tag on `main`.
 
-To check the whole pipeline without publishing, run **Publish release** by hand from the Actions tab with **dry run** enabled.
+It runs the CLI tests, installs the packed package from a clean directory, builds both images for both architectures, then publishes and signs the artifacts. After publishing, the verification job fetches the exact npm and GitHub Packages versions and fetches each GHCR version tag without credentials, recording its immutable manifest digest. If an image is private or unavailable, the job fails with the required package-visibility remediation instead of reporting a successful release.
+
+To check the whole pipeline without publishing, run **Publish release** by hand from the Actions tab with **dry run** enabled. The dry run exercises the build and clean-install commands but intentionally skips registry publication and post-publish fetchability checks. The equivalent local smoke-test commands are:
+
+```bash
+repo_root=$(pwd)
+npm ci
+npx vitest run --project unit tests/unit/cli.test.ts tests/unit/cli-mcp.test.ts
+node scripts/pack-cli.mjs
+smoke_dir=$(mktemp -d)
+cd dist/npm/traceyard && npm pack --pack-destination "$smoke_dir"
+cd "$smoke_dir" && npm init -y && npm install --no-audit --no-fund ./traceyard-*.tgz
+node "$repo_root/scripts/smoke-mcp.mjs" "$smoke_dir/node_modules/.bin/traceyard"
+```
 
 ## One-time setup
 
 - **`NPM_TOKEN`** repository Actions secret: an npm granular access token with publish rights to `traceyard`. GitHub Packages and GHCR use the workflow's own `GITHUB_TOKEN`.
-- After the first image push, open each package under the organization's **Packages** and set its visibility to **Public**, so `docker pull` works without signing in.
+- After the first image push, open each package under the organization's **Packages** and set its visibility to **Public**, so `docker pull` works without signing in. The post-publish verification job enforces this for both GHCR images.

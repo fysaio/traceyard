@@ -18,7 +18,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: traceyard-publish-${{ github.ref }}
+  # One global lock protects mutable aliases such as latest and v1 across tags.
+  group: traceyard-publish
   cancel-in-progress: false
 env:
   PUBLISH: ${{ github.event_name == 'push' || !inputs.dry_run }}
@@ -36,6 +37,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Reject an untagged non-dry-run dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" != "true" ]; then
+            echo '::error::Manual publishing is disabled. Push a matching semver tag from main, or select dry run.'
+            exit 1
+          fi
       - name: Check the tag matches the package versions
         id: version
         run: |
@@ -50,6 +60,22 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "major=${version%%.*}" >> "$GITHUB_OUTPUT"
+      - name: Reject a version rollback
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          latest_tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)
+          latest_version=${latest_tag#v}
+          if [ -z "$latest_version" ]; then
+            echo 'No prior GitHub release found; accepting the first release.'
+            exit 0
+          fi
+          if [ "$(printf '%s\n' "$latest_version" "$VERSION" | sort -V | tail -n1)" != "$VERSION" ]; then
+            echo "::error::Release $VERSION is older than the latest published release $latest_tag; refusing to move mutable aliases backward."
+            exit 1
+          fi
       - name: Check the tagged commit passed CI on main
         if: github.ref_type == 'tag'
         env:
@@ -75,6 +101,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
       - name: CLI and MCP tests
         run: npx vitest run --project unit tests/unit/cli.test.ts tests/unit/cli-mcp.test.ts
@@ -191,8 +218,57 @@ jobs:
           --certificate-identity "https://github.com/${{ github.workflow_ref }}"
           --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
-  release:
+  verify:
+    name: Verify published artifacts
     needs: [prepare, npm, images]
+    if: github.event_name == 'push' || !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [traceyard, traceyard-runner]
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+      - name: Verify npm package availability
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          npm view "traceyard@$VERSION" version --registry=https://registry.npmjs.org/
+      - name: Verify GitHub Packages availability
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          userconfig="$RUNNER_TEMP/github-packages.npmrc"
+          printf '//npm.pkg.github.com/:_authToken=%s\n' "$GH_TOKEN" > "$userconfig"
+          NPM_CONFIG_USERCONFIG="$userconfig" npm view "@fysaio/traceyard@$VERSION" version --registry=https://npm.pkg.github.com/
+      - name: Verify GHCR image is public and exposes an immutable digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -o pipefail
+          output=$(docker buildx imagetools inspect "$IMAGE:$VERSION" 2>&1) || {
+            echo "::error::Unable to fetch $IMAGE:$VERSION without credentials. Make the GHCR package public and retry the release verification."
+            printf '%s\n' "$output"
+            exit 1
+          }
+          printf '%s\n' "$output"
+          digest=$(printf '%s\n' "$output" | awk '/^Digest:/ {print $2; exit}')
+          if [ -z "$digest" ]; then
+            echo "::error::No immutable digest was returned for $IMAGE:$VERSION."
+            exit 1
+          fi
+          echo "Verified $IMAGE:$VERSION at $digest"
+
+  release:
+    needs: [prepare, npm, images, verify]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 5
