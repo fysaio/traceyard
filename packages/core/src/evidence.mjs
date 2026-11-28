@@ -36,8 +36,9 @@ export function deriveEvidenceOutcome({ state, scope, checks }) {
   if (PENDING.includes(state)) return { state, claim: "NOT_RUN" };
   if (INTERRUPTED.includes(state)) return { state, claim: "INCONCLUSIVE" };
   if (state === "FAILED") return { state: "FAILED", claim: "FAILED" };
-  if (checks.some((check) => check.status !== "PASSED"))
+  if (checks.length === 0 || checks.some((check) => check.status !== "PASSED"))
     return { state: "COMPLETED", claim: "INCONCLUSIVE" };
+  if (scope === "AFFECTED") return { state: "COMPLETED", claim: "INCONCLUSIVE" };
   return { state: "COMPLETED", claim: scope === "FOCUSED" ? "FOCUSED_PASS" : "REQUIRED_PASS" };
 }
 

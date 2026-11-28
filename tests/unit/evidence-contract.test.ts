@@ -57,6 +57,40 @@ describe("versioned evidence contract", () => {
     ).toEqual({ state: "COMPLETED", claim: "INCONCLUSIVE" });
   });
 
+  it.each(["FOCUSED", "AFFECTED", "REQUIRED", "FULL"] as const)(
+    "does not derive a pass for an empty %s scope",
+    (scope) => {
+      expect(deriveEvidenceOutcome({ state: "COMPLETED", scope, checks: [] })).toEqual({
+        state: "COMPLETED",
+        claim: "INCONCLUSIVE",
+      });
+    },
+  );
+
+  it.each([
+    ["FOCUSED", "FOCUSED_PASS"],
+    ["REQUIRED", "REQUIRED_PASS"],
+  ] as const)("rejects an empty %s %s envelope", (scope, claim) => {
+    const result = evidenceEnvelopeSchema.safeParse({ ...base, scope, claim, checks: [] });
+    expect(result.success).toBe(false);
+  });
+
+  it("does not treat an affected-check pass as a required-check pass", () => {
+    expect(
+      deriveEvidenceOutcome({
+        state: "COMPLETED",
+        scope: "AFFECTED",
+        checks: [{ id: "affected", status: "PASSED", required: false }],
+      }),
+    ).toEqual({ state: "COMPLETED", claim: "INCONCLUSIVE" });
+  });
+
+  it("keeps schema-v1 envelopes without later additive fields compatible", () => {
+    const result = evidenceEnvelopeSchema.safeParse(base);
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.next).toBeUndefined();
+  });
+
   it("accepts a completed inconclusive run when a required check was not run", () => {
     const result = evidenceEnvelopeSchema.safeParse({
       ...base,
