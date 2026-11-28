@@ -265,10 +265,23 @@ try {
       "The malformed commit should expose a validation message.",
     );
 
-    await driver.switchTo().activeElement().sendKeys(Key.META, "a");
-    await driver.switchTo().activeElement().sendKeys(candidateCommit);
+    await driver.actions().keyDown(Key.META).sendKeys("a").keyUp(Key.META).perform();
+    const selection = await driver.executeScript(
+      "return {value: arguments[0].value, start: arguments[0].selectionStart, end: arguments[0].selectionEnd}",
+      fixCommit,
+    );
+    assert.deepEqual(
+      { start: selection.start, end: selection.end },
+      { start: 0, end: selection.value.length },
+      `Command+A should select the entire repair SHA; input state: ${JSON.stringify(selection)}`,
+    );
+    await driver.actions().sendKeys(candidateCommit).perform();
     const valid = await driver.executeScript("return arguments[0].checkValidity()", fixCommit);
-    assert.equal(valid, true, "The valid candidate SHA should pass native form validation.");
+    assert.equal(
+      valid,
+      true,
+      `The valid candidate SHA should pass native form validation; actual value: ${await fixCommit.getAttribute("value")}`,
+    );
     await driver.actions().sendKeys(Key.TAB).perform();
     assert.equal(
       await isFocused(verifyButton),
