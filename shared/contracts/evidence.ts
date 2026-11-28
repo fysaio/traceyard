@@ -96,6 +96,7 @@ export const evidenceEnvelopeSchema = z
     if (evidence.claim === "FOCUSED_PASS") {
       if (evidence.state !== "COMPLETED") add("A focused pass requires completed evidence.");
       if (evidence.scope !== "FOCUSED") add("A focused pass must have FOCUSED scope.");
+      if (evidence.checks.length === 0) add("A focused pass requires at least one selected check.");
       if (evidence.checks.some((check) => check.status !== "PASSED"))
         add("A focused pass requires every selected check to pass.");
     }
@@ -103,6 +104,8 @@ export const evidenceEnvelopeSchema = z
       if (evidence.state !== "COMPLETED") add("A required pass requires completed evidence.");
       if (evidence.scope !== "REQUIRED" && evidence.scope !== "FULL")
         add("A required pass needs REQUIRED or FULL scope.");
+      if (evidence.checks.length === 0)
+        add("A required pass requires at least one executed check.");
       if (evidence.checks.some((check) => check.required && check.status !== "PASSED"))
         add("A required pass cannot omit or fail a required check.");
     }
@@ -167,8 +170,9 @@ export function deriveEvidenceOutcome(input: {
   if (["BLOCKED", "CANCELLED", "STALE", "REJECTED"].includes(input.state))
     return { state: input.state, claim: "INCONCLUSIVE" };
   if (input.state === "FAILED") return { state: "FAILED", claim: "FAILED" };
-  if (input.checks.some((check) => check.status !== "PASSED"))
+  if (input.checks.length === 0 || input.checks.some((check) => check.status !== "PASSED"))
     return { state: "COMPLETED", claim: "INCONCLUSIVE" };
+  if (input.scope === "AFFECTED") return { state: "COMPLETED", claim: "INCONCLUSIVE" };
   return {
     state: "COMPLETED",
     claim: input.scope === "FOCUSED" ? "FOCUSED_PASS" : "REQUIRED_PASS",
