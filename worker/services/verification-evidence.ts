@@ -75,6 +75,7 @@ export function verificationChecks(facts: VerificationFacts): Check[] {
     candidateRun.testPath === baselineRun.testPath &&
     candidateRun.testCase === baselineRun.testCase &&
     candidateRun.commit === facts.candidateCommit;
+  const reportMatchesCandidate = !!report && report.commit === facts.candidateCommit;
   let passesAfter: Status = "NOT_RUN";
   if (blocked) passesAfter = "BLOCKED";
   else if (ran)
@@ -88,6 +89,7 @@ export function verificationChecks(facts: VerificationFacts): Check[] {
   return [
     { id: `reproduces-before:${label}`, status: pass(reproduced), required: false },
     { id: "same-test-and-commit", status: after(sameTest), required: false },
+    { id: "report-commit", status: after(reportMatchesCandidate), required: false },
     { id: `passes-after:${label}`, status: passesAfter, required: false },
     {
       id: "no-new-skips",
