@@ -53,7 +53,7 @@ The coding agent was notified. Results from this run will become stale if releva
   "checks_run": [{ "id": "retry-unit", "state": "RUNNING" }],
   "checks_omitted": [{ "id": "full-suite", "reason": "not required by current policy" }],
   "risk_reasons": [],
-  "trust_level": "LOCAL_UNATTESTED",
+  "trust_level": "LOCAL_PROVISIONAL",
   "evidence_ids": [],
   "limitations": ["Working-tree result is provisional until committed"],
   "human_action": null,

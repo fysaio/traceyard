@@ -3,6 +3,7 @@ import { agentResult } from "../../packages/core/src/agent-result.mjs";
 import { evidenceEnvelopeSchema } from "../../shared/contracts/evidence";
 import type { InvestigationReport } from "../../shared/contracts/investigation-execution";
 import {
+  HOSTED_NETWORK_LIMITATION,
   HOSTED_UNATTESTED_LIMITATION,
   verificationEnvelope,
   type VerificationFacts,
@@ -81,6 +82,7 @@ describe("hosted verification evidence", () => {
       completedAt: "2026-11-25T08:00:05.000Z",
     });
     expect(envelope.limitations).toContain(HOSTED_UNATTESTED_LIMITATION);
+    expect(envelope.limitations).toContain(HOSTED_NETWORK_LIMITATION);
     expect(envelope.limitations.join(" ")).toMatch(/safe to merge/);
     expect(envelope.revision.inputFingerprint).toMatch(/^[a-f0-9]{64}$/);
   });
@@ -207,6 +209,14 @@ describe("hosted verification evidence", () => {
     const envelope = await verificationEnvelope(facts({ verdict: "INCONCLUSIVE" }));
     expect(envelope.claim).toBe("INCONCLUSIVE");
     expect(envelope.limitations.join(" ")).toMatch(/did not confirm a pass/);
+  });
+
+  it("keeps an unmanaged network boundary explicitly unattested", async () => {
+    const envelope = await verificationEnvelope(facts());
+    expect(envelope.source).toBe("HOSTED_UNATTESTED");
+    expect(envelope.claim).toBe("FOCUSED_PASS");
+    expect(envelope.limitations).toContain(HOSTED_NETWORK_LIMITATION);
+    expect(envelope.limitations.join(" ")).toMatch(/unrestricted outbound network access/);
   });
 
   it("keeps the claim when the hosted MCP response is compacted", async () => {
