@@ -194,6 +194,96 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  issue30-macos-webkit:
+    name: "Issue #30 keyboard flow on macOS WebKit"
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      WRANGLER_SEND_ERROR_REPORTS: "false"
+      DO_NOT_TRACK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright WebKit
+        run: npx playwright install webkit
+      - name: Enable keyboard navigation to all controls
+        run: |
+          defaults write NSGlobalDomain AppleKeyboardUIMode -int 2
+          test "$(defaults read NSGlobalDomain AppleKeyboardUIMode)" = "2"
+      - name: Record macOS and browser runtime versions
+        run: |
+          sw_vers
+          defaults read NSGlobalDomain AppleKeyboardUIMode
+          node --version
+          npx playwright --version
+          npx playwright install --list
+      - name: "Run the #30 keyboard-flow regression on macOS WebKit"
+        run: npx playwright test --config playwright.issue30.macos.config.ts
+      - name: Retain macOS WebKit test evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: issue-30-macos-webkit-evidence
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: error
+
+  issue30-firefox-macos:
+    name: "Issue #30 keyboard flow in Firefox on macOS"
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DO_NOT_TRACK: "1"
+      ISSUE30_OS_LABEL: macOS GitHub-hosted runner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright Firefox
+        run: npx playwright install firefox
+      - name: Record Playwright Firefox runtime
+        run: |
+          sw_vers
+          node --version
+          npx playwright --version
+          npx playwright install --list
+      - name: Enable all-controls Tab and reduced motion
+        run: |
+          defaults write NSGlobalDomain AppleKeyboardUIMode -int 2
+          defaults write com.apple.universalaccess reduceMotion -bool true
+          test "$(defaults read NSGlobalDomain AppleKeyboardUIMode)" = "2"
+          test "$(defaults read com.apple.universalaccess reduceMotion)" = "1"
+      - name: Record macOS runtime
+        run: |
+          sw_vers
+          defaults read NSGlobalDomain AppleKeyboardUIMode
+          defaults read com.apple.universalaccess reduceMotion
+          node --version
+      - name: Run keyboard-only flow in Firefox
+        run: |
+          export ISSUE30_OS_LABEL="$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+          npx playwright test --config playwright.issue30.firefox.config.ts
+      - name: Retain Firefox keyboard-flow evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: issue-30-firefox-keyboard-evidence
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: error
+
   windows:
     name: Windows tests and release build
     runs-on: windows-latest
