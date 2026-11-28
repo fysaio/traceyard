@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
 const json = (data: unknown) => ({
   contentType: "application/json",
@@ -152,6 +153,25 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
   page,
 }, testInfo) => {
   const candidateCommit = "b".repeat(40);
+  const browser = page.context().browser();
+  expect(browser).not.toBeNull();
+  const browserVersion = browser!.version();
+  type ViewportReport = {
+    requestedViewport: { width: number; height: number };
+    viewport: { width: number; height: number; dpr: number };
+    steps: string[];
+    result: "passed";
+    screenshot: string;
+    reducedMotion: true;
+  };
+  const steps = [
+    "Use Tab to traverse the test path, failed commit, input-mode control, and Run test button; submit with Enter.",
+    "Open and close retained evidence with Enter and confirm focus remains on its control.",
+    "Tab to Verify, Shift+Tab to the repair field, then verify invalid-SHA error and focus behavior without a request.",
+    "Replace the repair SHA with the platform Select All shortcut, submit by keyboard, and verify focus order without a trap.",
+    "Confirm reduced-motion preference, bounded animation/transition timing, and no horizontal overflow.",
+  ];
+  const viewportReports: ViewportReport[] = [];
   let createWrites = 0;
   let verificationWrites = 0;
 
@@ -231,6 +251,11 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Reproduce a failing test" })).toBeVisible();
+    const actualViewport = await page.evaluate(() => ({
+      width: innerWidth,
+      height: innerHeight,
+      dpr: devicePixelRatio,
+    }));
     expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
       true,
     );
@@ -372,7 +397,42 @@ test("issue #30: keyboard-only composer, evidence and repair flow at narrow and 
       path: screenshotPath,
       contentType: "image/png",
     });
+    viewportReports.push({
+      requestedViewport: { width, height: 900 },
+      viewport: actualViewport,
+      steps,
+      result: "passed",
+      screenshot: `issue-30-${width}px.png`,
+      reducedMotion: true,
+    });
   }
+
+  const reportPath = testInfo.outputPath("issue-30-firefox-results.json");
+  await writeFile(
+    reportPath,
+    JSON.stringify(
+      {
+        issue: 30,
+        commit: process.env.GITHUB_SHA ?? "local",
+        browser: "firefox",
+        browserVersion,
+        userAgent: await page.evaluate(() => navigator.userAgent),
+        operatingSystem: process.env.ISSUE30_OS_LABEL ?? process.platform,
+        platform: process.platform,
+        viewportZoom: "100% browser default; CSS viewport and devicePixelRatio recorded per case",
+        assistiveTechnology:
+          "Not enabled in automated browser job; VoiceOver manual observation remains separate.",
+        syntheticDataOnly: true,
+        results: viewportReports,
+      },
+      null,
+      2,
+    ),
+  );
+  await testInfo.attach("issue-30-firefox-results.json", {
+    path: reportPath,
+    contentType: "application/json",
+  });
 });
 
 test("a CI link prefills the exact Pytest case in its connected repository", async ({ page }) => {

@@ -276,7 +276,9 @@ jobs:
           safaridriver --version
           node --version
       - name: Run keyboard-only flow in Firefox
-        run: npx playwright test --config playwright.issue30.firefox.config.ts
+        run: |
+          export ISSUE30_OS_LABEL="$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+          npx playwright test --config playwright.issue30.firefox.config.ts
       - name: Start isolated acceptance app for Safari
         run: |
           mkdir -p "$ISSUE30_OUTPUT_DIR"
