@@ -195,7 +195,7 @@ jobs:
           if-no-files-found: ignore
 
   issue30-macos-webkit:
-    name: Issue #30 keyboard flow on macOS WebKit
+    name: "Issue #30 keyboard flow on macOS WebKit"
     runs-on: macos-latest
     timeout-minutes: 15
     env:
@@ -224,13 +224,82 @@ jobs:
           node --version
           npx playwright --version
           npx playwright install --list
-      - name: Run the #30 keyboard-flow regression on macOS WebKit
+      - name: "Run the #30 keyboard-flow regression on macOS WebKit"
         run: npx playwright test --config playwright.issue30.macos.config.ts
       - name: Retain macOS WebKit test evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: issue-30-macos-webkit-evidence
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: error
+
+  issue30-native-browsers-macos:
+    name: "Issue #30 keyboard flow in Firefox and Safari apps"
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      DO_NOT_TRACK: "1"
+      ISSUE30_OS_LABEL: macOS GitHub-hosted runner
+      ISSUE30_OUTPUT_DIR: test-results/issue-30-native-browser
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright Firefox
+        run: npx playwright install firefox
+      - name: Record Playwright Firefox runtime
+        run: |
+          sw_vers
+          node --version
+          npx playwright --version
+          npx playwright install --list
+      - name: Enable Safari WebDriver, all-controls Tab, and reduced motion
+        run: |
+          sudo safaridriver --enable
+          defaults write NSGlobalDomain AppleKeyboardUIMode -int 2
+          defaults write com.apple.universalaccess reduceMotion -bool true
+          test "$(defaults read NSGlobalDomain AppleKeyboardUIMode)" = "2"
+          test "$(defaults read com.apple.universalaccess reduceMotion)" = "1"
+      - name: Record macOS and Safari runtime
+        run: |
+          sw_vers
+          defaults read NSGlobalDomain AppleKeyboardUIMode
+          defaults read com.apple.universalaccess reduceMotion
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Safari.app/Contents/Info.plist
+          safaridriver --version
+          node --version
+      - name: Run keyboard-only flow in Firefox
+        run: npx playwright test --config playwright.issue30.firefox.config.ts
+      - name: Start isolated acceptance app for Safari
+        run: |
+          mkdir -p "$ISSUE30_OUTPUT_DIR"
+          npm run dev:acceptance -- --host 127.0.0.1 > "$RUNNER_TEMP/traceyard-vite.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/traceyard-vite.pid"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:5173/api/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/traceyard-vite.log"
+          exit 1
+      - name: Run keyboard-only flow in the Safari app
+        env:
+          ISSUE30_BROWSER: safari
+          ISSUE30_OS_LABEL: macOS GitHub-hosted runner
+        run: |
+          ISSUE30_OS_LABEL="$(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))" \
+            node scripts/issue30-native-browser.mjs
+      - name: Retain Firefox and Safari keyboard-flow evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: issue-30-firefox-safari-keyboard-evidence
           path: test-results/
           retention-days: 7
           if-no-files-found: error
